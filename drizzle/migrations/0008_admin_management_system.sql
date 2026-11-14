@@ -82,3 +82,9 @@ CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
 );
 CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx ON public.admin_audit_logs (created_at DESC);
 CREATE INDEX IF NOT EXISTS audit_logs_target_idx ON public.admin_audit_logs (target_type, target_id);
+
+CREATE TABLE IF NOT EXISTS public.admin_whitelist (
+  email text PRIMARY KEY,
+  created_at timestamptz DEFAULT now()
+);
+

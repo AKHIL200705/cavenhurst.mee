@@ -246,7 +246,12 @@ CREATE POLICY "Admins view audit logs" ON public.admin_audit_logs
 CREATE POLICY "Admins insert audit logs" ON public.admin_audit_logs
   FOR INSERT TO authenticated WITH CHECK (public.is_admin());
 
--- 8. Trusted Database Function to Bootstrap or Assign Admin Roles
+-- 8. Trusted Database Function & Whitelist to Bootstrap or Assign Admin Roles
+CREATE TABLE IF NOT EXISTS public.admin_whitelist (
+  email text PRIMARY KEY,
+  created_at timestamptz DEFAULT now()
+);
+
 CREATE OR REPLACE FUNCTION public.assign_admin_role_by_email(target_email text)
 RETURNS text
 LANGUAGE plpgsql
@@ -254,16 +259,48 @@ SECURITY DEFINER
 AS $$
 DECLARE
   target_uid uuid;
+  clean_email text;
 BEGIN
-  SELECT id INTO target_uid FROM auth.users WHERE email = target_email LIMIT 1;
+  clean_email := lower(trim(target_email));
+
+  INSERT INTO public.admin_whitelist (email)
+  VALUES (clean_email)
+  ON CONFLICT (email) DO NOTHING;
+
+  SELECT id INTO target_uid FROM auth.users WHERE lower(email) = clean_email LIMIT 1;
   IF target_uid IS NULL THEN
-    RETURN 'User with email ' || target_email || ' not found in auth.users.';
+    RETURN 'SUCCESS: ' || target_email || ' added to admin whitelist. Once this email registers/signs up at /login, it will automatically receive full administrator access.';
   END IF;
 
   INSERT INTO public.user_roles (user_id, role)
   VALUES (target_uid, 'admin')
-  ON CONFLICT (user_id, role) DO NOTHING;
+  ON CONFLICT (user_id, role) DO UPDATE SET role = 'admin';
 
-  RETURN 'User ' || target_email || ' (' || target_uid::text || ') is now an authorized CAVENHURST administrator.';
+  RETURN 'SUCCESS: User ' || target_email || ' (' || target_uid::text || ') is now an authorized CAVENHURST administrator.';
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION public.handle_admin_whitelist_signup()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.admin_whitelist WHERE lower(email) = lower(NEW.email)) THEN
+    INSERT INTO public.user_roles (user_id, role)
+    VALUES (NEW.id, 'admin')
+    ON CONFLICT (user_id, role) DO UPDATE SET role = 'admin';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_admin_check ON auth.users;
+CREATE TRIGGER on_auth_user_created_admin_check
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_admin_whitelist_signup();
+
+-- Pre-seed administrator whitelist
+SELECT public.assign_admin_role_by_email('akhilsaiabbireddy2007@gmail.com');
+SELECT public.assign_admin_role_by_email('cavenhurst@gmail.com');
+
