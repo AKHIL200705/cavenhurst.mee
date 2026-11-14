@@ -120,13 +120,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let active = true;
     const userId = user.id;
-    setWelcome(null);
 
-    // Check local fallback first for instant responsive feel
+    // Admins always bypass welcome checks directly
+    if (user.isAdmin) {
+      setWelcome({ userId, seen: true, error: false });
+      return;
+    }
+
     const localWelcomeSeen =
       typeof window !== "undefined" &&
       localStorage.getItem(`${GOOGLE_WELCOME_KEY_PREFIX}${userId}`) === "true";
 
+    if (localWelcomeSeen) {
+      setWelcome({ userId, seen: true, error: false });
+      return;
+    }
+
+    // Try checking Supabase without blocking the user on failure
     Promise.resolve(
       supabase
         .from("customer_welcome")
@@ -134,13 +144,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq("user_id", userId)
         .maybeSingle(),
     )
-      .then(({ data, error }) => {
+      .then(({ data }) => {
         if (active) {
-          const seen = Boolean(data?.welcome_seen_at) || localWelcomeSeen;
           setWelcome({
             userId,
-            seen,
-            error: error && !localWelcomeSeen ? true : false,
+            seen: Boolean(data?.welcome_seen_at),
+            error: false,
           });
         }
       })
@@ -148,8 +157,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (active) {
           setWelcome({
             userId,
-            seen: localWelcomeSeen,
-            error: !localWelcomeSeen,
+            seen: false,
+            error: false,
           });
         }
       });
@@ -171,6 +180,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setSessionToken(newSessionToken);
     setReady(true);
+    setWelcome({
+      userId: newUser.id,
+      seen: Boolean(newUser.isAdmin),
+      error: false,
+    });
   };
 
   const completeWelcome = async () => {
