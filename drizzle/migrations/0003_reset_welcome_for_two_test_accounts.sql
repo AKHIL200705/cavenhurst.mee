@@ -1,0 +1,1 @@
+delete from public.customer_welcome where user_id in (select id from auth.users where email in ('rushimurari296@gmail.com','tj349824@gmail.com'));

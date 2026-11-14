@@ -1,0 +1,4 @@
+- Product catalog lives in src/lib/products.ts and cart/wishlist in localStorage via src/lib/store.tsx — temporary until a database is connected; pricing rules are in src/lib/pricing.ts (tested).
+- Account welcome completion is an immutable own-account row; AuthProvider reads its status and the root screen gate hides shopping during checks, so first-login routing never flashes store content or relies on browser storage.
+- Use global font-role tokens for body, UI, headings, display accents and references; keep the logo token separate so typography changes preserve the wordmark.
+- Keep storefront motion and glass surfaces in global semantic CSS classes; animate pathname changes inside the shopping gate so account checks stay hidden, and disable motion for reduced-motion visitors.
