@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { PRODUCTS, type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
+import { verifyGoogleSessionOrToken } from "./auth";
 import type { Json, Database } from "@/integrations/supabase/types";
 
 type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];
@@ -46,30 +47,46 @@ async function verifyAdminSession(providedToken?: string | undefined): Promise<A
     throw new Error("Unauthorized: Administrator authentication session required.");
   }
 
-  const {
-    data: { user },
-    error,
-  } = await supabaseAdmin.auth.getUser(token);
-
-  if (error || !user) {
-    throw new Error("Unauthorized: Invalid administrator session.");
+  // 1. Try Google Admin session verification
+  try {
+    const googleSession = await verifyGoogleSessionOrToken(token);
+    if (googleSession && googleSession.isAdmin) {
+      return {
+        userId: googleSession.sub,
+        email: googleSession.email || null,
+      };
+    }
+  } catch (err) {
+    // Continue to Supabase check
   }
 
-  const { data: roleRow, error: roleError } = await supabaseAdmin
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id)
-    .eq("role", "admin")
-    .maybeSingle();
+  // 2. Fallback to Supabase admin check
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabaseAdmin.auth.getUser(token);
 
-  if (roleError || !roleRow) {
-    throw new Error("Forbidden: Access restricted to CAVENHURST administrators.");
+    if (!error && user) {
+      const { data: roleRow, error: roleError } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "admin")
+        .maybeSingle();
+
+      if (!roleError && roleRow) {
+        return {
+          userId: user.id,
+          email: user.email || null,
+        };
+      }
+    }
+  } catch {
+    // Supabase check failed
   }
 
-  return {
-    userId: user.id,
-    email: user.email || null,
-  };
+  throw new Error("Forbidden: Access restricted to CAVENHURST administrators.");
 }
 
 /**

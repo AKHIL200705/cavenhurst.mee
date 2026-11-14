@@ -120,11 +120,31 @@ function AdminDashboard() {
   const verifyAdmin = useCallback(async () => {
     setAuthChecking(true);
     try {
+      // Check for active direct Google session first
+      if (typeof window !== "undefined") {
+        const stored = localStorage.getItem("cavenhurst_google_session");
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (parsed?.sessionToken && parsed?.user) {
+              setAuthToken(parsed.sessionToken);
+              if (parsed.user.isAdmin) {
+                setIsAdmin(true);
+                setAuthChecking(false);
+                return;
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
       const token = session?.access_token;
-      setAuthToken(token);
+      if (token) setAuthToken(token);
 
       if (!session?.user) {
         setIsAdmin(false);
@@ -158,11 +178,24 @@ function AdminDashboard() {
     setLoading(true);
 
     try {
-      // Always get latest token
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      let token = authToken;
+      if (!token && typeof window !== "undefined") {
+        try {
+          const stored = localStorage.getItem("cavenhurst_google_session");
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.sessionToken) token = parsed.sessionToken;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!token) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        token = session?.access_token;
+      }
       setAuthToken(token);
 
       switch (activeTab) {
@@ -233,7 +266,7 @@ function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage]);
+  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage, authToken]);
 
   useEffect(() => {
     if (isAdmin) {

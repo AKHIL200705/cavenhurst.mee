@@ -3,6 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProduct, type Size } from "@/lib/products";
 import { computeTotals } from "@/lib/pricing";
+import { verifyGoogleSessionOrToken } from "./auth";
 import {
   createRazorpayOrder,
   confirmVerifiedPayment,
@@ -56,6 +57,19 @@ async function getServerSessionUser(): Promise<{
 
     const token = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!token || token.split(".").length !== 3) return null;
+
+    // Check Google session first
+    try {
+      const googleSession = await verifyGoogleSessionOrToken(token);
+      if (googleSession) {
+        return {
+          id: googleSession.sub,
+          email: googleSession.email,
+        };
+      }
+    } catch {
+      // Continue to Supabase check
+    }
 
     const {
       data: { user },

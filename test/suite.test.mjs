@@ -245,3 +245,76 @@ test("Orders: Order number generator specification", () => {
   const num = generateOrderNumber();
   assert.match(num, /^CVH-\d{8}-[A-Z0-9]{4}$/, "Order number must match CVH-YYYYMMDD-XXXX");
 });
+
+// ==============================================================================
+// 6. DIRECT GOOGLE AUTH & SESSION TOKEN TESTS
+// ==============================================================================
+const DEFAULT_ADMIN_EMAILS = ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"];
+
+function isWhitelistedAdmin(email) {
+  if (!email) return false;
+  return DEFAULT_ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
+
+function testSignSessionToken(payload, secret, expiresInSec = 3600) {
+  const now = Math.floor(Date.now() / 1000);
+  const full = { ...payload, iat: now, exp: now + expiresInSec };
+  const h = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const b = Buffer.from(JSON.stringify(full)).toString("base64url");
+  const s = createHmac("sha256", secret).update(`${h}.${b}`).digest("base64url");
+  return `${h}.${b}.${s}`;
+}
+
+function testVerifySessionToken(token, secret) {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [h, b, s] = parts;
+  const expected = createHmac("sha256", secret).update(`${h}.${b}`).digest("base64url");
+  if (s !== expected) return null;
+  const parsed = JSON.parse(Buffer.from(b, "base64url").toString("utf8"));
+  if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
+  return parsed;
+}
+
+test("Google Auth: Admin whitelist email authorization", () => {
+  assert.equal(isWhitelistedAdmin("akhilsaiabbireddy2007@gmail.com"), true);
+  assert.equal(isWhitelistedAdmin("AKHILSAIABBIREDDY2007@GMAIL.COM"), true);
+  assert.equal(isWhitelistedAdmin("cavenhurst@gmail.com"), true);
+  assert.equal(isWhitelistedAdmin("CAVENHURST@GMAIL.COM"), true);
+  assert.equal(isWhitelistedAdmin("customer@example.com"), false);
+  assert.equal(isWhitelistedAdmin(null), false);
+  assert.equal(isWhitelistedAdmin(""), false);
+});
+
+test("Google Auth: Cryptographic session token signing and verification", () => {
+  const secret = "test_google_client_secret_xyz";
+  const user = {
+    sub: "google_123456789",
+    email: "akhilsaiabbireddy2007@gmail.com",
+    name: "Akhil Sai",
+    picture: "https://lh3.googleusercontent.com/a/test",
+    isAdmin: true,
+  };
+
+  const token = testSignSessionToken(user, secret, 3600);
+  assert.equal(typeof token, "string");
+  assert.equal(token.split(".").length, 3);
+
+  // Successful verification
+  const verified = testVerifySessionToken(token, secret);
+  assert.ok(verified);
+  assert.equal(verified.sub, "google_123456789");
+  assert.equal(verified.email, "akhilsaiabbireddy2007@gmail.com");
+  assert.equal(verified.isAdmin, true);
+
+  // Invalid secret rejection
+  assert.equal(testVerifySessionToken(token, "wrong_secret"), null);
+
+  // Tampered payload rejection
+  const tampered = token.slice(0, 10) + "X" + token.slice(11);
+  assert.equal(testVerifySessionToken(tampered, secret), null);
+
+  // Expired token rejection
+  const expired = testSignSessionToken(user, secret, -10);
+  assert.equal(testVerifySessionToken(expired, secret), null);
+});

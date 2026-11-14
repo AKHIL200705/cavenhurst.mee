@@ -34,6 +34,9 @@ function Account() {
 
   useEffect(() => {
     if (!user) return;
+    if (user.isAdmin) {
+      setIsAdmin(true);
+    }
     supabase
       .from("orders")
       .select(
@@ -49,7 +52,7 @@ function Account() {
       .eq("role", "admin")
       .maybeSingle()
       .then(({ data }) => {
-        setIsAdmin(Boolean(data));
+        if (data) setIsAdmin(true);
       });
   }, [user]);
 
