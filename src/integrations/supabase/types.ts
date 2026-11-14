@@ -375,6 +375,8 @@ export type Database = {
           images: string[];
           is_new: boolean;
           is_published: boolean;
+          is_featured: boolean;
+          views: number;
           mrp: number;
           name: string;
           price: number;
@@ -396,6 +398,8 @@ export type Database = {
           images?: string[];
           is_new?: boolean;
           is_published?: boolean;
+          is_featured?: boolean;
+          views?: number;
           mrp: number;
           name: string;
           price: number;
@@ -417,6 +421,8 @@ export type Database = {
           images?: string[];
           is_new?: boolean;
           is_published?: boolean;
+          is_featured?: boolean;
+          views?: number;
           mrp?: number;
           name?: string;
           price?: number;
@@ -678,6 +684,177 @@ export type Database = {
           id?: string;
           role?: string;
           user_id?: string;
+        };
+        Relationships: [];
+      };
+      coupons: {
+        Row: {
+          id: string;
+          code: string;
+          discount_type: "percentage" | "fixed";
+          discount_value: number;
+          min_order_value: number;
+          max_discount: number | null;
+          usage_limit: number | null;
+          times_used: number;
+          expires_at: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          code: string;
+          discount_type: "percentage" | "fixed";
+          discount_value: number;
+          min_order_value?: number;
+          max_discount?: number | null;
+          usage_limit?: number | null;
+          times_used?: number;
+          expires_at?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          code?: string;
+          discount_type?: "percentage" | "fixed";
+          discount_value?: number;
+          min_order_value?: number;
+          max_discount?: number | null;
+          usage_limit?: number | null;
+          times_used?: number;
+          expires_at?: string | null;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      refunds: {
+        Row: {
+          id: string;
+          order_id: string;
+          payment_id: string | null;
+          razorpay_payment_id: string;
+          razorpay_refund_id: string | null;
+          amount: number;
+          amount_paise: number;
+          currency: string;
+          reason: string | null;
+          status: string;
+          admin_user_id: string | null;
+          raw_response: Json | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          payment_id?: string | null;
+          razorpay_payment_id: string;
+          razorpay_refund_id?: string | null;
+          amount: number;
+          amount_paise: number;
+          currency?: string;
+          reason?: string | null;
+          status?: string;
+          admin_user_id?: string | null;
+          raw_response?: Json | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          payment_id?: string | null;
+          razorpay_payment_id?: string;
+          razorpay_refund_id?: string | null;
+          amount?: number;
+          amount_paise?: number;
+          currency?: string;
+          reason?: string | null;
+          status?: string;
+          admin_user_id?: string | null;
+          raw_response?: Json | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      inventory_movements: {
+        Row: {
+          id: string;
+          product_id: string;
+          product_slug: string;
+          size: string;
+          color: string | null;
+          change_qty: number;
+          new_stock: number;
+          reason: string;
+          reference_id: string | null;
+          admin_user_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          product_id: string;
+          product_slug: string;
+          size: string;
+          color?: string | null;
+          change_qty: number;
+          new_stock: number;
+          reason: string;
+          reference_id?: string | null;
+          admin_user_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          product_id?: string;
+          product_slug?: string;
+          size?: string;
+          color?: string | null;
+          change_qty?: number;
+          new_stock?: number;
+          reason?: string;
+          reference_id?: string | null;
+          admin_user_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      admin_audit_logs: {
+        Row: {
+          id: string;
+          admin_user_id: string | null;
+          admin_email: string | null;
+          action: string;
+          target_type: string;
+          target_id: string;
+          details: Json | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          admin_user_id?: string | null;
+          admin_email?: string | null;
+          action: string;
+          target_type: string;
+          target_id: string;
+          details?: Json | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          admin_user_id?: string | null;
+          admin_email?: string | null;
+          action?: string;
+          target_type?: string;
+          target_id?: string;
+          details?: Json | null;
+          created_at?: string;
         };
         Relationships: [];
       };

@@ -219,6 +219,8 @@ export const products = pgTable("products", {
   images: text("images").array().default([]),
   isNew: boolean("is_new").default(true),
   isPublished: boolean("is_published").default(true),
+  isFeatured: boolean("is_featured").default(false),
+  views: integer("views").default(0),
   sold: integer("sold").default(0),
   rank: integer("rank").default(100),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -229,5 +231,66 @@ export const userRoles = pgTable("user_roles", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull(),
   role: text("role").notNull().default("customer"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const coupons = pgTable("coupons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  code: text("code").notNull().unique(),
+  discountType: text("discount_type").notNull(),
+  discountValue: integer("discount_value").notNull(),
+  minOrderValue: integer("min_order_value").notNull().default(0),
+  maxDiscount: integer("max_discount"),
+  usageLimit: integer("usage_limit"),
+  timesUsed: integer("times_used").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const refunds = pgTable("refunds", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  orderId: uuid("order_id")
+    .notNull()
+    .references(() => orders.id, { onDelete: "cascade" }),
+  paymentId: uuid("payment_id").references(() => payments.id),
+  razorpayPaymentId: text("razorpay_payment_id").notNull(),
+  razorpayRefundId: text("razorpay_refund_id"),
+  amount: integer("amount").notNull(),
+  amountPaise: integer("amount_paise").notNull(),
+  currency: text("currency").notNull().default("INR"),
+  reason: text("reason"),
+  status: text("status").notNull().default("pending"),
+  adminUserId: uuid("admin_user_id"),
+  rawResponse: jsonb("raw_response").default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const inventoryMovements = pgTable("inventory_movements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  productId: uuid("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  productSlug: text("product_slug").notNull(),
+  size: text("size").notNull(),
+  color: text("color"),
+  changeQty: integer("change_qty").notNull(),
+  newStock: integer("new_stock").notNull(),
+  reason: text("reason").notNull(),
+  referenceId: text("reference_id"),
+  adminUserId: uuid("admin_user_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const adminAuditLogs = pgTable("admin_audit_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  adminUserId: uuid("admin_user_id"),
+  adminEmail: text("admin_email"),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id").notNull(),
+  details: jsonb("details").default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

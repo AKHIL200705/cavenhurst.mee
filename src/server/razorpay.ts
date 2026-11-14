@@ -432,3 +432,87 @@ export async function processRazorpayWebhook(
 
   return { processed: true };
 }
+
+/**
+ * Initiates an official server-side refund for a captured Razorpay payment.
+ */
+export async function refundRazorpayPayment(input: {
+  paymentId: string;
+  amountInPaise?: number | undefined;
+  notes?: Record<string, string> | undefined;
+}): Promise<{
+  success: boolean;
+  refundId?: string | undefined;
+  amount?: number | undefined;
+  status?: string | undefined;
+  error?: string | undefined;
+  raw?: unknown | undefined;
+}> {
+  const keyId = process.env["RAZORPAY_KEY_ID"];
+  const keySecret = process.env["RAZORPAY_KEY_SECRET"];
+
+  if (!keyId || !keySecret) {
+    return {
+      success: false,
+      error: "Razorpay credentials are not configured on the server. Cannot process refund.",
+    };
+  }
+
+  try {
+    const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`;
+    const payload: Record<string, unknown> = {};
+    if (input.amountInPaise && input.amountInPaise > 0) {
+      payload["amount"] = input.amountInPaise;
+    }
+    if (input.notes) {
+      payload["notes"] = input.notes;
+    }
+
+    const response = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(input.paymentId)}/refund`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+
+    const data = (await response.json()) as Record<string, unknown>;
+    if (!response.ok) {
+      console.error("[Razorpay Refund Failed]", data);
+      const errObj = (data["error"] as Record<string, string>) || {};
+      return {
+        success: false,
+        error:
+          errObj["description"] ||
+          errObj["message"] ||
+          "Razorpay refund request was rejected by gateway.",
+        raw: data,
+      };
+    }
+
+    const refundId = (data["id"] as string) || undefined;
+    const amountVal = typeof data["amount"] === "number" ? data["amount"] / 100 : undefined;
+    const statusVal = (data["status"] as string) || undefined;
+
+    return {
+      success: true,
+      refundId,
+      amount: amountVal,
+      status: statusVal,
+      raw: data,
+    };
+  } catch (err) {
+    console.error("[Razorpay Refund Exception]", err);
+    return {
+      success: false,
+      error:
+        err instanceof Error
+          ? err.message
+          : "Internal error communicating with Razorpay refund API.",
+    };
+  }
+}

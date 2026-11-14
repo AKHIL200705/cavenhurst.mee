@@ -1,358 +1,433 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState, useCallback } from "react";
+import { meta } from "@/components/site/InfoPage";
+import { useAuth } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
-  AlertTriangle,
-  ArrowUpDown,
-  CheckCircle2,
-  Clock,
-  Filter,
+  LayoutDashboard,
   Package,
-  RefreshCw,
-  Search,
-  ShieldAlert,
-  ShieldCheck,
+  Tags,
+  Boxes,
+  CreditCard,
   Truck,
+  Users,
+  Ticket,
+  ScrollText,
+  Sliders,
+  LogOut,
+  RefreshCw,
+  ShieldCheck,
 } from "lucide-react";
-import { meta } from "@/components/site/InfoPage";
-import { formatINR } from "@/lib/pricing";
-import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/auth";
-import { getAdminOrdersServerFn } from "@/server/orders";
-import { supabase } from "@/integrations/supabase/client";
+
+import { AdminAuthGate } from "@/components/admin/AdminAuthGate";
+import { OverviewTab, type OverviewData } from "@/components/admin/OverviewTab";
+import { OrdersTab, type AdminOrderItem } from "@/components/admin/OrdersTab";
+import { ProductsTab, type AdminProductListItem } from "@/components/admin/ProductsTab";
+import {
+  InventoryTab,
+  type AdminInventoryItem,
+  type AdminInventoryMovement,
+} from "@/components/admin/InventoryTab";
+import { PaymentsTab, type AdminPaymentItem } from "@/components/admin/PaymentsTab";
+import { ShipmentsTab, type AdminShipmentItem } from "@/components/admin/ShipmentsTab";
+import { CustomersTab, type AdminCustomerItem } from "@/components/admin/CustomersTab";
+import { CouponsTab, type AdminCouponItem } from "@/components/admin/CouponsTab";
+import { AuditLogsTab, type AdminAuditLogItem } from "@/components/admin/AuditLogsTab";
+import { SettingsTab, type AdminSettingsData } from "@/components/admin/SettingsTab";
+
+import {
+  getAdminOverviewServerFn,
+  getAdminOrdersServerFn,
+  getAdminProductsServerFn,
+  getAdminInventoryServerFn,
+  getAdminPaymentsServerFn,
+  getAdminShipmentsServerFn,
+  getAdminCustomersServerFn,
+  getAdminCouponsServerFn,
+  getAdminAuditLogsServerFn,
+  getAdminSettingsServerFn,
+} from "@/server/admin";
 
 export const Route = createFileRoute("/admin")({
-  head: () => meta("Admin Dashboard", "CAVENHURST Admin Portal — Orders, Razorpay & ShipMaxx360."),
+  head: () =>
+    meta(
+      "Operations & Fulfillment Console",
+      "CAVENHURST Admin Portal — End-to-end e-commerce management system.",
+    ),
   component: AdminDashboard,
 });
 
-type AdminOrder = {
-  id: string;
-  order_number: string | null;
-  customer_name: string | null;
-  customer_email: string | null;
-  customer_phone: string | null;
-  total: number;
-  status: string;
-  payment_method: string | null;
-  payment_status: string | null;
-  shipment_status: string | null;
-  razorpay_order_id: string | null;
-  razorpay_payment_id: string | null;
-  awb_number: string | null;
-  courier_partner: string | null;
-  created_at: string;
-};
+type AdminTab =
+  | "overview"
+  | "orders"
+  | "products"
+  | "inventory"
+  | "payments"
+  | "shipments"
+  | "customers"
+  | "coupons"
+  | "audit"
+  | "settings";
 
-const FILTERS = [
-  { id: "all", label: "All Orders" },
-  { id: "pending_payment", label: "Pending Payment" },
-  { id: "paid", label: "Paid" },
-  { id: "cod", label: "Cash on Delivery" },
-  { id: "processing", label: "Processing" },
-  { id: "shipped", label: "Shipped" },
-  { id: "out_for_delivery", label: "Out for Delivery" },
-  { id: "delivered", label: "Delivered" },
-  { id: "cancelled", label: "Cancelled" },
-  { id: "rto_initiated", label: "RTO" },
-  { id: "returned", label: "Returned" },
+const NAV_TABS = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "orders", label: "Orders", icon: Package },
+  { id: "products", label: "Products", icon: Tags },
+  { id: "inventory", label: "Inventory", icon: Boxes },
+  { id: "payments", label: "Payments", icon: CreditCard },
+  { id: "shipments", label: "Logistics", icon: Truck },
+  { id: "customers", label: "Customers", icon: Users },
+  { id: "coupons", label: "Coupons", icon: Ticket },
+  { id: "audit", label: "Audit Logs", icon: ScrollText },
+  { id: "settings", label: "Settings", icon: Sliders },
 ] as const;
 
 function AdminDashboard() {
   const { user, ready } = useAuth();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
-  const [orders, setOrders] = useState<AdminOrder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState("all");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [authChecking, setAuthChecking] = useState(true);
+  const [authToken, setAuthToken] = useState<string | undefined>(undefined);
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [loading, setLoading] = useState(false);
 
-  // Check admin role
-  useEffect(() => {
-    if (!ready) return;
-    if (!user) {
-      setIsAdmin(false);
-      setLoading(false);
-      return;
-    }
+  // Data states
+  const [overviewData, setOverviewData] = useState<OverviewData | null>(null);
 
-    supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
-      .maybeSingle()
-      .then(({ data }) => {
-        // If user is admin in user_roles or authenticated owner
-        const authorized = Boolean(data);
-        setIsAdmin(authorized);
-        if (authorized) {
-          void loadOrders("all", "");
-        } else {
-          setLoading(false);
-        }
-      });
-  }, [user, ready]);
+  // Orders tab state
+  const [orders, setOrders] = useState<AdminOrderItem[]>([]);
+  const [totalOrdersCount, setTotalOrdersCount] = useState(0);
+  const [orderPage, setOrderPage] = useState(1);
+  const [orderFilter, setOrderFilter] = useState("all");
+  const [orderSearch, setOrderSearch] = useState("");
 
-  const loadOrders = async (filter: string, search: string) => {
-    setLoading(true);
+  // Products & Inventory state
+  const [products, setProducts] = useState<AdminProductListItem[]>([]);
+  const [inventory, setInventory] = useState<AdminInventoryItem[]>([]);
+  const [inventoryMovements, setInventoryMovements] = useState<AdminInventoryMovement[]>([]);
+
+  // Payments & Shipments state
+  const [payments, setPayments] = useState<AdminPaymentItem[]>([]);
+  const [shipments, setShipments] = useState<AdminShipmentItem[]>([]);
+
+  // Customers & Coupons & Logs & Settings
+  const [customers, setCustomers] = useState<AdminCustomerItem[]>([]);
+  const [coupons, setCoupons] = useState<AdminCouponItem[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLogItem[]>([]);
+  const [settings, setSettings] = useState<AdminSettingsData | null>(null);
+
+  // 1. Check admin authorization
+  const verifyAdmin = useCallback(async () => {
+    setAuthChecking(true);
     try {
-      const data = await getAdminOrdersServerFn({
-        data: { filter, search },
-      });
-      setOrders(data as AdminOrder[]);
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      setAuthToken(token);
+
+      if (!session?.user) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data: roleRow } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", session.user.id)
+        .eq("role", "admin")
+        .maybeSingle();
+
+      setIsAdmin(Boolean(roleRow));
+    } catch {
+      setIsAdmin(false);
+    } finally {
+      setAuthChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ready) {
+      void verifyAdmin();
+    }
+  }, [ready, user, verifyAdmin]);
+
+  // 2. Fetch tab-specific data
+  const loadActiveTabData = useCallback(async () => {
+    if (!isAdmin) return;
+    setLoading(true);
+
+    try {
+      // Always get latest token
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      setAuthToken(token);
+
+      switch (activeTab) {
+        case "overview": {
+          const res = await getAdminOverviewServerFn({ data: { authToken: token } });
+          setOverviewData(res);
+          break;
+        }
+        case "orders": {
+          const res = await getAdminOrdersServerFn({
+            data: {
+              authToken: token,
+              filter: orderFilter,
+              search: orderSearch,
+              page: orderPage,
+              limit: 25,
+            },
+          });
+          setOrders(res.orders);
+          setTotalOrdersCount(res.totalCount);
+          break;
+        }
+        case "products": {
+          const res = await getAdminProductsServerFn({ data: { authToken: token } });
+          setProducts(res as unknown as AdminProductListItem[]);
+          break;
+        }
+        case "inventory": {
+          const res = await getAdminInventoryServerFn({ data: { authToken: token } });
+          setInventory(res.inventory as AdminInventoryItem[]);
+          setInventoryMovements(res.recentMovements as AdminInventoryMovement[]);
+          break;
+        }
+        case "payments": {
+          const res = await getAdminPaymentsServerFn({ data: { authToken: token } });
+          setPayments(res);
+          break;
+        }
+        case "shipments": {
+          const res = await getAdminShipmentsServerFn({ data: { authToken: token } });
+          setShipments(res);
+          break;
+        }
+        case "customers": {
+          const res = await getAdminCustomersServerFn({ data: { authToken: token } });
+          setCustomers(res);
+          break;
+        }
+        case "coupons": {
+          const res = await getAdminCouponsServerFn({ data: { authToken: token } });
+          setCoupons(res);
+          break;
+        }
+        case "audit": {
+          const res = await getAdminAuditLogsServerFn({ data: { authToken: token } });
+          setAuditLogs(res);
+          break;
+        }
+        case "settings": {
+          const res = await getAdminSettingsServerFn({ data: { authToken: token } });
+          setSettings(res);
+          break;
+        }
+      }
     } catch (err) {
-      console.error("Failed to load admin orders:", err);
-      toast.error("Failed to fetch orders");
+      console.error("[Admin Data Fetch Error]", err);
+      toast.error(err instanceof Error ? err.message : "Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
+  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage]);
+
+  useEffect(() => {
+    if (isAdmin) {
+      void loadActiveTabData();
+    }
+  }, [isAdmin, activeTab, loadActiveTabData]);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAdmin(false);
+    setAuthToken(undefined);
+    toast.info("Logged out of administrator session.");
   };
 
-  const handleFilterChange = (filter: string) => {
-    setActiveFilter(filter);
-    void loadOrders(filter, searchTerm);
-  };
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    void loadOrders(activeFilter, searchTerm);
-  };
-
-  if (!ready || isAdmin === null) {
+  // Auth Checking Loading State
+  if (authChecking || !ready) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
         <RefreshCw className="h-6 w-6 animate-spin text-silver" />
-      </div>
-    );
-  }
-
-  // Unauthorized access warning
-  if (!isAdmin) {
-    return (
-      <div className="mx-auto max-w-md px-4 py-24 text-center">
-        <ShieldAlert className="mx-auto h-16 w-16 text-rose-500" />
-        <h1 className="mt-4 font-serif text-3xl italic">Admin Access Required</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          You must be signed in with a verified CAVENHURST administrator account to view the
-          operations dashboard.
+        <p className="font-mono text-xs uppercase tracking-brand text-muted-foreground">
+          Authenticating Administrator...
         </p>
-        <Link
-          to="/login"
-          className="mt-6 inline-block rounded-md bg-primary px-6 py-3 font-bold text-primary-foreground"
-        >
-          Sign in as Admin
-        </Link>
       </div>
     );
   }
 
-  // Summary Metrics
-  const totalRevenue = orders
-    .filter((o) => o.payment_status === "paid" || o.payment_method === "cod")
-    .reduce((s, o) => s + (o.total || 0), 0);
-  const totalPaid = orders.filter((o) => o.payment_status === "paid").length;
-  const totalCod = orders.filter((o) => o.payment_method === "cod").length;
-  const totalActiveShipments = orders.filter((o) =>
-    ["shipment_created", "shipped", "in_transit", "out_for_delivery"].includes(
-      o.shipment_status || "",
-    ),
-  ).length;
+  // Unauthorized Access Gate
+  if (!isAdmin) {
+    return <AdminAuthGate onAuthenticated={() => void verifyAdmin()} />;
+  }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12 space-y-8">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
-        <div>
-          <span className="text-xs font-bold tracking-brand text-silver">
-            CAVENHURST OPERATIONS
-          </span>
-          <h1 className="font-serif text-4xl italic">Fulfillment & Payments Dashboard</h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => void loadOrders(activeFilter, searchTerm)}
-            className="flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-semibold hover:bg-accent"
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh
-          </button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-background pb-16">
+      {/* Top Admin App Bar */}
+      <div className="border-b border-border bg-card/60 backdrop-blur-md sticky top-0 z-40">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex h-16 items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="font-serif text-2xl italic tracking-tight text-foreground">
+                CAVENHURST
+              </span>
+              <span className="hidden sm:inline-block rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 font-mono text-[10px] font-bold text-gold">
+                OPERATIONS CONSOLE
+              </span>
+            </div>
 
-      {/* Overview Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-xl border border-border bg-card p-5">
-          <p className="text-xs uppercase tracking-brand text-silver">TOTAL ACTIVE ORDERS</p>
-          <p className="mt-2 font-mono text-3xl font-bold">{orders.length}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-5">
-          <p className="text-xs uppercase tracking-brand text-silver">PAID (RAZORPAY)</p>
-          <p className="mt-2 font-mono text-3xl font-bold text-emerald-500">{totalPaid}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-5">
-          <p className="text-xs uppercase tracking-brand text-silver">CASH ON DELIVERY</p>
-          <p className="mt-2 font-mono text-3xl font-bold text-amber-500">{totalCod}</p>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-5">
-          <p className="text-xs uppercase tracking-brand text-silver">SHIPMAXX360 IN TRANSIT</p>
-          <p className="mt-2 font-mono text-3xl font-bold text-electric">{totalActiveShipments}</p>
-        </div>
-      </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="hidden md:flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-muted-foreground">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+                <span className="font-mono">{user?.email || "Admin"}</span>
+              </div>
 
-      {/* Security Note on Online Payments */}
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-background p-4 text-xs text-muted-foreground">
-        <ShieldCheck className="h-5 w-5 text-emerald-500 shrink-0" />
-        <span>
-          <strong>Security Policy:</strong> Online payments are verified strictly through Razorpay
-          HMAC SHA-256 signatures or signed webhooks. Administrators cannot manually override
-          payment statuses without verified cryptographic proof.
-        </span>
-      </div>
+              <button
+                onClick={() => void loadActiveTabData()}
+                disabled={loading}
+                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-semibold text-foreground hover:bg-accent transition disabled:opacity-50"
+                title="Refresh current dataset"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
 
-      {/* Search & Filter Bar */}
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <form onSubmit={handleSearchSubmit} className="flex gap-2">
-          <div className="relative flex-1 sm:w-80">
-            <input
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search Order #, Customer, AWB"
-              className="w-full rounded-md border border-input bg-transparent px-3 py-2 pr-9 text-sm outline-none focus:border-electric"
-            />
-            <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-semibold text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400 transition"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Log Out</span>
+              </button>
+            </div>
           </div>
-          <button type="submit" className="rounded-md bg-secondary px-4 text-sm font-semibold">
-            Search
-          </button>
-        </form>
 
-        {/* Filter Badges */}
-        <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto pb-2">
-          <span className="flex items-center gap-1 text-xs font-bold text-silver mr-2">
-            <Filter className="h-3 w-3" /> Filters:
-          </span>
-          {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => handleFilterChange(f.id)}
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-medium transition",
-                activeFilter === f.id
-                  ? "bg-primary font-bold text-primary-foreground"
-                  : "border border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
+          {/* Navigation Tabs Bar */}
+          <div className="flex space-x-1 overflow-x-auto pb-1 pt-1 scrollbar-none">
+            {NAV_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-semibold whitespace-nowrap transition ${
+                    isActive
+                      ? "border-primary text-foreground font-bold"
+                      : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                  }`}
+                >
+                  <Icon className={`h-3.5 w-3.5 ${isActive ? "text-gold" : "text-silver"}`} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Orders Table */}
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-background/50 text-xs uppercase tracking-brand text-silver">
-            <tr>
-              <th className="px-4 py-3.5">Order</th>
-              <th className="px-4 py-3.5">Customer</th>
-              <th className="px-4 py-3.5">Payment (Razorpay)</th>
-              <th className="px-4 py-3.5">Shipping (ShipMaxx360)</th>
-              <th className="px-4 py-3.5">AWB / Courier</th>
-              <th className="px-4 py-3.5 text-right">Total</th>
-              <th className="px-4 py-3.5 text-right">Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {loading ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
-                  <RefreshCw className="mx-auto h-5 w-5 animate-spin" />
-                  <p className="mt-2 text-xs">Loading orders...</p>
-                </td>
-              </tr>
-            ) : orders.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
-                  <Package className="mx-auto h-8 w-8 text-silver mb-2" />
-                  No orders match this filter.
-                </td>
-              </tr>
-            ) : (
-              orders.map((o) => (
-                <tr key={o.id} className="hover:bg-accent/40 transition">
-                  <td className="px-4 py-4 font-mono font-bold text-foreground">
-                    #{o.order_number || o.id.slice(0, 8)}
-                  </td>
-                  <td className="px-4 py-4">
-                    <p className="font-semibold">{o.customer_name || "Guest Shopper"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {o.customer_phone || o.customer_email}
-                    </p>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex flex-col gap-1">
-                      <span
-                        className={cn(
-                          "w-fit rounded px-2 py-0.5 text-[11px] font-bold uppercase",
-                          o.payment_status === "paid" && "bg-emerald-500/10 text-emerald-500",
-                          o.payment_status === "pending" && "bg-amber-500/10 text-amber-500",
-                          o.payment_status === "failed" && "bg-rose-500/10 text-rose-500",
-                        )}
-                      >
-                        {o.payment_method === "cod" ? "COD · " : "Online · "}
-                        {o.payment_status || "Pending"}
-                      </span>
-                      {o.razorpay_payment_id && (
-                        <span className="font-mono text-[10px] text-silver truncate max-w-[140px]">
-                          {o.razorpay_payment_id}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span
-                      className={cn(
-                        "w-fit rounded px-2 py-0.5 text-[11px] font-bold uppercase",
-                        o.shipment_status === "delivered" && "bg-emerald-500/10 text-emerald-500",
-                        ["shipped", "in_transit", "out_for_delivery"].includes(
-                          o.shipment_status || "",
-                        ) && "bg-blue-500/10 text-blue-500",
-                        o.shipment_status === "rto_initiated" && "bg-rose-500/10 text-rose-500",
-                        (!o.shipment_status || o.shipment_status === "unfulfilled") &&
-                          "bg-secondary text-secondary-foreground",
-                      )}
-                    >
-                      {o.shipment_status?.replace(/_/g, " ") || "Unfulfilled"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    {o.awb_number ? (
-                      <div>
-                        <p className="font-mono font-semibold text-xs text-foreground">
-                          {o.awb_number}
-                        </p>
-                        <p className="text-[11px] text-silver">
-                          {o.courier_partner || "ShipMaxx360"}
-                        </p>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-4 text-right font-mono font-bold text-foreground">
-                    {formatINR(o.total)}
-                  </td>
-                  <td className="px-4 py-4 text-right text-xs text-muted-foreground">
-                    {new Date(o.created_at).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* Main Content Workspace */}
+      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
+        {activeTab === "overview" && overviewData && (
+          <OverviewTab data={overviewData} onNavigateTab={(t) => setActiveTab(t as AdminTab)} />
+        )}
+
+        {activeTab === "orders" && (
+          <OrdersTab
+            orders={orders}
+            totalCount={totalOrdersCount}
+            currentPage={orderPage}
+            limit={25}
+            loading={loading}
+            filter={orderFilter}
+            search={orderSearch}
+            authToken={authToken}
+            onFilterChange={(f) => {
+              setOrderFilter(f);
+              setOrderPage(1);
+            }}
+            onSearchChange={(s) => {
+              setOrderSearch(s);
+              setOrderPage(1);
+            }}
+            onPageChange={(p) => setOrderPage(p)}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "products" && (
+          <ProductsTab
+            products={products}
+            loading={loading}
+            authToken={authToken}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "inventory" && (
+          <InventoryTab
+            inventory={inventory}
+            movements={inventoryMovements}
+            loading={loading}
+            authToken={authToken}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "payments" && (
+          <PaymentsTab
+            payments={payments}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+            onInitiateRefund={() => setActiveTab("orders")}
+          />
+        )}
+
+        {activeTab === "shipments" && (
+          <ShipmentsTab
+            shipments={shipments}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "customers" && (
+          <CustomersTab
+            customers={customers}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "coupons" && (
+          <CouponsTab
+            coupons={coupons}
+            loading={loading}
+            authToken={authToken}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "audit" && (
+          <AuditLogsTab
+            logs={auditLogs}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "settings" && (
+          <SettingsTab
+            settings={settings}
+            authToken={authToken}
+            onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+      </main>
     </div>
   );
 }

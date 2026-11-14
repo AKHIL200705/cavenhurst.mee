@@ -289,7 +289,26 @@ export const COLLECTIONS = {
 } as const;
 export type CollectionSlug = keyof typeof COLLECTIONS;
 
-export const getProduct = (slug: string) => PRODUCTS.find((p) => p.slug === slug);
+let liveProductsMap: Map<string, Product> | null = null;
+
+export function setLiveProducts(list: Product[]) {
+  liveProductsMap = new Map(list.map((p) => [p.slug, p]));
+}
+
+export const getProduct = (slug: string) => {
+  if (liveProductsMap && liveProductsMap.has(slug)) {
+    return liveProductsMap.get(slug);
+  }
+  return PRODUCTS.find((p) => p.slug === slug);
+};
+
+export const getAllProducts = (): Product[] => {
+  if (liveProductsMap && liveProductsMap.size > 0) {
+    return Array.from(liveProductsMap.values());
+  }
+  return PRODUCTS;
+};
+
 export const inStock = (p: Product) => Object.values(p.stock).some((n) => (n ?? 0) > 0);
 
 const COLOR_PHOTOS: Record<string, Record<string, string>> = {

@@ -44,7 +44,7 @@ export interface PlaceOrderInput {
  * Derives authenticated customer identity strictly from the verified server session.
  * Never trust or accept a client-supplied userId!
  */
-export async function getServerSessionUser(): Promise<{
+async function getServerSessionUser(): Promise<{
   id: string;
   email?: string | undefined;
 } | null> {
@@ -75,7 +75,7 @@ export async function getServerSessionUser(): Promise<{
 /**
  * Checks if a user has administrator privileges in user_roles.
  */
-export async function checkIsUserAdmin(userId: string): Promise<boolean> {
+async function checkIsUserAdmin(userId: string): Promise<boolean> {
   try {
     const { data } = await supabaseAdmin
       .from("user_roles")
@@ -99,7 +99,7 @@ function generateOrderNumber(): string {
  * Recalculates order subtotal, discount, shipping and total strictly on the server.
  * Never trust client amounts!
  */
-export function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: string | null) {
+function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: string | null) {
   let subtotal = 0;
   const itemsWithDetails: Array<{
     slug: string;
