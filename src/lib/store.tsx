@@ -77,7 +77,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       live = false;
     };
-  }, [user?.id, ready]);
+  }, [user, ready]);
   useEffect(() => {
     if (!user || synced !== user.id) return;
     const t = setTimeout(() => {
@@ -87,7 +87,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .then(() => {});
     }, 400);
     return () => clearTimeout(t);
-  }, [cart, wishlist, synced, user?.id]);
+  }, [cart, wishlist, synced, user]);
 
   const stockFor = (slug: string, size: Size) => getProduct(slug)?.stock[size] ?? 0;
 

@@ -75,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [user?.id, attempt]);
+  }, [user, attempt]);
 
   const completeWelcome = async () => {
     if (!user) throw new Error("Please sign in again.");

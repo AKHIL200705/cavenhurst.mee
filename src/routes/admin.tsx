@@ -86,7 +86,7 @@ function AdminDashboard() {
         const authorized = Boolean(data);
         setIsAdmin(authorized);
         if (authorized) {
-          void loadOrders(activeFilter, searchTerm);
+          void loadOrders("all", "");
         } else {
           setLoading(false);
         }
