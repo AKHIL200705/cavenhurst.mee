@@ -20,9 +20,7 @@ export interface AdminAuthParams {
 /**
  * Strict server-side verification of admin identity.
  */
-async function verifyAdminSession(
-  providedToken?: string | undefined,
-): Promise<AdminAuthResult> {
+async function verifyAdminSession(providedToken?: string | undefined): Promise<AdminAuthResult> {
   let token = providedToken;
 
   if (!token) {
