@@ -6,8 +6,7 @@ import tsconfigPaths from "vite-tsconfig-paths";
 import { nitro } from "nitro/vite";
 import path from "node:path";
 
-const nitroPreset =
-  process.env["NITRO_PRESET"] || (process.env["VERCEL"] ? "vercel" : undefined);
+const nitroPreset = process.env["NITRO_PRESET"] || (process.env["VERCEL"] ? "vercel" : undefined);
 
 export default defineConfig({
   plugins: [
