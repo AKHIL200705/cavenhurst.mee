@@ -13,7 +13,9 @@ export default defineConfig({
       server: { entry: "server" },
     }),
     viteReact(),
-    nitro(process.env["VERCEL"] ? { preset: "vercel" } : {}),
+    nitro({
+      preset: process.env["NITRO_PRESET"] || (process.env["VERCEL"] ? "vercel" : undefined),
+    }),
     tsconfigPaths(),
   ],
   resolve: {

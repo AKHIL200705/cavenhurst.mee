@@ -1,24 +1,10 @@
 import "./lib/error-capture";
 
+import defaultServerEntry, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { processRazorpayWebhook, verifyRazorpayWebhookSignature } from "./server/razorpay";
 import { processShipMaxxWebhook, verifyShipMaxxWebhookSignature } from "./server/shipmaxx";
-
-type ServerEntry = {
-  fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
-};
-
-let serverEntryPromise: Promise<ServerEntry> | undefined;
-
-async function getServerEntry(): Promise<ServerEntry> {
-  if (!serverEntryPromise) {
-    serverEntryPromise = import("@tanstack/react-start/server-entry").then(
-      (m) => (m.default ?? m) as ServerEntry,
-    );
-  }
-  return serverEntryPromise;
-}
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
@@ -144,8 +130,8 @@ async function handleWebhookRoute(request: Request, url: URL): Promise<Response 
   return null;
 }
 
-export default {
-  async fetch(request: Request, env: unknown, ctx: unknown) {
+export default createServerEntry({
+  async fetch(request, opts) {
     try {
       const url = new URL(request.url);
 
@@ -155,8 +141,7 @@ export default {
         return webhookResponse;
       }
 
-      const entry = await getServerEntry();
-      const response = await entry.fetch(request, env, ctx);
+      const response = await defaultServerEntry.fetch(request, opts);
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
       console.error(error);
@@ -166,4 +151,4 @@ export default {
       });
     }
   },
-};
+});
