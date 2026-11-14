@@ -34,8 +34,8 @@ GitHub Repository ───> Vercel (Edge / Serverless SSR & Functions) ──�
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/<your-username>/cavenhurst.git
-cd cavenhurst
+git clone https://github.com/AKHIL200705/cavenhurst.mee.git
+cd cavenhurst.mee
 npm install
 ```
 
