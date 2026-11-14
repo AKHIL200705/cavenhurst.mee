@@ -17,8 +17,8 @@ GitHub Repository ───> Vercel (Edge / Serverless SSR & Functions) ──�
 - **Frontend & SSR**: TanStack Start + React 19 + Vite + Tailwind CSS
 - **Backend & Database**: Supabase (PostgreSQL, GoTrue Auth, Row Level Security, Storage)
 - **Deployment**: Vercel (Fluid Compute via Nitro server engine)
-- **Payments**: Razorpay (server-side verification)
-- **Shipping**: Shiprocket (fulfillment & tracking)
+- **Payments**: Razorpay (server-side HMAC verification)
+- **Shipping**: ShipMaxx360 (fulfillment, AWB generation & live tracking)
 
 ---
 
@@ -62,12 +62,16 @@ SUPABASE_SERVICE_ROLE_KEY="your-supabase-service-role-secret-key"
 # Direct PostgreSQL connection string (for migrations)
 DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@db.[YOUR-PROJECT-ID].supabase.co:5432/postgres"
 
-# Payments & Shipping
+# Payments (Razorpay) & Shipping (ShipMaxx360)
 VITE_RAZORPAY_KEY_ID="rzp_test_..."
 RAZORPAY_KEY_ID="rzp_test_..."
 RAZORPAY_KEY_SECRET="..."
-SHIPROCKET_EMAIL="support@cavenhurst.in"
-SHIPROCKET_PASSWORD="..."
+RAZORPAY_WEBHOOK_SECRET="..."
+SHIPMAXX360_BASE_URL="https://api.shipmaxx360.com"
+SHIPMAXX360_API_KEY="..."
+SHIPMAXX360_API_SECRET="..."
+SHIPMAXX360_WEBHOOK_SECRET="..."
+SHIPMAXX360_PICKUP_PINCODE="521212"
 ```
 
 ### Local Development
@@ -173,8 +177,12 @@ In the Vercel project settings, add the following variables under **Settings** >
 - `VITE_RAZORPAY_KEY_ID`
 - `RAZORPAY_KEY_ID`
 - `RAZORPAY_KEY_SECRET`
-- `SHIPROCKET_EMAIL`
-- `SHIPROCKET_PASSWORD`
+- `RAZORPAY_WEBHOOK_SECRET`
+- `SHIPMAXX360_BASE_URL`
+- `SHIPMAXX360_API_KEY`
+- `SHIPMAXX360_API_SECRET`
+- `SHIPMAXX360_WEBHOOK_SECRET`
+- `SHIPMAXX360_PICKUP_PINCODE`
 - `CRON_SECRET`
 
 ### 4. Custom Domain Setup

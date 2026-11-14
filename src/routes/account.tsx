@@ -49,7 +49,7 @@ function Account() {
       .eq("role", "admin")
       .maybeSingle()
       .then(({ data }) => {
-        setIsAdmin(Boolean(data) || user.email === "admin@cavenhurst.in");
+        setIsAdmin(Boolean(data));
       });
   }, [user]);
 

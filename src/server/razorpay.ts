@@ -68,19 +68,25 @@ export async function createRazorpayOrder(input: CreateRazorpayOrderInput) {
       };
     }
 
-    const data = (await response.json()) as { id: string; amount: number; currency: string };
+    const data = (await response.json()) as {
+      id: string;
+      amount: number;
+      currency: string;
+      receipt: string;
+      status: string;
+    };
+
     return {
       success: true,
       configured: true,
       order: data,
     };
   } catch (error) {
-    console.error("[Razorpay] Network/API error:", error);
+    console.error("[Razorpay] Network error creating order:", error);
     return {
       success: false,
       configured: true,
-      error:
-        error instanceof Error ? error.message : "Failed to communicate with Razorpay servers.",
+      error: error instanceof Error ? error.message : "Failed to communicate with Razorpay API.",
     };
   }
 }
@@ -88,6 +94,7 @@ export async function createRazorpayOrder(input: CreateRazorpayOrderInput) {
 /**
  * Cryptographically verifies Razorpay payment signature server-side.
  * Formula: HMAC SHA256 (order_id + "|" + razorpay_payment_id, secret) == razorpay_signature
+ * Uses timingSafeEqual to prevent timing attacks.
  */
 export function verifyRazorpaySignature(params: {
   razorpayOrderId: string;
@@ -119,7 +126,7 @@ export function verifyRazorpaySignature(params: {
  */
 export function verifyRazorpayWebhookSignature(rawBody: string, signature: string): boolean {
   const webhookSecret = process.env["RAZORPAY_WEBHOOK_SECRET"];
-  if (!webhookSecret) return false;
+  if (!webhookSecret || !signature) return false;
 
   try {
     const expectedSignature = createHmac("sha256", webhookSecret).update(rawBody).digest("hex");
@@ -137,21 +144,47 @@ export function verifyRazorpayWebhookSignature(rawBody: string, signature: strin
 }
 
 /**
- * Verifies payment, prevents duplicate processing, and marks order as paid in Supabase.
+ * Verifies payment, checks order ID match, verifies amount/currency,
+ * ensures captured status, prevents duplicate processing, and marks order as paid in Supabase.
  */
 export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
-  // 1. Verify cryptographic HMAC signature
-  const valid = verifyRazorpaySignature({
+  // 1. Fetch current order from Supabase
+  const { data: existingOrder, error: orderFetchErr } = await supabaseAdmin
+    .from("orders")
+    .select("id, order_number, status, payment_status, total, razorpay_order_id, user_id")
+    .eq("id", input.orderId)
+    .single();
+
+  if (orderFetchErr || !existingOrder) {
+    return { success: false, error: "Associated order could not be found." };
+  }
+
+  // 2. Security Check: verify stored Razorpay order ID matches payment response
+  if (
+    existingOrder.razorpay_order_id &&
+    existingOrder.razorpay_order_id !== input.razorpayOrderId
+  ) {
+    console.error(
+      `[Razorpay Security] Order ID mismatch: stored=${existingOrder.razorpay_order_id}, received=${input.razorpayOrderId}`,
+    );
+    return {
+      success: false,
+      error: "Security validation error: Stored order reference does not match payment response.",
+    };
+  }
+
+  // 3. Cryptographic HMAC signature verification
+  const validSignature = verifyRazorpaySignature({
     razorpayOrderId: input.razorpayOrderId,
     razorpayPaymentId: input.razorpayPaymentId,
     razorpaySignature: input.razorpaySignature,
   });
 
-  if (!valid) {
-    // Record failed verification attempt
+  if (!validSignature) {
+    // Record failed verification attempt in payments ledger
     await supabaseAdmin.from("payments").insert({
       order_id: input.orderId,
-      user_id: input.userId || null,
+      user_id: input.userId || existingOrder.user_id || null,
       gateway: "razorpay",
       payment_method: "online",
       razorpay_order_id: input.razorpayOrderId,
@@ -173,18 +206,7 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     };
   }
 
-  // 2. Fetch current order to check idempotency (never charge or process twice!)
-  const { data: existingOrder, error: orderFetchErr } = await supabaseAdmin
-    .from("orders")
-    .select("id, order_number, status, payment_status, total")
-    .eq("id", input.orderId)
-    .single();
-
-  if (orderFetchErr || !existingOrder) {
-    return { success: false, error: "Associated order could not be found." };
-  }
-
-  // Idempotency: If already paid, return success without duplicate processing
+  // 4. Idempotency Check: if already paid, return confirmed without re-processing
   if (existingOrder.payment_status === "paid") {
     return {
       success: true,
@@ -193,10 +215,80 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     };
   }
 
-  // 3. Record successful payment in payments table
+  // 5. Verification against Razorpay API (amount, currency, captured status)
+  const keyId = process.env["RAZORPAY_KEY_ID"];
+  const keySecret = process.env["RAZORPAY_KEY_SECRET"];
+
+  if (keyId && keySecret) {
+    try {
+      const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`;
+      const rzpRes = await fetch(
+        `https://api.razorpay.com/v1/payments/${encodeURIComponent(input.razorpayPaymentId)}`,
+        {
+          headers: {
+            Authorization: authHeader,
+          },
+        },
+      );
+
+      if (rzpRes.ok) {
+        const paymentData = (await rzpRes.json()) as {
+          id: string;
+          order_id: string;
+          status: string;
+          amount: number;
+          currency: string;
+          captured?: boolean;
+        };
+
+        // Verify order reference on payment entity
+        if (paymentData.order_id && paymentData.order_id !== input.razorpayOrderId) {
+          return {
+            success: false,
+            error: "Payment verification failed: Payment entity order_id does not match order.",
+          };
+        }
+
+        // Verify currency
+        if (paymentData.currency && paymentData.currency !== "INR") {
+          return {
+            success: false,
+            error: `Payment verification failed: Currency mismatch (${paymentData.currency}). Expected INR.`,
+          };
+        }
+
+        // Verify amount in paise matches order total
+        const expectedPaise = Math.round(existingOrder.total * 100);
+        if (paymentData.amount !== expectedPaise) {
+          console.error(
+            `[Razorpay Amount Mismatch] expected=${expectedPaise} paise, received=${paymentData.amount} paise`,
+          );
+          return {
+            success: false,
+            error: `Payment verification failed: Amount mismatch. Expected ₹${existingOrder.total}, received ₹${paymentData.amount / 100}.`,
+          };
+        }
+
+        // Verify status is captured (or authorized if auto-capture configured)
+        if (paymentData.status !== "captured" && paymentData.status !== "authorized") {
+          return {
+            success: false,
+            error: `Payment verification failed: Payment status is '${paymentData.status}', not captured.`,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(
+        "[Razorpay Verification] API check skipped due to network error, proceeding with valid HMAC signature:",
+        err,
+      );
+    }
+  }
+
+  // 6. Record verified payment in payments ledger
   await supabaseAdmin.from("payments").insert({
     order_id: input.orderId,
-    user_id: input.userId || null,
+    user_id: input.userId || existingOrder.user_id || null,
     gateway: "razorpay",
     payment_method: "online",
     razorpay_order_id: input.razorpayOrderId,
@@ -209,7 +301,7 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     payload: input as unknown as Json,
   });
 
-  // 4. Update order state to paid & confirmed
+  // 7. Update order state to paid & confirmed (never touch shipment_status!)
   await supabaseAdmin
     .from("orders")
     .update({
@@ -229,15 +321,29 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
 }
 
 /**
- * Handles Razorpay webhook event with idempotency.
+ * Handles Razorpay webhook event with reliable idempotency.
+ * Updates payment status without overwriting shipment status.
  */
-export async function processRazorpayWebhook(eventPayload: {
-  event: string;
-  payload: {
-    payment?: { entity?: { id?: string; order_id?: string; amount?: number; status?: string } };
-    order?: { entity?: { id?: string; receipt?: string; status?: string } };
-  };
-}) {
+export async function processRazorpayWebhook(
+  eventPayload: {
+    id?: string;
+    event_id?: string;
+    event: string;
+    payload: {
+      payment?: {
+        entity?: {
+          id?: string;
+          order_id?: string;
+          amount?: number;
+          currency?: string;
+          status?: string;
+        };
+      };
+      order?: { entity?: { id?: string; receipt?: string; status?: string; amount?: number } };
+    };
+  },
+  headerEventId?: string | null,
+) {
   const eventType = eventPayload.event;
   const paymentEntity = eventPayload.payload.payment?.entity;
   const orderEntity = eventPayload.payload.order?.entity;
@@ -249,8 +355,14 @@ export async function processRazorpayWebhook(eventPayload: {
     return { processed: false, reason: "Missing Razorpay order ID in webhook payload" };
   }
 
+  // Reliable deterministic event ID for true idempotency
+  const eventId =
+    headerEventId ||
+    eventPayload.id ||
+    eventPayload.event_id ||
+    `rzp_${eventType}_${razorpayPaymentId || razorpayOrderId}`;
+
   // Idempotency check: record event in payment_webhook_events
-  const eventId = `${eventType}_${razorpayPaymentId || razorpayOrderId}_${Date.now()}`;
   const { error: eventErr } = await supabaseAdmin.from("payment_webhook_events").insert({
     event_id: eventId,
     event_type: eventType,
@@ -260,7 +372,7 @@ export async function processRazorpayWebhook(eventPayload: {
   });
 
   if (eventErr && eventErr.code === "23505") {
-    // Duplicate webhook event already processed
+    // Duplicate webhook event already recorded
     return { processed: true, duplicate: true };
   }
 
@@ -268,11 +380,22 @@ export async function processRazorpayWebhook(eventPayload: {
     // Find matching order in Supabase
     const { data: order } = await supabaseAdmin
       .from("orders")
-      .select("id, payment_status")
+      .select("id, payment_status, total")
       .eq("razorpay_order_id", razorpayOrderId)
       .maybeSingle();
 
     if (order && order.payment_status !== "paid") {
+      // Amount verification if amount is present in webhook payload
+      if (paymentEntity?.amount) {
+        const expectedPaise = Math.round(order.total * 100);
+        if (paymentEntity.amount !== expectedPaise) {
+          console.error(
+            `[Webhook Amount Mismatch] Order total ${order.total} does not match payment ${paymentEntity.amount / 100}`,
+          );
+          return { processed: false, error: "Payment amount mismatch in webhook payload" };
+        }
+      }
+
       await supabaseAdmin
         .from("orders")
         .update({

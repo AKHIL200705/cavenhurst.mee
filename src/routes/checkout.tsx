@@ -154,12 +154,12 @@ function Checkout() {
         courier: res.courierPartner,
         estimatedDays: res.estimatedDays,
       });
-    } catch {
+    } catch (err) {
       setShippingInfo({
         checking: false,
-        serviceable: true,
-        courier: "ShipMaxx360 Express Network",
-        estimatedDays: 4,
+        serviceable: false,
+        message:
+          err instanceof Error ? err.message : "Could not verify serviceability with ShipMaxx360.",
       });
     }
   };
@@ -243,14 +243,13 @@ function Checkout() {
     setBusy(true);
 
     try {
-      // Step 1: Place Order through secure server function
+      // Step 1: Place Order through secure server function (derives customer identity from session)
       const orderRes = await placeOrderServerFn({
         data: {
           customer: f,
           cart,
           coupon,
           paymentMethod: paymentMode,
-          userId: user?.id || null,
         },
       });
 
@@ -269,14 +268,10 @@ function Checkout() {
 
       // Handle Online Payment (Razorpay)
       if (paymentMode === "online") {
-        if (!orderRes.razorpayConfigured || !orderRes.razorpayOrderId || !orderRes.keyId) {
-          // If Razorpay keys are not yet configured on the server, inform customer clearly
-          clear();
-          setOrderSuccess({
-            orderNumber: orderRes.orderNumber,
-            isCod: false,
-          });
-          toast.info("Order created in test mode. Awaiting Razorpay live credentials.");
+        if (!orderRes.razorpayOrderId || !orderRes.keyId) {
+          toast.error(
+            "Online payment gateway is temporarily unavailable. Please choose Cash on Delivery.",
+          );
           setBusy(false);
           return;
         }
@@ -309,7 +304,7 @@ function Checkout() {
           modal: {
             ondismiss: () => {
               setBusy(false);
-              toast.info("Payment cancelled. You can retry or choose Cash on Delivery.");
+              toast.info("Payment window closed. Your items remain in your cart.");
             },
           },
           handler: async (response: {
@@ -320,14 +315,13 @@ function Checkout() {
             try {
               toast.loading("Verifying payment security...", { id: "pay-verify" });
 
-              // Server-side cryptographic signature verification
+              // Server-side cryptographic signature & monetary verification
               const verifyRes = await verifyPaymentServerFn({
                 data: {
                   orderId: orderRes.orderId,
                   razorpayOrderId: response.razorpay_order_id,
                   razorpayPaymentId: response.razorpay_payment_id,
                   razorpaySignature: response.razorpay_signature,
-                  userId: user?.id || null,
                 },
               });
 
@@ -389,26 +383,19 @@ function Checkout() {
               value={f.name}
               onChange={setField("name")}
             />
-            <div className="flex rounded-md border border-input">
-              <span className="flex items-center border-r border-input px-3 py-3 text-sm text-silver">
-                🇮🇳 +91
-              </span>
-              <input
-                required
-                className="flex-1 bg-transparent px-3 text-sm outline-none"
-                inputMode="numeric"
-                placeholder="10-digit Mobile number *"
-                value={f.phone}
-                onChange={(e) =>
-                  setF({ ...f, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })
-                }
-              />
-            </div>
             <input
               required
-              className={cn(inputClass, "sm:col-span-2")}
+              type="tel"
+              className={inputClass}
+              placeholder="Mobile number (10 digits) *"
+              value={f.phone}
+              onChange={setField("phone")}
+            />
+            <input
+              required
               type="email"
-              placeholder="Email address (for order tracking and receipt) *"
+              className={cn(inputClass, "sm:col-span-2")}
+              placeholder="Email address for order receipt *"
               value={f.email}
               onChange={setField("email")}
             />
@@ -428,14 +415,14 @@ function Checkout() {
             <input
               required
               className={cn(inputClass, "sm:col-span-2")}
-              placeholder="House/Flat no., Building name, Street, Area *"
+              placeholder="House / Flat / Building / Street *"
               value={f.address}
               onChange={setField("address")}
             />
             <input
               required
               className={inputClass}
-              placeholder="City *"
+              placeholder="City / District *"
               value={f.city}
               onChange={setField("city")}
             />
@@ -455,9 +442,9 @@ function Checkout() {
             <div className="sm:col-span-2">
               <input
                 required
+                maxLength={6}
                 className={inputClass}
-                inputMode="numeric"
-                placeholder="6-digit PIN code *"
+                placeholder="PIN Code (6 digits) *"
                 value={f.pin}
                 onChange={setField("pin")}
               />
@@ -470,14 +457,16 @@ function Checkout() {
               {shippingInfo.serviceable === true && (
                 <p className="mt-2 flex items-center gap-2 text-xs font-semibold text-emerald-500">
                   <CheckCircle2 className="h-3.5 w-3.5" />
-                  Serviceable via {shippingInfo.courier || "ShipMaxx360"} · Estimated delivery in{" "}
-                  {shippingInfo.estimatedDays || 4} days
+                  Serviceable via {shippingInfo.courier || "ShipMaxx360"}
+                  {shippingInfo.estimatedDays
+                    ? ` · Estimated delivery in ${shippingInfo.estimatedDays} days`
+                    : ""}
                 </p>
               )}
               {shippingInfo.serviceable === false && (
                 <p className="mt-2 text-xs font-semibold text-rose-500">
                   {shippingInfo.message ||
-                    "This pincode could not be verified. Please check and try again."}
+                    "This delivery pincode is not serviceable by ShipMaxx360."}
                 </p>
               )}
             </div>
@@ -562,7 +551,7 @@ function Checkout() {
 
         <button
           type="submit"
-          disabled={busy}
+          disabled={busy || shippingInfo.serviceable === false}
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-primary py-3.5 font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
         >
           {busy ? (
@@ -578,12 +567,12 @@ function Checkout() {
 
         <p className="mt-4 text-center text-xs text-muted-foreground">
           By placing your order, you agree to our{" "}
-          <Link to="/terms" className="underline">
+          <Link to="/terms" className="underline hover:text-foreground">
             Terms
           </Link>{" "}
           and{" "}
-          <Link to="/shipping-returns" className="underline">
-            Shipping & Return Policy
+          <Link to="/privacy" className="underline hover:text-foreground">
+            Privacy Policy
           </Link>
           .
         </p>

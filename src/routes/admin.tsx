@@ -83,7 +83,7 @@ function AdminDashboard() {
       .maybeSingle()
       .then(({ data }) => {
         // If user is admin in user_roles or authenticated owner
-        const authorized = Boolean(data) || user.email === "admin@cavenhurst.in";
+        const authorized = Boolean(data);
         setIsAdmin(authorized);
         if (authorized) {
           void loadOrders(activeFilter, searchTerm);

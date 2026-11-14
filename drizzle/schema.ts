@@ -9,7 +9,7 @@ export const customerCarts = pgTable("customer_carts", {
 
 export const orders = pgTable("orders", {
   id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull(),
+  userId: uuid("user_id"),
   orderNumber: text("order_number").unique(),
   customerName: text("customer_name"),
   customerEmail: text("customer_email"),
@@ -155,13 +155,11 @@ export const shippingWebhookEvents = pgTable("shipping_webhook_events", {
 export const shippingSettings = pgTable("shipping_settings", {
   id: text("id").primaryKey().default("default"),
   pickupPincode: text("pickup_pincode").notNull().default("521212"),
-  pickupAddressName: text("pickup_address_name").notNull().default("CAVENHURST Dispatch Hub"),
-  pickupAddressLine1: text("pickup_address_line1")
-    .notNull()
-    .default("Plot No. 12, Industrial Area"),
-  pickupAddressCity: text("pickup_address_city").notNull().default("Gudivada"),
-  pickupAddressState: text("pickup_address_state").notNull().default("Andhra Pradesh"),
-  pickupPhone: text("pickup_phone").notNull().default("+919876543210"),
+  pickupAddressName: text("pickup_address_name").default("CAVENHURST Dispatch Hub"),
+  pickupAddressLine1: text("pickup_address_line1"),
+  pickupAddressCity: text("pickup_address_city"),
+  pickupAddressState: text("pickup_address_state"),
+  pickupPhone: text("pickup_phone"),
   defaultPackageWeightGrams: integer("default_package_weight_grams").notNull().default(500),
   packageType: text("package_type").notNull().default("One packed T-shirt"),
   codEnabled: boolean("cod_enabled").notNull().default(true),

@@ -3,7 +3,7 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { processRazorpayWebhook, verifyRazorpayWebhookSignature } from "./server/razorpay";
-import { processShipMaxxWebhook } from "./server/shipmaxx";
+import { processShipMaxxWebhook, verifyShipMaxxWebhookSignature } from "./server/shipmaxx";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -47,7 +47,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 }
 
 /**
- * Handles incoming webhooks for Razorpay and ShipMaxx360.
+ * Handles incoming webhooks for Razorpay and ShipMaxx360 with strict cryptographic authentication.
  */
 async function handleWebhookRoute(request: Request, url: URL): Promise<Response | null> {
   // 1. Razorpay Payment Webhook
@@ -55,20 +55,27 @@ async function handleWebhookRoute(request: Request, url: URL): Promise<Response 
     try {
       const rawBody = await request.text();
       const signature = request.headers.get("x-razorpay-signature");
+      const eventIdHeader = request.headers.get("x-razorpay-event-id");
 
-      // Verify webhook signature if webhook secret is configured
-      if (process.env["RAZORPAY_WEBHOOK_SECRET"]) {
-        if (!signature || !verifyRazorpayWebhookSignature(rawBody, signature)) {
-          console.error("[Razorpay Webhook] Invalid signature rejected.");
-          return new Response(JSON.stringify({ error: "Invalid webhook signature" }), {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
+      // Webhook authenticity verification: reject unsigned or invalid requests
+      if (!signature) {
+        console.error("[Razorpay Webhook] Rejected: Missing x-razorpay-signature header");
+        return new Response(JSON.stringify({ error: "Missing x-razorpay-signature header" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (!verifyRazorpayWebhookSignature(rawBody, signature)) {
+        console.error("[Razorpay Webhook] Rejected: Invalid cryptographic HMAC signature");
+        return new Response(JSON.stringify({ error: "Invalid webhook signature" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
       }
 
       const eventPayload = JSON.parse(rawBody);
-      await processRazorpayWebhook(eventPayload);
+      await processRazorpayWebhook(eventPayload, eventIdHeader);
 
       return new Response(JSON.stringify({ status: "success" }), {
         status: 200,
@@ -86,8 +93,40 @@ async function handleWebhookRoute(request: Request, url: URL): Promise<Response 
   // 2. ShipMaxx360 Shipping Webhook
   if (url.pathname === "/api/webhooks/shipmaxx360" && request.method === "POST") {
     try {
-      const payload = await request.json();
-      await processShipMaxxWebhook(payload);
+      const rawBody = await request.text();
+      const signatureHeader =
+        request.headers.get("x-shipmaxx-signature") ||
+        request.headers.get("x-signature") ||
+        request.headers.get("x-webhook-secret") ||
+        request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+      const eventIdHeader =
+        request.headers.get("x-shipmaxx-event-id") || request.headers.get("x-event-id");
+
+      // Webhook authenticity verification: reject unsigned or invalid requests
+      if (!signatureHeader) {
+        console.error("[ShipMaxx360 Webhook] Rejected: Missing authentication header");
+        return new Response(
+          JSON.stringify({ error: "Missing webhook authentication signature or token header" }),
+          {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      if (!verifyShipMaxxWebhookSignature(rawBody, signatureHeader)) {
+        console.error("[ShipMaxx360 Webhook] Rejected: Invalid signature or secret token");
+        return new Response(
+          JSON.stringify({ error: "Unauthorized: Invalid webhook signature or token" }),
+          {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      const payload = JSON.parse(rawBody);
+      await processShipMaxxWebhook(payload, eventIdHeader);
 
       return new Response(JSON.stringify({ status: "success" }), {
         status: 200,
@@ -110,14 +149,14 @@ export default {
     try {
       const url = new URL(request.url);
 
-      // Check for webhook endpoints first
+      // Webhook route interceptor (handles raw body extraction before framework parser)
       const webhookResponse = await handleWebhookRoute(request, url);
       if (webhookResponse) {
         return webhookResponse;
       }
 
-      const handler = await getServerEntry();
-      const response = await handler.fetch(request, env, ctx);
+      const entry = await getServerEntry();
+      const response = await entry.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);
     } catch (error) {
       console.error(error);

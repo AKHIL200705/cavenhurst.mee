@@ -1,6 +1,8 @@
 -- CAVENHURST – Razorpay + ShipMaxx360 Full Integration Schema
 
 -- 1. Extend orders table with explicit payment, fulfillment and ShipMaxx360 tracking columns
+ALTER TABLE public.orders ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE public.orders ALTER COLUMN user_id SET DEFAULT NULL;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS order_number text;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_name text;
 ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS customer_email text;
@@ -199,11 +201,11 @@ ALTER TABLE public.shipping_webhook_events ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS public.shipping_settings (
   id text PRIMARY KEY DEFAULT 'default',
   pickup_pincode text NOT NULL DEFAULT '521212',
-  pickup_address_name text NOT NULL DEFAULT 'CAVENHURST Dispatch Hub',
-  pickup_address_line1 text NOT NULL DEFAULT 'Plot No. 12, Industrial Area',
-  pickup_address_city text NOT NULL DEFAULT 'Gudivada',
-  pickup_address_state text NOT NULL DEFAULT 'Andhra Pradesh',
-  pickup_phone text NOT NULL DEFAULT '+919876543210',
+  pickup_address_name text DEFAULT 'CAVENHURST Dispatch Hub',
+  pickup_address_line1 text,
+  pickup_address_city text,
+  pickup_address_state text,
+  pickup_phone text,
   default_package_weight_grams integer NOT NULL DEFAULT 500,
   package_type text NOT NULL DEFAULT 'One packed T-shirt',
   cod_enabled boolean NOT NULL DEFAULT true,
@@ -223,3 +225,4 @@ CREATE POLICY "Anyone can view shipping settings" ON public.shipping_settings
 
 CREATE POLICY "Admins can update shipping settings" ON public.shipping_settings
   FOR UPDATE TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+

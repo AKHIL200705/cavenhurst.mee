@@ -182,7 +182,7 @@ export type Database = {
           tracking_data: Json;
           tracking_url: string | null;
           updated_at: string;
-          user_id: string;
+          user_id: string | null;
         };
         Insert: {
           awb_number?: string | null;
@@ -212,7 +212,7 @@ export type Database = {
           tracking_data?: Json;
           tracking_url?: string | null;
           updated_at?: string;
-          user_id: string;
+          user_id?: string | null;
         };
         Update: {
           awb_number?: string | null;
@@ -242,7 +242,7 @@ export type Database = {
           tracking_data?: Json;
           tracking_url?: string | null;
           updated_at?: string;
-          user_id?: string;
+          user_id?: string | null;
         };
         Relationships: [];
       };
@@ -549,11 +549,11 @@ export type Database = {
           default_package_weight_grams: number;
           id: string;
           package_type: string;
-          pickup_address_city: string;
-          pickup_address_line1: string;
-          pickup_address_name: string;
-          pickup_address_state: string;
-          pickup_phone: string;
+          pickup_address_city: string | null;
+          pickup_address_line1: string | null;
+          pickup_address_name: string | null;
+          pickup_address_state: string | null;
+          pickup_phone: string | null;
           pickup_pincode: string;
           updated_at: string;
         };
@@ -562,11 +562,11 @@ export type Database = {
           default_package_weight_grams?: number;
           id?: string;
           package_type?: string;
-          pickup_address_city?: string;
-          pickup_address_line1?: string;
-          pickup_address_name?: string;
-          pickup_address_state?: string;
-          pickup_phone?: string;
+          pickup_address_city?: string | null;
+          pickup_address_line1?: string | null;
+          pickup_address_name?: string | null;
+          pickup_address_state?: string | null;
+          pickup_phone?: string | null;
           pickup_pincode?: string;
           updated_at?: string;
         };
@@ -575,11 +575,11 @@ export type Database = {
           default_package_weight_grams?: number;
           id?: string;
           package_type?: string;
-          pickup_address_city?: string;
-          pickup_address_line1?: string;
-          pickup_address_name?: string;
-          pickup_address_state?: string;
-          pickup_phone?: string;
+          pickup_address_city?: string | null;
+          pickup_address_line1?: string | null;
+          pickup_address_name?: string | null;
+          pickup_address_state?: string | null;
+          pickup_phone?: string | null;
           pickup_pincode?: string;
           updated_at?: string;
         };

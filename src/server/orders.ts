@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProduct, type Size } from "@/lib/products";
 import { computeTotals } from "@/lib/pricing";
@@ -37,7 +38,55 @@ export interface PlaceOrderInput {
   cart: CheckoutCartItemInput[];
   coupon: string | null;
   paymentMethod: "online" | "cod";
-  userId?: string | null | undefined;
+}
+
+/**
+ * Derives authenticated customer identity strictly from the verified server session.
+ * Never trust or accept a client-supplied userId!
+ */
+export async function getServerSessionUser(): Promise<{
+  id: string;
+  email?: string | undefined;
+} | null> {
+  try {
+    const request = getRequest();
+    if (!request?.headers) return null;
+    const authHeader = request.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token || token.split(".").length !== 3) return null;
+
+    const {
+      data: { user },
+      error,
+    } = await supabaseAdmin.auth.getUser(token);
+    if (error || !user) return null;
+
+    return {
+      id: user.id,
+      email: user.email,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Checks if a user has administrator privileges in user_roles.
+ */
+export async function checkIsUserAdmin(userId: string): Promise<boolean> {
+  try {
+    const { data } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .eq("role", "admin")
+      .maybeSingle();
+    return Boolean(data);
+  } catch {
+    return false;
+  }
 }
 
 function generateOrderNumber(): string {
@@ -92,6 +141,7 @@ export function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: 
 
 /**
  * Server Function: Serviceability Check
+ * Checks prepaid and COD serviceability separately using official rules.
  */
 export const checkPincodeServiceabilityFn = createServerFn({ method: "POST" })
   .validator((data: { pincode: string; paymentMode?: "prepaid" | "cod" }) => data)
@@ -104,18 +154,20 @@ export const checkPincodeServiceabilityFn = createServerFn({ method: "POST" })
 
 /**
  * Server Function: Place Order & Initialize Payment / Shipment
+ * Derives authenticated customer from server session, secures guest checkout,
+ * checks serviceability, and prevents duplicate orders.
  */
 export const placeOrderServerFn = createServerFn({ method: "POST" })
   .validator((input: PlaceOrderInput) => input)
   .handler(async ({ data }) => {
-    const { customer, cart, coupon, paymentMethod, userId } = data;
+    const { customer, cart, coupon, paymentMethod } = data;
 
-    // 1. Validate inputs
-    if (!customer.name.trim() || customer.name.length < 2) {
+    // 1. Strict input validation
+    if (!customer.name.trim() || customer.name.trim().length < 2) {
       throw new Error("Please enter your full name.");
     }
     if (!/^[6-9]\d{9}$/.test(customer.phone.replace(/\D/g, ""))) {
-      throw new Error("Please enter a valid 10-digit mobile number.");
+      throw new Error("Please enter a valid 10-digit Indian mobile number.");
     }
     if (!/^\S+@\S+\.\S+$/.test(customer.email.trim())) {
       throw new Error("Please enter a valid email address.");
@@ -130,7 +182,11 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       throw new Error("Your shopping bag is empty.");
     }
 
-    // 2. Server-side price calculation
+    // 2. Derive verified user identity from server session (never trust browser!)
+    const authUser = await getServerSessionUser();
+    const verifiedUserId = authUser ? authUser.id : null;
+
+    // 3. Server-side price calculation
     const { subtotal, discount, shippingFee, total, itemsWithDetails } = calculateOrderTotals(
       cart,
       coupon,
@@ -139,13 +195,32 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       throw new Error("No valid products found in your order.");
     }
 
+    // 4. Verify logistics serviceability before creating order
+    const serviceCheck = await checkShipMaxxServiceability({
+      deliveryPincode: customer.pin.trim(),
+      paymentMode: paymentMethod === "cod" ? "cod" : "prepaid",
+    });
+
+    if (!serviceCheck.serviceable) {
+      throw new Error(
+        serviceCheck.message ||
+          "Delivery to this PIN code is currently unavailable. Please verify your address.",
+      );
+    }
+
+    if (paymentMethod === "cod" && !serviceCheck.codAvailable) {
+      throw new Error(
+        "Cash on Delivery (COD) is not available for this delivery PIN code. Please select Pay Online.",
+      );
+    }
+
     const orderNumber = generateOrderNumber();
 
-    // 3. Insert order into Supabase
+    // 5. Insert order into Supabase
     const { data: order, error: orderErr } = await supabaseAdmin
       .from("orders")
       .insert({
-        user_id: userId || "00000000-0000-0000-0000-000000000000",
+        user_id: verifiedUserId,
         order_number: orderNumber,
         customer_name: customer.name.trim(),
         customer_email: customer.email.trim(),
@@ -178,7 +253,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
 
     const orderId = order.id;
 
-    // 4. Insert line items into order_items
+    // 6. Insert line items into order_items
     const orderItemsToInsert = itemsWithDetails.map((item) => ({
       order_id: orderId,
       product_slug: item.slug,
@@ -191,10 +266,10 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
     }));
     await supabaseAdmin.from("order_items").insert(orderItemsToInsert);
 
-    // 5. Insert shipping address
+    // 7. Insert shipping address
     await supabaseAdmin.from("shipping_addresses").insert({
       order_id: orderId,
-      user_id: userId || null,
+      user_id: verifiedUserId,
       full_name: customer.name.trim(),
       phone: customer.phone.replace(/\D/g, ""),
       email: customer.email.trim(),
@@ -205,25 +280,18 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       country: "India",
     });
 
-    // 6. Handle Payment Method
+    // 8. Handle Payment Method
     if (paymentMethod === "online") {
       const razorpayKeyId = getRazorpayKeyId();
 
       // Check if Razorpay is configured
       if (!isRazorpayConfigured() || !razorpayKeyId) {
-        return {
-          success: true,
-          orderId,
-          orderNumber,
-          paymentMethod: "online" as const,
-          razorpayConfigured: false,
-          total,
-          message:
-            "Order created successfully. Online payment is currently in test mode or awaiting merchant API keys.",
-        };
+        throw new Error(
+          "Online payment is temporarily unavailable. Please select Cash on Delivery or contact store support.",
+        );
       }
 
-      // Create Razorpay Order
+      // Create Razorpay Order on Razorpay servers
       const rzpRes = await createRazorpayOrder({
         amountInPaise: total * 100,
         receipt: orderNumber,
@@ -235,21 +303,23 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       });
 
       if (!rzpRes.success || !rzpRes.order) {
-        throw new Error(rzpRes.error || "Failed to initialize Razorpay checkout.");
+        // Rollback pending order if Razorpay initialization fails
+        await supabaseAdmin.from("orders").delete().eq("id", orderId);
+        throw new Error(rzpRes.error || "Failed to initialize payment gateway checkout.");
       }
 
-      // Save Razorpay order ID to order and payments table
+      // Record Razorpay order ID
       await supabaseAdmin
         .from("orders")
         .update({
           razorpay_order_id: rzpRes.order.id,
-          payment_status: "processing",
+          payment_status: "pending",
         })
         .eq("id", orderId);
 
       await supabaseAdmin.from("payments").insert({
         order_id: orderId,
-        user_id: userId || null,
+        user_id: verifiedUserId,
         gateway: "razorpay",
         payment_method: "online",
         razorpay_order_id: rzpRes.order.id,
@@ -264,7 +334,6 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         orderId,
         orderNumber,
         paymentMethod: "online" as const,
-        razorpayConfigured: true,
         razorpayOrderId: rzpRes.order.id,
         amountInPaise: rzpRes.order.amount,
         currency: rzpRes.order.currency,
@@ -273,11 +342,11 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       };
     } else {
       // Cash on Delivery (COD)
-      // Immediately create shipment in ShipMaxx360
+      // Call ShipMaxx360 to register COD consignment
       const shipmentRes = await createShipMaxxShipment({
         orderId,
         orderNumber,
-        userId: userId || null,
+        userId: verifiedUserId,
         customerName: customer.name.trim(),
         customerPhone: customer.phone.replace(/\D/g, ""),
         customerEmail: customer.email.trim(),
@@ -307,12 +376,15 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         total,
         awbNumber: shipmentRes.awbNumber,
         courierPartner: shipmentRes.courierPartner,
+        shipmentSuccess: shipmentRes.success,
+        shipmentMessage: shipmentRes.error,
       };
     }
   });
 
 /**
  * Server Function: Verify Razorpay Payment and Dispatch ShipMaxx360 Shipment
+ * Cryptographically verifies payment, ensures captured status, and prevents duplicate processing.
  */
 export const verifyPaymentServerFn = createServerFn({ method: "POST" })
   .validator(
@@ -321,28 +393,31 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
       razorpayOrderId: string;
       razorpayPaymentId: string;
       razorpaySignature: string;
-      userId?: string | null | undefined;
     }) => input,
   )
   .handler(async ({ data }) => {
-    // 1. Verify Razorpay cryptographic signature and mark order paid
+    // 1. Derive verified user from session
+    const authUser = await getServerSessionUser();
+    const verifiedUserId = authUser ? authUser.id : null;
+
+    // 2. Verify Razorpay cryptographic signature, amount, currency, and mark order paid
     const verification = await confirmVerifiedPayment({
       orderId: data.orderId,
       razorpayOrderId: data.razorpayOrderId,
       razorpayPaymentId: data.razorpayPaymentId,
       razorpaySignature: data.razorpaySignature,
-      userId: data.userId ?? null,
+      userId: verifiedUserId,
     });
 
     if (!verification.success) {
       throw new Error(verification.error || "Payment verification failed.");
     }
 
-    // 2. Fetch full order and customer address to create ShipMaxx360 shipment
+    // 3. Fetch order details to create prepaid shipment via ShipMaxx360
     const { data: order } = await supabaseAdmin
       .from("orders")
       .select(
-        "id, order_number, customer_name, customer_email, customer_phone, items, total, shipping",
+        "id, order_number, customer_name, customer_email, customer_phone, items, total, shipping, user_id",
       )
       .eq("id", data.orderId)
       .single();
@@ -365,11 +440,11 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
           price: number;
         }>) || [];
 
-      // Automatically create prepaid shipment via ShipMaxx360
+      // Automatically book prepaid consignment with ShipMaxx360
       await createShipMaxxShipment({
         orderId: order.id,
         orderNumber: order.order_number || `CVH-${order.id.slice(0, 8)}`,
-        userId: data.userId ?? null,
+        userId: order.user_id || verifiedUserId,
         customerName: order.customer_name || "Valued Customer",
         customerPhone: order.customer_phone || "",
         customerEmail: order.customer_email || "",
@@ -401,10 +476,22 @@ export const trackOrderServerFn = createServerFn({ method: "POST" })
 
 /**
  * Server Function: Admin Orders List with Filters
+ * Protected: Requires authenticated administrator session!
  */
 export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
   .validator((params?: { filter?: string; search?: string }) => params || {})
   .handler(async ({ data }) => {
+    // Authenticate and authorize admin
+    const authUser = await getServerSessionUser();
+    if (!authUser) {
+      throw new Error("Unauthorized: Admin authentication required.");
+    }
+
+    const isAdmin = await checkIsUserAdmin(authUser.id);
+    if (!isAdmin) {
+      throw new Error("Forbidden: Access restricted to CAVENHURST administrators.");
+    }
+
     let query = supabaseAdmin
       .from("orders")
       .select(
