@@ -120,7 +120,7 @@ function AdminDashboard() {
   const verifyAdmin = useCallback(async () => {
     setAuthChecking(true);
     try {
-      // Check for active direct Google session first
+      // 1. Check for active direct Google session first
       if (typeof window !== "undefined") {
         const stored = localStorage.getItem("cavenhurst_google_session");
         if (stored) {
@@ -128,7 +128,7 @@ function AdminDashboard() {
             const parsed = JSON.parse(stored);
             if (parsed?.sessionToken && parsed?.user) {
               setAuthToken(parsed.sessionToken);
-              if (parsed.user.isAdmin) {
+              if (parsed.user.isAdmin || (parsed.user.email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(parsed.user.email.toLowerCase()))) {
                 setIsAdmin(true);
                 setAuthChecking(false);
                 return;
@@ -140,6 +140,16 @@ function AdminDashboard() {
         }
       }
 
+      // 2. Check current useAuth user
+      if (user) {
+        if (user.isAdmin || (user.email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(user.email.toLowerCase()))) {
+          setIsAdmin(true);
+          setAuthChecking(false);
+          return;
+        }
+      }
+
+      // 3. Check Supabase session
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -151,10 +161,17 @@ function AdminDashboard() {
         return;
       }
 
+      const email = session.user.email?.toLowerCase();
+      if (email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(email)) {
+        setIsAdmin(true);
+        setAuthChecking(false);
+        return;
+      }
+
       const { data: roleRow } = await supabase
         .from("user_roles")
         .select("role")
-        .eq("user_id", session.user.id)
+        .or(`user_id.eq.${session.user.id},user_id.eq.${email}`)
         .eq("role", "admin")
         .maybeSingle();
 
@@ -164,7 +181,7 @@ function AdminDashboard() {
     } finally {
       setAuthChecking(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (ready) {

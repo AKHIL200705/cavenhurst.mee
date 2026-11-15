@@ -68,10 +68,17 @@ async function verifyAdminSession(providedToken?: string | undefined): Promise<A
     } = await supabaseAdmin.auth.getUser(token);
 
     if (!error && user) {
+      if (user.email && isWhitelistedAdminEmail(user.email)) {
+        return {
+          userId: user.id,
+          email: user.email,
+        };
+      }
+
       const { data: roleRow, error: roleError } = await supabaseAdmin
         .from("user_roles")
         .select("role")
-        .eq("user_id", user.id)
+        .or(`user_id.eq.${user.id},user_id.eq.${user.email?.toLowerCase()}`)
         .eq("role", "admin")
         .maybeSingle();
 

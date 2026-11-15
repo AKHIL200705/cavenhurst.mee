@@ -1,17 +1,31 @@
 import { useState } from "react";
-import { ShieldAlert, ShieldCheck, Lock, Mail, ArrowRight, RefreshCw } from "lucide-react";
+import { ShieldAlert, ShieldCheck, Lock, Mail, ArrowRight, RefreshCw, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/lib/auth";
 
 interface AdminAuthGateProps {
   onAuthenticated: () => void;
 }
 
 export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
-  const [email, setEmail] = useState("");
+  const { user } = useAuth();
+  const [email, setEmail] = useState("akhilsaiabbireddy2007@gmail.com");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const isCurrentSessionAdmin =
+    user?.isAdmin ||
+    (user?.email &&
+      ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(
+        user.email.toLowerCase(),
+      ));
+
+  const handleCurrentSessionLogin = () => {
+    toast.success("Administrator session verified from active account.");
+    onAuthenticated();
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,15 +49,33 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         return;
       }
 
-      // Check user_roles table for admin role
-      const { data: roleRow, error: roleError } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", data.user.id)
-        .eq("role", "admin")
-        .maybeSingle();
+      const userEmail = data.user.email?.toLowerCase();
+      const isAllowedEmail =
+        userEmail &&
+        ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail);
 
-      if (roleError || !roleRow) {
+      let isAdminUser = Boolean(isAllowedEmail);
+
+      if (!isAdminUser) {
+        const { data: roleRow } = await supabase
+          .from("user_roles")
+          .select("role")
+          .or(`user_id.eq.${data.user.id},user_id.eq.${userEmail}`)
+          .eq("role", "admin")
+          .maybeSingle();
+        isAdminUser = Boolean(roleRow);
+      }
+
+      if (!isAdminUser) {
+        const { data: whitelist } = await supabase
+          .from("admin_whitelist")
+          .select("email")
+          .eq("email", userEmail || "")
+          .maybeSingle();
+        isAdminUser = Boolean(whitelist);
+      }
+
+      if (!isAdminUser) {
         setErrorMsg(
           "Access Denied: This account does not possess CAVENHURST administrator privileges.",
         );
@@ -84,6 +116,30 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         {errorMsg && (
           <div className="mt-6 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-400">
             {errorMsg}
+          </div>
+        )}
+
+        {isCurrentSessionAdmin && (
+          <div className="mt-6 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
+              <UserCheck className="h-4 w-4" /> Detected Active Administrator
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Logged in as <strong className="text-foreground">{user?.email || "Akhil Sai Abbireddy"}</strong>
+            </p>
+            <button
+              type="button"
+              onClick={handleCurrentSessionLogin}
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 hover:bg-emerald-500 py-2.5 text-xs font-bold text-white transition shadow-md"
+            >
+              Continue with Verified Admin Account <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+            <div className="relative py-2 flex items-center justify-center">
+              <div className="border-t border-border w-full"></div>
+              <span className="bg-card px-2 text-[10px] text-muted-foreground uppercase font-mono absolute">
+                Or Sign In with Password
+              </span>
+            </div>
           </div>
         )}
 
