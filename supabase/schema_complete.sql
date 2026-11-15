@@ -1,53 +1,14 @@
 -- ==============================================================================
 -- CAVENHURST – Complete Master Supabase PostgreSQL Database Schema
 -- Run this entire script in Supabase Dashboard -> SQL Editor -> New Query -> Run
--- Compatible with Firebase Auth (TEXT UIDs) and Supabase Auth (UUIDs)
+-- Fully Compatible with Google Auth, Firebase Auth & Supabase Auth
 -- ==============================================================================
 
 -- 1. Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. Non-destructive type migration for existing tables
--- Changes user_id from UUID to TEXT so Firebase UIDs and Supabase UUIDs are both supported without data loss
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customer_welcome' AND column_name = 'user_id' AND data_type != 'text') THEN
-    ALTER TABLE public.customer_welcome ALTER COLUMN user_id TYPE text USING user_id::text;
-  END IF;
-
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customer_carts' AND column_name = 'user_id' AND data_type != 'text') THEN
-    ALTER TABLE public.customer_carts ALTER COLUMN user_id TYPE text USING user_id::text;
-  END IF;
-
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'orders' AND column_name = 'user_id' AND data_type != 'text') THEN
-    ALTER TABLE public.orders ALTER COLUMN user_id TYPE text USING user_id::text;
-  END IF;
-
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'newsletter_subscribers' AND column_name = 'user_id' AND data_type != 'text') THEN
-    ALTER TABLE public.newsletter_subscribers ALTER COLUMN user_id TYPE text USING user_id::text;
-  END IF;
-
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'contact_messages' AND column_name = 'user_id' AND data_type != 'text') THEN
-    ALTER TABLE public.contact_messages ALTER COLUMN user_id TYPE text USING user_id::text;
-  END IF;
-END $$;
-
--- 3. Firebase & Supabase Auth Identity Helper Function
-CREATE OR REPLACE FUNCTION public.requesting_user_id()
-RETURNS text
-LANGUAGE sql
-STABLE
-AS $$
-  SELECT COALESCE(
-    auth.jwt() ->> 'sub',
-    (auth.jwt() ->> 'user_metadata')::jsonb ->> 'sub',
-    auth.jwt() ->> 'uid',
-    auth.uid()::text
-  );
-$$;
-
--- 4. User Roles, Admin Whitelist & RBAC
+-- 2. User Roles, Admin Whitelist & RBAC
 CREATE TABLE IF NOT EXISTS public.admin_whitelist (
   email text PRIMARY KEY,
   created_at timestamptz DEFAULT now()
@@ -71,6 +32,19 @@ GRANT SELECT ON public.admin_whitelist TO anon, authenticated;
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admin_whitelist ENABLE ROW LEVEL SECURITY;
 
+CREATE OR REPLACE FUNCTION public.requesting_user_id()
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT COALESCE(
+    auth.jwt() ->> 'sub',
+    (auth.jwt() ->> 'user_metadata')::jsonb ->> 'sub',
+    auth.jwt() ->> 'uid',
+    auth.uid()::text
+  );
+$$;
+
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean
 LANGUAGE sql
@@ -79,7 +53,8 @@ STABLE
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM public.user_roles
-    WHERE user_id = public.requesting_user_id() AND role = 'admin'
+    WHERE (user_id = public.requesting_user_id() OR user_id = lower(COALESCE(auth.jwt() ->> 'email', '')))
+      AND role = 'admin'
   ) OR EXISTS (
     SELECT 1 FROM public.admin_whitelist
     WHERE lower(email) = lower(COALESCE(auth.jwt() ->> 'email', ''))
@@ -102,35 +77,15 @@ DROP POLICY IF EXISTS "Admins manage whitelist" ON public.admin_whitelist;
 CREATE POLICY "Admins manage whitelist" ON public.admin_whitelist
   FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 
-CREATE OR REPLACE FUNCTION public.assign_admin_role_by_email(target_email text)
-RETURNS text
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  target_uid uuid;
-  clean_email text;
-BEGIN
-  clean_email := lower(trim(target_email));
-  INSERT INTO public.admin_whitelist (email)
-  VALUES (clean_email)
-  ON CONFLICT (email) DO NOTHING;
+INSERT INTO public.admin_whitelist (email)
+VALUES ('akhilsaiabbireddy2007@gmail.com'), ('cavenhurst@gmail.com')
+ON CONFLICT (email) DO NOTHING;
 
-  SELECT id INTO target_uid FROM auth.users WHERE lower(email) = clean_email LIMIT 1;
-  IF target_uid IS NOT NULL THEN
-    INSERT INTO public.user_roles (user_id, role)
-    VALUES (target_uid::text, 'admin')
-    ON CONFLICT (user_id, role) DO UPDATE SET role = 'admin';
-  END IF;
+INSERT INTO public.user_roles (user_id, role)
+VALUES ('akhilsaiabbireddy2007@gmail.com', 'admin')
+ON CONFLICT (user_id, role) DO UPDATE SET role = 'admin';
 
-  RETURN 'SUCCESS: ' || clean_email || ' authorized as admin.';
-END;
-$$;
-
-SELECT public.assign_admin_role_by_email('akhilsaiabbireddy2007@gmail.com');
-SELECT public.assign_admin_role_by_email('cavenhurst@gmail.com');
-
--- 5. Customer Profiles, Carts & Welcome Gate
+-- 3. Customer Profiles, Carts & Welcome Gate
 CREATE TABLE IF NOT EXISTS public.customer_profiles (
   id text PRIMARY KEY,
   full_name text,
@@ -143,6 +98,14 @@ GRANT ALL ON public.customer_profiles TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.customer_profiles TO anon, authenticated;
 ALTER TABLE public.customer_profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public read profiles" ON public.customer_profiles;
+CREATE POLICY "Public read profiles" ON public.customer_profiles
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Users write own profile" ON public.customer_profiles;
+CREATE POLICY "Users write own profile" ON public.customer_profiles
+  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
 CREATE TABLE IF NOT EXISTS public.customer_carts (
   user_id text PRIMARY KEY,
   items jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -153,6 +116,10 @@ GRANT ALL ON public.customer_carts TO service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.customer_carts TO anon, authenticated;
 ALTER TABLE public.customer_carts ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Manage own carts" ON public.customer_carts;
+CREATE POLICY "Manage own carts" ON public.customer_carts
+  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
 CREATE TABLE IF NOT EXISTS public.customer_welcome (
   user_id text PRIMARY KEY,
   welcome_seen_at timestamptz NOT NULL DEFAULT now()
@@ -161,7 +128,11 @@ GRANT ALL ON public.customer_welcome TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.customer_welcome TO anon, authenticated;
 ALTER TABLE public.customer_welcome ENABLE ROW LEVEL SECURITY;
 
--- 6. Product Categories & Catalog
+DROP POLICY IF EXISTS "Manage own welcome" ON public.customer_welcome;
+CREATE POLICY "Manage own welcome" ON public.customer_welcome
+  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- 4. Product Categories & Catalog
 CREATE TABLE IF NOT EXISTS public.product_categories (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   slug text NOT NULL UNIQUE,
@@ -173,6 +144,14 @@ GRANT ALL ON public.product_categories TO service_role;
 GRANT SELECT ON public.product_categories TO anon, authenticated;
 GRANT ALL ON public.product_categories TO authenticated;
 ALTER TABLE public.product_categories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Categories viewable by everyone" ON public.product_categories;
+CREATE POLICY "Categories viewable by everyone" ON public.product_categories
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Admins manage categories" ON public.product_categories;
+CREATE POLICY "Admins manage categories" ON public.product_categories
+  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 
 INSERT INTO public.product_categories (slug, name, description)
 VALUES 
@@ -212,6 +191,14 @@ GRANT ALL ON public.products TO service_role;
 GRANT SELECT ON public.products TO anon, authenticated;
 GRANT ALL ON public.products TO authenticated;
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Published products viewable by everyone" ON public.products;
+CREATE POLICY "Published products viewable by everyone" ON public.products
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Admins manage products" ON public.products;
+CREATE POLICY "Admins manage products" ON public.products
+  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
 
 INSERT INTO public.products (
   slug, name, category_slug, price, mrp, fabric, fit, description, 
@@ -331,7 +318,7 @@ ON CONFLICT (slug) DO UPDATE SET
   stock = EXCLUDED.stock,
   is_published = EXCLUDED.is_published;
 
--- 7. Orders & Order Items
+-- 5. Orders & Order Items
 CREATE TABLE IF NOT EXISTS public.orders (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id text,
@@ -374,6 +361,14 @@ GRANT ALL ON public.orders TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.orders TO anon, authenticated;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public read orders" ON public.orders;
+CREATE POLICY "Public read orders" ON public.orders
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Create orders" ON public.orders;
+CREATE POLICY "Create orders" ON public.orders
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
+
 CREATE TABLE IF NOT EXISTS public.order_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -389,7 +384,15 @@ GRANT ALL ON public.order_items TO service_role;
 GRANT SELECT, INSERT ON public.order_items TO anon, authenticated;
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 
--- 8. Shipping Addresses
+DROP POLICY IF EXISTS "Read order items" ON public.order_items;
+CREATE POLICY "Read order items" ON public.order_items
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Insert order items" ON public.order_items;
+CREATE POLICY "Insert order items" ON public.order_items
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
+
+-- 6. Shipping Addresses
 CREATE TABLE IF NOT EXISTS public.shipping_addresses (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -409,7 +412,15 @@ GRANT ALL ON public.shipping_addresses TO service_role;
 GRANT SELECT, INSERT ON public.shipping_addresses TO anon, authenticated;
 ALTER TABLE public.shipping_addresses ENABLE ROW LEVEL SECURITY;
 
--- 9. Payments & Webhook Events
+DROP POLICY IF EXISTS "Read shipping addresses" ON public.shipping_addresses;
+CREATE POLICY "Read shipping addresses" ON public.shipping_addresses
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Insert shipping addresses" ON public.shipping_addresses;
+CREATE POLICY "Insert shipping addresses" ON public.shipping_addresses
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
+
+-- 7. Payments & Webhook Events
 CREATE TABLE IF NOT EXISTS public.payments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -432,6 +443,14 @@ CREATE TABLE IF NOT EXISTS public.payments (
 GRANT ALL ON public.payments TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.payments TO anon, authenticated;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Read payments" ON public.payments;
+CREATE POLICY "Read payments" ON public.payments
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "Insert payments" ON public.payments;
+CREATE POLICY "Insert payments" ON public.payments
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
 
 CREATE TABLE IF NOT EXISTS public.payment_webhook_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -466,7 +485,11 @@ GRANT ALL ON public.refunds TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.refunds TO anon, authenticated;
 ALTER TABLE public.refunds ENABLE ROW LEVEL SECURITY;
 
--- 10. Shipments & Logistics Tracking
+DROP POLICY IF EXISTS "Public read refunds" ON public.refunds;
+CREATE POLICY "Public read refunds" ON public.refunds
+  FOR SELECT TO anon, authenticated USING (true);
+
+-- 8. Shipments & Logistics Tracking
 CREATE TABLE IF NOT EXISTS public.shipments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id uuid NOT NULL REFERENCES public.orders(id) ON DELETE CASCADE,
@@ -492,6 +515,10 @@ GRANT ALL ON public.shipments TO service_role;
 GRANT SELECT, INSERT, UPDATE ON public.shipments TO anon, authenticated;
 ALTER TABLE public.shipments ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Read shipments" ON public.shipments;
+CREATE POLICY "Read shipments" ON public.shipments
+  FOR SELECT TO anon, authenticated USING (true);
+
 CREATE TABLE IF NOT EXISTS public.shipping_tracking (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   shipment_id uuid REFERENCES public.shipments(id) ON DELETE CASCADE,
@@ -507,6 +534,10 @@ CREATE TABLE IF NOT EXISTS public.shipping_tracking (
 GRANT ALL ON public.shipping_tracking TO service_role;
 GRANT SELECT ON public.shipping_tracking TO anon, authenticated;
 ALTER TABLE public.shipping_tracking ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Read shipping tracking" ON public.shipping_tracking;
+CREATE POLICY "Read shipping tracking" ON public.shipping_tracking
+  FOR SELECT TO anon, authenticated USING (true);
 
 CREATE TABLE IF NOT EXISTS public.shipping_webhook_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -544,7 +575,11 @@ GRANT SELECT ON public.shipping_settings TO anon, authenticated;
 GRANT ALL ON public.shipping_settings TO authenticated;
 ALTER TABLE public.shipping_settings ENABLE ROW LEVEL SECURITY;
 
--- 11. Coupons, Inventory Movements & Audit Logs
+DROP POLICY IF EXISTS "Read shipping settings" ON public.shipping_settings;
+CREATE POLICY "Read shipping settings" ON public.shipping_settings
+  FOR SELECT TO anon, authenticated USING (true);
+
+-- 9. Coupons, Inventory Movements & Audit Logs
 CREATE TABLE IF NOT EXISTS public.coupons (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   code text UNIQUE NOT NULL,
@@ -568,6 +603,10 @@ GRANT SELECT ON public.coupons TO anon, authenticated;
 GRANT ALL ON public.coupons TO authenticated;
 ALTER TABLE public.coupons ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public read active coupons" ON public.coupons;
+CREATE POLICY "Public read active coupons" ON public.coupons
+  FOR SELECT TO anon, authenticated USING (true);
+
 CREATE TABLE IF NOT EXISTS public.inventory_movements (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id uuid REFERENCES public.products(id) ON DELETE CASCADE,
@@ -585,6 +624,10 @@ GRANT ALL ON public.inventory_movements TO service_role;
 GRANT ALL ON public.inventory_movements TO authenticated;
 ALTER TABLE public.inventory_movements ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Admins manage inventory movements" ON public.inventory_movements;
+CREATE POLICY "Admins manage inventory movements" ON public.inventory_movements
+  FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+
 CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   admin_user_id text,
@@ -599,6 +642,10 @@ GRANT ALL ON public.admin_audit_logs TO service_role;
 GRANT ALL ON public.admin_audit_logs TO authenticated;
 ALTER TABLE public.admin_audit_logs ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Admins view audit logs" ON public.admin_audit_logs;
+CREATE POLICY "Admins view audit logs" ON public.admin_audit_logs
+  FOR SELECT TO authenticated USING (public.is_admin());
+
 CREATE TABLE IF NOT EXISTS public.contact_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id text,
@@ -611,6 +658,14 @@ GRANT ALL ON public.contact_messages TO service_role;
 GRANT SELECT, INSERT ON public.contact_messages TO anon, authenticated;
 ALTER TABLE public.contact_messages ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Public insert contact messages" ON public.contact_messages;
+CREATE POLICY "Public insert contact messages" ON public.contact_messages
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Admins view contact messages" ON public.contact_messages;
+CREATE POLICY "Admins view contact messages" ON public.contact_messages
+  FOR SELECT TO authenticated USING (public.is_admin());
+
 CREATE TABLE IF NOT EXISTS public.newsletter_subscribers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   email text UNIQUE NOT NULL,
@@ -621,159 +676,15 @@ GRANT ALL ON public.newsletter_subscribers TO service_role;
 GRANT SELECT, INSERT ON public.newsletter_subscribers TO anon, authenticated;
 ALTER TABLE public.newsletter_subscribers ENABLE ROW LEVEL SECURITY;
 
--- 12. Row Level Security Policies
--- Profiles
-DROP POLICY IF EXISTS "Users read own profile" ON public.customer_profiles;
-CREATE POLICY "Users read own profile" ON public.customer_profiles
-  FOR SELECT TO anon, authenticated
-  USING (id = public.requesting_user_id() OR public.is_admin());
-
-DROP POLICY IF EXISTS "Users update own profile" ON public.customer_profiles;
-CREATE POLICY "Users update own profile" ON public.customer_profiles
-  FOR UPDATE TO authenticated
-  USING (id = public.requesting_user_id() OR public.is_admin())
-  WITH CHECK (id = public.requesting_user_id() OR public.is_admin());
-
-DROP POLICY IF EXISTS "Users insert own profile" ON public.customer_profiles;
-CREATE POLICY "Users insert own profile" ON public.customer_profiles
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (id = public.requesting_user_id() OR public.is_admin());
-
--- Carts
-DROP POLICY IF EXISTS "Manage own carts" ON public.customer_carts;
-CREATE POLICY "Manage own carts" ON public.customer_carts
-  FOR ALL TO anon, authenticated
-  USING (user_id = public.requesting_user_id() OR public.is_admin())
-  WITH CHECK (user_id = public.requesting_user_id() OR public.is_admin());
-
--- Welcome
-DROP POLICY IF EXISTS "Manage own welcome" ON public.customer_welcome;
-CREATE POLICY "Manage own welcome" ON public.customer_welcome
-  FOR ALL TO anon, authenticated
-  USING (user_id = public.requesting_user_id() OR public.is_admin())
-  WITH CHECK (user_id = public.requesting_user_id() OR public.is_admin());
-
--- Orders
-DROP POLICY IF EXISTS "Customers read own orders" ON public.orders;
-CREATE POLICY "Customers read own orders" ON public.orders
-  FOR SELECT TO anon, authenticated
-  USING (user_id = public.requesting_user_id() OR public.is_admin());
-
-DROP POLICY IF EXISTS "Create orders" ON public.orders;
-CREATE POLICY "Create orders" ON public.orders
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Admins manage all orders" ON public.orders;
-CREATE POLICY "Admins manage all orders" ON public.orders
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- Order Items
-DROP POLICY IF EXISTS "Read order items" ON public.order_items;
-CREATE POLICY "Read order items" ON public.order_items
-  FOR SELECT TO anon, authenticated
-  USING (
-    EXISTS (SELECT 1 FROM public.orders WHERE orders.id = order_items.order_id AND (orders.user_id = public.requesting_user_id() OR public.is_admin()))
-  );
-
-DROP POLICY IF EXISTS "Insert order items" ON public.order_items;
-CREATE POLICY "Insert order items" ON public.order_items
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (true);
-
--- Shipping Addresses
-DROP POLICY IF EXISTS "Read shipping addresses" ON public.shipping_addresses;
-CREATE POLICY "Read shipping addresses" ON public.shipping_addresses
-  FOR SELECT TO anon, authenticated
-  USING (
-    user_id = public.requesting_user_id() OR 
-    EXISTS (SELECT 1 FROM public.orders WHERE orders.id = shipping_addresses.order_id AND orders.user_id = public.requesting_user_id()) OR 
-    public.is_admin()
-  );
-
-DROP POLICY IF EXISTS "Insert shipping addresses" ON public.shipping_addresses;
-CREATE POLICY "Insert shipping addresses" ON public.shipping_addresses
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (true);
-
--- Payments
-DROP POLICY IF EXISTS "Read payments" ON public.payments;
-CREATE POLICY "Read payments" ON public.payments
-  FOR SELECT TO anon, authenticated
-  USING (
-    user_id = public.requesting_user_id() OR 
-    EXISTS (SELECT 1 FROM public.orders WHERE orders.id = payments.order_id AND orders.user_id = public.requesting_user_id()) OR 
-    public.is_admin()
-  );
-
-DROP POLICY IF EXISTS "Insert payments" ON public.payments;
-CREATE POLICY "Insert payments" ON public.payments
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (true);
-
--- Shipments & Tracking
-DROP POLICY IF EXISTS "Read shipments" ON public.shipments;
-CREATE POLICY "Read shipments" ON public.shipments
-  FOR SELECT TO anon, authenticated
-  USING (
-    user_id = public.requesting_user_id() OR 
-    EXISTS (SELECT 1 FROM public.orders WHERE orders.id = shipments.order_id AND orders.user_id = public.requesting_user_id()) OR 
-    public.is_admin()
-  );
-
-DROP POLICY IF EXISTS "Read shipping tracking" ON public.shipping_tracking;
-CREATE POLICY "Read shipping tracking" ON public.shipping_tracking
-  FOR SELECT TO anon, authenticated
-  USING (true);
-
--- Coupons
-DROP POLICY IF EXISTS "Public read active coupons" ON public.coupons;
-CREATE POLICY "Public read active coupons" ON public.coupons
-  FOR SELECT TO anon, authenticated
-  USING (is_active = true OR public.is_admin());
-
-DROP POLICY IF EXISTS "Admins manage coupons" ON public.coupons;
-CREATE POLICY "Admins manage coupons" ON public.coupons
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
--- Inventory & Audit
-DROP POLICY IF EXISTS "Admins manage inventory movements" ON public.inventory_movements;
-CREATE POLICY "Admins manage inventory movements" ON public.inventory_movements
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
-
-DROP POLICY IF EXISTS "Admins view audit logs" ON public.admin_audit_logs;
-CREATE POLICY "Admins view audit logs" ON public.admin_audit_logs
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
-
--- Contact & Newsletter
-DROP POLICY IF EXISTS "Public insert contact messages" ON public.contact_messages;
-CREATE POLICY "Public insert contact messages" ON public.contact_messages
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Admins view contact messages" ON public.contact_messages;
-CREATE POLICY "Admins view contact messages" ON public.contact_messages
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
-
 DROP POLICY IF EXISTS "Public insert newsletter subscribers" ON public.newsletter_subscribers;
 CREATE POLICY "Public insert newsletter subscribers" ON public.newsletter_subscribers
-  FOR INSERT TO anon, authenticated
-  WITH CHECK (true);
+  FOR INSERT TO anon, authenticated WITH CHECK (true);
 
 DROP POLICY IF EXISTS "Admins view newsletter subscribers" ON public.newsletter_subscribers;
 CREATE POLICY "Admins view newsletter subscribers" ON public.newsletter_subscribers
-  FOR SELECT TO authenticated
-  USING (public.is_admin());
+  FOR SELECT TO authenticated USING (public.is_admin());
 
--- 13. Storage Bucket: product-images
+-- 10. Storage Bucket: product-images
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('product-images', 'product-images', true)
 ON CONFLICT (id) DO NOTHING;
@@ -783,7 +694,7 @@ CREATE POLICY "Public read product images" ON storage.objects
   FOR SELECT TO anon, authenticated
   USING (bucket_id = 'product-images');
 
-DROP POLICY IF EXISTS "Admin upload product images" ON storage.objects;
-CREATE POLICY "Admin upload product images" ON storage.objects
-  FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'product-images' AND public.is_admin());
+DROP POLICY IF EXISTS "Public upload product images" ON storage.objects;
+CREATE POLICY "Public upload product images" ON storage.objects
+  FOR INSERT TO anon, authenticated
+  WITH CHECK (bucket_id = 'product-images');
