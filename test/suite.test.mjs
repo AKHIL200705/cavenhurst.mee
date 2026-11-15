@@ -318,3 +318,208 @@ test("Google Auth: Cryptographic session token signing and verification", () => 
   const expired = testSignSessionToken(user, secret, -10);
   assert.equal(testVerifySessionToken(expired, secret), null);
 });
+
+// ==============================================================================
+// 6. MSG91 SMS OTP & SUPABASE SEND SMS AUTH HOOK TESTS
+// ==============================================================================
+function normalizeIndianPhone(input) {
+  const digits = input.replace(/\D/g, "");
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return `91${digits}`;
+  }
+  if (digits.length === 12 && digits.startsWith("91") && /^91[6-9]/.test(digits)) {
+    return digits;
+  }
+  return digits;
+}
+
+function isValidIndianMobile(normalizedPhone) {
+  return /^91[6-9]\d{9}$/.test(normalizedPhone);
+}
+
+function testVerifySupabaseHookSignature(body, headers, configuredSecret) {
+  if (!configuredSecret) return true;
+
+  const authHeader = headers["authorization"]?.replace(/^Bearer\s+/i, "").trim();
+  const webhookSecretHeader = headers["x-webhook-secret"]?.trim();
+
+  if (authHeader && authHeader === configuredSecret) return true;
+  if (webhookSecretHeader && webhookSecretHeader === configuredSecret) return true;
+
+  const id = headers["webhook-id"] || headers["x-webhook-id"];
+  const ts = headers["webhook-timestamp"] || headers["x-webhook-timestamp"];
+  const sigHeader =
+    headers["webhook-signature"] ||
+    headers["x-webhook-signature"] ||
+    headers["x-supabase-signature"];
+
+  if (!sigHeader) return false;
+
+  const rawSecret = configuredSecret.startsWith("whsec_")
+    ? configuredSecret.slice(6)
+    : configuredSecret.startsWith("v1,whsec_")
+      ? configuredSecret.slice(9)
+      : configuredSecret;
+
+  let key;
+  try {
+    key = Buffer.from(rawSecret, "base64");
+    if (key.length === 0) key = Buffer.from(rawSecret, "utf8");
+  } catch {
+    key = Buffer.from(rawSecret, "utf8");
+  }
+
+  const toSign = id && ts ? `${id}.${ts}.${body}` : body;
+  const computed = createHmac("sha256", key).update(toSign).digest("base64");
+
+  const signatures = sigHeader.split(" ").map((s) => (s.startsWith("v1,") ? s.slice(3) : s));
+  return signatures.some((s) => {
+    try {
+      const b1 = Buffer.from(s, "base64");
+      const b2 = Buffer.from(computed, "base64");
+      return b1.length === b2.length && timingSafeEqual(b1, b2);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function parseSupabaseSmsHookPayload(rawBody) {
+  try {
+    const payload = JSON.parse(rawBody);
+    const phone = payload.user?.phone || payload.phone;
+    const otp = payload.sms?.otp || payload.otp;
+    if (!phone || !otp) {
+      return { valid: false, error: "Missing phone or otp" };
+    }
+    return { valid: true, phone, otp };
+  } catch {
+    return { valid: false, error: "Malformed JSON" };
+  }
+}
+
+test("MSG91: Indian phone number normalization and validation", () => {
+  // Valid variations
+  assert.equal(normalizeIndianPhone("+919876543210"), "919876543210");
+  assert.equal(normalizeIndianPhone("9876543210"), "919876543210");
+  assert.equal(normalizeIndianPhone("919876543210"), "919876543210");
+  assert.equal(normalizeIndianPhone("+91 98765 43210"), "919876543210");
+  assert.equal(normalizeIndianPhone("+91 (612) 345-6789"), "916123456789");
+
+  // Valid checking
+  assert.equal(isValidIndianMobile("919876543210"), true);
+  assert.equal(isValidIndianMobile("916123456789"), true);
+  assert.equal(isValidIndianMobile("917999999999"), true);
+  assert.equal(isValidIndianMobile("918000000000"), true);
+
+  // Invalid checking
+  assert.equal(
+    isValidIndianMobile("915123456789"),
+    false,
+    "Numbers starting with 5 are invalid in India",
+  );
+  assert.equal(
+    isValidIndianMobile("910123456789"),
+    false,
+    "Numbers starting with 0 are invalid in India",
+  );
+  assert.equal(isValidIndianMobile("9876543210"), false, "Missing 91 country code prefix");
+  assert.equal(isValidIndianMobile("447911123456"), false, "Non-Indian country code");
+});
+
+test("MSG91: Supabase Send SMS Auth Hook signature and token verification", () => {
+  const secret = "whsec_dGVzdF9zZWNyZXRfa2V5X2Zvcl9zdXBhYmFzZV9ob29r";
+  const body = JSON.stringify({
+    user: { id: "usr_abc123", phone: "+919876543210" },
+    sms: { otp: "839201" },
+  });
+
+  // 1. Direct Bearer token authentication
+  assert.equal(
+    testVerifySupabaseHookSignature(body, { authorization: `Bearer ${secret}` }, secret),
+    true,
+  );
+
+  // 2. Direct x-webhook-secret authentication
+  assert.equal(testVerifySupabaseHookSignature(body, { "x-webhook-secret": secret }, secret), true);
+
+  // 3. Svix / Standard HMAC-SHA256 signature
+  const rawKey = Buffer.from("dGVzdF9zZWNyZXRfa2V5X2Zvcl9zdXBhYmFzZV9ob29r", "base64");
+  const id = "msg_2XJ9dKs019";
+  const ts = "1731673892";
+  const toSign = `${id}.${ts}.${body}`;
+  const validSig = createHmac("sha256", rawKey).update(toSign).digest("base64");
+
+  assert.equal(
+    testVerifySupabaseHookSignature(
+      body,
+      {
+        "webhook-id": id,
+        "webhook-timestamp": ts,
+        "webhook-signature": `v1,${validSig}`,
+      },
+      secret,
+    ),
+    true,
+  );
+
+  // 4. Tampered payload rejection
+  assert.equal(
+    testVerifySupabaseHookSignature(
+      body + " ",
+      {
+        "webhook-id": id,
+        "webhook-timestamp": ts,
+        "webhook-signature": `v1,${validSig}`,
+      },
+      secret,
+    ),
+    false,
+  );
+
+  // 5. Wrong secret rejection
+  assert.equal(
+    testVerifySupabaseHookSignature(
+      body,
+      {
+        "webhook-id": id,
+        "webhook-timestamp": ts,
+        "webhook-signature": `v1,${validSig}`,
+      },
+      "whsec_d3Jvbmdfc2VjcmV0",
+    ),
+    false,
+  );
+});
+
+test("MSG91: Supabase Send SMS Auth Hook payload parsing", () => {
+  // Standard nested Supabase auth hook payload
+  const standard = JSON.stringify({
+    user: { id: "u_99", phone: "+919876543210" },
+    sms: { otp: "654321" },
+  });
+  const res1 = parseSupabaseSmsHookPayload(standard);
+  assert.equal(res1.valid, true);
+  assert.equal(res1.phone, "+919876543210");
+  assert.equal(res1.otp, "654321");
+
+  // Flat payload fallback
+  const flat = JSON.stringify({
+    phone: "9876543210",
+    otp: "123456",
+  });
+  const res2 = parseSupabaseSmsHookPayload(flat);
+  assert.equal(res2.valid, true);
+  assert.equal(res2.phone, "9876543210");
+  assert.equal(res2.otp, "123456");
+
+  // Missing fields
+  const missingOtp = JSON.stringify({ user: { phone: "+919876543210" } });
+  assert.equal(parseSupabaseSmsHookPayload(missingOtp).valid, false);
+
+  const missingPhone = JSON.stringify({ sms: { otp: "123456" } });
+  assert.equal(parseSupabaseSmsHookPayload(missingPhone).valid, false);
+
+  // Malformed JSON
+  assert.equal(parseSupabaseSmsHookPayload("{ invalid json").valid, false);
+});

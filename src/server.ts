@@ -5,6 +5,7 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { processRazorpayWebhook, verifyRazorpayWebhookSignature } from "./server/razorpay";
 import { processShipMaxxWebhook, verifyShipMaxxWebhookSignature } from "./server/shipmaxx";
+import { handleSupabaseSmsHook } from "./server/msg91";
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
@@ -124,6 +125,35 @@ async function handleWebhookRoute(request: Request, url: URL): Promise<Response 
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
+    }
+  }
+
+  // 3. Supabase Send SMS Auth Hook (MSG91 Gateway)
+  if (
+    (url.pathname === "/api/auth/send-sms" || url.pathname === "/api/webhooks/supabase-sms") &&
+    request.method === "POST"
+  ) {
+    try {
+      const rawBody = await request.text();
+      const result = await handleSupabaseSmsHook(rawBody, request.headers);
+      return new Response(JSON.stringify(result.body), {
+        status: result.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      console.error("[Supabase SMS Hook] Unhandled error:", err);
+      return new Response(
+        JSON.stringify({
+          error: {
+            http_code: 500,
+            message: "Internal server error in Supabase SMS hook",
+          },
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
   }
 
