@@ -205,3 +205,4 @@ ON CONFLICT (user_id, role) DO UPDATE SET role = 'admin';
 INSERT INTO public.shipping_settings (id, pickup_pincode)
 VALUES ('default', '521212')
 ON CONFLICT (id) DO NOTHING;
+
