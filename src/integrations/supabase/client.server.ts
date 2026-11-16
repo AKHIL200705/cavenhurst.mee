@@ -40,7 +40,13 @@ function createSupabaseAdminClient() {
   ).replace(/^["']|["']$/g, "").trim();
 
   const SUPABASE_SERVICE_ROLE_KEY = (
-    process.env["SUPABASE_SERVICE_ROLE_KEY"] || ""
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SECRET_KEY"] ||
+    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["SUPABASE_ANON_KEY"] ||
+    process.env["VITE_SUPABASE_ANON_KEY"] ||
+    ""
   ).replace(/^["']|["']$/g, "").trim();
 
   if (!SUPABASE_URL) {
@@ -51,7 +57,7 @@ function createSupabaseAdminClient() {
 
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error(
-      "[Supabase Security Error] SUPABASE_SERVICE_ROLE_KEY is missing in server environment. Administrative and server-side operations require a dedicated, private service_role key to bypass RLS securely and must never fall back to public keys.",
+      "[Supabase Security Error] Supabase API key is missing in server environment. Please configure SUPABASE_SERVICE_ROLE_KEY or SUPABASE_PUBLISHABLE_KEY in your environment variables.",
     );
   }
 
