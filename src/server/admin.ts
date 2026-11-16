@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { PRODUCTS, type Product, type Size } from "@/lib/products";
+import { type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
 import { verifyGoogleSessionOrToken } from "./auth";
@@ -170,7 +170,14 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
     const paidOrders = allOrders.filter((o) => o.payment_status === "paid");
     const codOrders = allOrders.filter((o) => o.payment_method === "cod");
 
-    const totalPaidRevenue = paidOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+    // Fetch verified refunds to calculate net realized revenue
+    const { data: allRefunds } = await supabaseAdmin.from("refunds").select("amount");
+    const totalRefunded = (allRefunds || []).reduce((sum, r) => sum + (r.amount || 0), 0);
+
+    const totalPaidRevenue = Math.max(
+      0,
+      paidOrders.reduce((sum, o) => sum + (o.total || 0), 0) - totalRefunded,
+    );
     const totalCodRevenue = codOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
     const pendingPayments = allOrders.filter((o) => o.payment_status === "pending").length;
@@ -186,7 +193,7 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
     const returnOrders = allOrders.filter((o) => o.status === "returned").length;
 
     const { data: dbProducts } = await supabaseAdmin.from("products").select("slug, name, stock");
-    const productList = dbProducts && dbProducts.length > 0 ? dbProducts : PRODUCTS;
+    const productList = dbProducts || [];
 
     let lowStockCount = 0;
     const lowStockAlerts: Array<{ name: string; slug: string; size: string; stock: number }> = [];
@@ -217,7 +224,8 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       const entry = dailySalesMap.get(dateKey);
       if (entry) {
         entry.orders += 1;
-        if (o.payment_status === "paid" || o.payment_method === "cod") {
+        // Only count paid orders as realized revenue (do not report uncollected COD orders as received revenue)
+        if (o.payment_status === "paid") {
           entry.revenue += o.total || 0;
         }
       }
@@ -562,7 +570,7 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
 
     const { data: order, error } = await supabaseAdmin
       .from("orders")
-      .select("id, total, payment_status, razorpay_payment_id")
+      .select("id, total, status, payment_status, razorpay_payment_id")
       .eq("id", data.orderId)
       .single();
 
@@ -605,11 +613,24 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
       raw_response: (refundRes.raw || {}) as unknown as Json,
     });
 
+    // Calculate total refunds for this order to distinguish partial vs full refund
+    const { data: previousRefunds } = await supabaseAdmin
+      .from("refunds")
+      .select("amount")
+      .eq("order_id", order.id);
+
+    const totalRefunded =
+      (previousRefunds || []).reduce((sum, r) => sum + (r.amount || 0), 0) + data.amountInRupees;
+    const isFullRefund = totalRefunded >= order.total;
+
+    const newPaymentStatus = isFullRefund ? "refunded" : "partially_refunded";
+    const newOrderStatus = isFullRefund ? "refunded" : order.status;
+
     await supabaseAdmin
       .from("orders")
       .update({
-        status: "refunded",
-        payment_status: "refunded",
+        status: newOrderStatus,
+        payment_status: newPaymentStatus,
         updated_at: new Date().toISOString(),
       })
       .eq("id", order.id);
@@ -617,10 +638,19 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
     await supabaseAdmin
       .from("payments")
       .update({
-        status: "refunded",
+        status: newPaymentStatus,
         updated_at: new Date().toISOString(),
       })
       .eq("order_id", order.id);
+
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: order.id,
+      status: newOrderStatus,
+      comment: isFullRefund
+        ? `Full refund of ₹${data.amountInRupees} processed successfully via Razorpay.`
+        : `Partial refund of ₹${data.amountInRupees} processed via Razorpay. Total refunded: ₹${totalRefunded} of ₹${order.total}.`,
+      changed_by: admin.email || admin.userId,
+    });
 
     await recordAdminAuditLog(admin, "refund_initiated", "order", order.id, {
       amount: data.amountInRupees,
@@ -654,11 +684,7 @@ export const getAdminProductsServerFn = createServerFn({ method: "POST" })
       throw new Error("Failed to load products");
     }
 
-    if (!dbProducts || dbProducts.length === 0) {
-      return PRODUCTS;
-    }
-
-    return dbProducts;
+    return dbProducts || [];
   });
 
 export const saveAdminProductServerFn = createServerFn({ method: "POST" })
@@ -929,58 +955,44 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const [profilesRes, ordersRes] = await Promise.all([
-      supabaseAdmin.from("customer_profiles").select("*").limit(200),
+    const [customersRes, ordersRes] = await Promise.all([
+      supabaseAdmin
+        .from("customers")
+        .select(
+          "id, auth_provider_uid, full_name, email, phone, account_status, registration_date, created_at",
+        )
+        .order("created_at", { ascending: false })
+        .limit(200),
       supabaseAdmin
         .from("orders")
-        .select("user_id, customer_email, customer_name, customer_phone, total, status"),
+        .select("id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status"),
     ]);
 
     const orders = ordersRes.data || [];
-    const customerMap = new Map<
-      string,
-      {
-        id: string;
-        name: string;
-        email: string;
-        phone: string;
-        orderCount: number;
-        totalSpent: number;
-        createdAt?: string | undefined;
-      }
-    >();
+    const customerList = (customersRes.data || []).map((c) => {
+      const customerOrders = orders.filter(
+        (o) =>
+          o.customer_id === c.id ||
+          (c.auth_provider_uid && o.user_id === c.auth_provider_uid) ||
+          (c.email && o.customer_email?.toLowerCase() === c.email.toLowerCase()),
+      );
 
-    for (const p of profilesRes.data || []) {
-      customerMap.set(p.id, {
-        id: p.id,
-        name: p.full_name || "Customer",
-        email: "",
-        phone: p.phone || "",
-        orderCount: 0,
-        totalSpent: 0,
-        createdAt: p.created_at,
-      });
-    }
+      const totalSpent = customerOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
-    for (const o of orders) {
-      const key = o.user_id || o.customer_email || "anonymous";
-      const existing = customerMap.get(key) || {
-        id: key,
-        name: o.customer_name || "Guest Customer",
-        email: o.customer_email || "",
-        phone: o.customer_phone || "",
-        orderCount: 0,
-        totalSpent: 0,
+      return {
+        id: c.id,
+        authUid: c.auth_provider_uid,
+        name: c.full_name || "Customer",
+        email: c.email || "",
+        phone: c.phone || "",
+        orderCount: customerOrders.length,
+        totalSpent,
+        status: c.account_status || "active",
+        createdAt: c.registration_date || c.created_at,
       };
+    });
 
-      existing.orderCount += 1;
-      existing.totalSpent += o.total || 0;
-      if (!existing.email && o.customer_email) existing.email = o.customer_email;
-      if (!existing.phone && o.customer_phone) existing.phone = o.customer_phone;
-      customerMap.set(key, existing);
-    }
-
-    return Array.from(customerMap.values());
+    return customerList;
   });
 
 // -----------------------------------------------------------------------------

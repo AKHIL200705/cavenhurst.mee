@@ -3,19 +3,29 @@ import { Search } from "lucide-react";
 import { useState } from "react";
 import { ProductCard } from "@/components/site/ProductCard";
 import { meta } from "@/components/site/InfoPage";
-import { PRODUCTS } from "@/lib/products";
+import type { Product } from "@/lib/products";
+import { getStoreCatalogServerFn } from "@/server/catalog";
 import { formatINR } from "@/lib/pricing";
 
 export const Route = createFileRoute("/search")({
+  loader: async (): Promise<{ products: Product[] }> => {
+    try {
+      const catalog = await getStoreCatalogServerFn();
+      return { products: catalog || [] };
+    } catch {
+      return { products: [] };
+    }
+  },
   head: () => meta("Search", "Search CAVENHURST premium apparel."),
   component: SearchPage,
 });
 
 function SearchPage() {
+  const { products } = Route.useLoaderData();
   const [q, setQ] = useState("");
   const term = q.trim().toLowerCase();
   const results = term
-    ? PRODUCTS.filter((p) =>
+    ? products.filter((p) =>
         [p.name, p.category, ...p.tags, ...p.colors.map((c) => c.name)]
           .join(" ")
           .toLowerCase()

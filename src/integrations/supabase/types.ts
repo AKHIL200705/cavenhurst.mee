@@ -153,6 +153,7 @@ export type Database = {
           color: string | null;
           added_at: string | null;
           updated_at: string | null;
+          product_slug: string | null;
         };
         Insert: {
           id?: string;
@@ -165,6 +166,7 @@ export type Database = {
           color?: string | null;
           added_at?: string | null;
           updated_at?: string | null;
+          product_slug?: string | null;
         };
         Update: {
           id?: string | null;
@@ -177,6 +179,7 @@ export type Database = {
           color?: string | null;
           added_at?: string | null;
           updated_at?: string | null;
+          product_slug?: string | null;
         };
         Relationships: [];
       };

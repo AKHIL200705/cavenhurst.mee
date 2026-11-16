@@ -14,6 +14,7 @@ import {
   verifyPaymentServerFn,
   checkPincodeServiceabilityFn,
 } from "@/server/orders";
+import { getCustomerAddressesServerFn } from "@/server/customers";
 
 declare global {
   interface Window {
@@ -81,7 +82,7 @@ function loadRazorpayScript(): Promise<boolean> {
 
 function Checkout() {
   const { cart, clear, coupon } = useStore();
-  const { user } = useAuth();
+  const { user, sessionToken } = useAuth();
   const navigate = useNavigate();
 
   const [paymentMode, setPaymentMode] = useState<"online" | "cod">("online");
@@ -103,6 +104,9 @@ function Checkout() {
     serviceable: null,
   });
 
+  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string>("new");
+
   const [f, setF] = useState({
     name: "",
     phone: "",
@@ -113,7 +117,7 @@ function Checkout() {
     pin: "",
   });
 
-  // Prefill authenticated customer details
+  // Prefill authenticated customer details and load saved address book
   useEffect(() => {
     if (user) {
       const metaData = user.user_metadata || {};
@@ -127,8 +131,40 @@ function Checkout() {
         phone: prev.phone || phoneNum.replace(/\D/g, "").slice(-10),
         email: prev.email || emailAddr,
       }));
+
+      // Retrieve saved addresses from customer account
+      getCustomerAddressesServerFn({
+        data: { authToken: sessionToken || undefined },
+      })
+        .then((addrs) => {
+          if (addrs && addrs.length > 0) {
+            setSavedAddresses(addrs);
+            const defaultAddr = addrs.find((a: any) => a.is_default) || addrs[0];
+            if (defaultAddr) {
+              setSelectedAddressId(defaultAddr.id);
+              applyAddress(defaultAddr);
+            }
+          }
+        })
+        .catch((err) => console.warn("[Checkout] Failed to load saved addresses:", err));
     }
-  }, [user]);
+  }, [user, sessionToken]);
+
+  const applyAddress = (addr: any) => {
+    const fullStreet = [addr.address_line1, addr.address_line2].filter(Boolean).join(", ");
+    setF((prev) => ({
+      ...prev,
+      name: addr.full_name || prev.name,
+      phone: addr.phone || prev.phone,
+      address: fullStreet || prev.address,
+      city: addr.city || prev.city,
+      state: addr.state || prev.state,
+      pin: addr.postal_code || prev.pin,
+    }));
+    if (addr.postal_code && /^[1-9]\d{5}$/.test(addr.postal_code)) {
+      void checkPincode(addr.postal_code, paymentMode === "cod" ? "cod" : "prepaid");
+    }
+  };
 
   const setField =
     (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -411,6 +447,62 @@ function Checkout() {
             </span>
           </div>
 
+          {savedAddresses.length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-silver uppercase tracking-wider mb-2">
+                Saved Address Book
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2 mb-4">
+                {savedAddresses.map((a: any) => {
+                  const isSel = selectedAddressId === a.id;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedAddressId(a.id);
+                        applyAddress(a);
+                      }}
+                      className={cn(
+                        "text-left p-3 rounded-lg border text-xs transition",
+                        isSel
+                          ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary"
+                          : "border-border bg-card text-muted-foreground hover:border-silver/40",
+                      )}
+                    >
+                      <div className="flex items-center justify-between font-semibold text-foreground">
+                        <span>{a.full_name}</span>
+                        {a.is_default && (
+                          <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-mono">
+                            DEFAULT
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 line-clamp-1">{a.address_line1}</p>
+                      <p>
+                        {a.city}, {a.state} - {a.postal_code}
+                      </p>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAddressId("new");
+                  }}
+                  className={cn(
+                    "text-left p-3 rounded-lg border text-xs flex items-center justify-center font-semibold transition py-4",
+                    selectedAddressId === "new"
+                      ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary"
+                      : "border-dashed border-border text-muted-foreground hover:border-silver/40",
+                  )}
+                >
+                  + Deliver to a different address
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <input
               required
@@ -527,20 +619,29 @@ function Checkout() {
         <ul className="mb-5 space-y-3">
           {cart.map((c) => {
             const p = getProduct(c.slug);
-            if (!p) return null;
+            const itemName = c.name || p?.name;
+            if (!itemName) return null;
+            const itemPrice = c.price ?? p?.price ?? 0;
+            const itemImage = c.image || (p ? imageFor(p, c.color) : "");
             return (
               <li key={`${c.slug}-${c.size}-${c.color}`} className="flex gap-3 text-sm">
-                <img
-                  src={imageFor(p, c.color)}
-                  alt={p.name}
-                  className="h-16 w-12 rounded object-cover"
-                />
+                {itemImage ? (
+                  <img
+                    src={itemImage}
+                    alt={itemName}
+                    className="h-16 w-12 rounded object-cover"
+                  />
+                ) : (
+                  <div className="h-16 w-12 rounded bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                    CAV
+                  </div>
+                )}
                 <div className="flex-1">
-                  <p className="font-semibold">{p.name}</p>
+                  <p className="font-semibold">{itemName}</p>
                   <p className="text-xs text-muted-foreground">
                     {c.color} · {c.size} · ×{c.qty}
                   </p>
-                  <p className="mt-0.5 font-bold">{formatINR(p.price * c.qty)}</p>
+                  <p className="mt-0.5 font-bold">{formatINR(itemPrice * c.qty)}</p>
                 </div>
               </li>
             );

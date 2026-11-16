@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProductCard } from "@/components/site/ProductCard";
-import { PRODUCTS, SIZES, getProduct, imageFor, type Size, type Product } from "@/lib/products";
+import { SIZES, imageFor, type Size, type Product } from "@/lib/products";
 import { discountPercent, formatINR } from "@/lib/pricing";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -19,16 +19,17 @@ import {
   getProductBySlugServerFn,
   getProductReviewsServerFn,
   submitProductReviewServerFn,
+  getStoreCatalogServerFn,
 } from "@/server/catalog";
 import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/product/$slug")({
-  loader: async ({ params }): Promise<{ product: Product; reviews: any[] }> => {
+  loader: async ({ params }): Promise<{ product: Product; reviews: any[]; related: Product[] }> => {
     let p: Product | null = null;
     try {
       p = await getProductBySlugServerFn({ data: { slug: params.slug } });
     } catch {
-      p = getProduct(params.slug) || null;
+      p = null;
     }
     if (!p) throw notFound();
 
@@ -39,7 +40,17 @@ export const Route = createFileRoute("/product/$slug")({
       reviews = [];
     }
 
-    return { product: p, reviews };
+    let related: Product[] = [];
+    try {
+      const catalog = await getStoreCatalogServerFn();
+      if (catalog) {
+        related = catalog.filter((x) => x.slug !== p.slug && x.category === p.category).slice(0, 4);
+      }
+    } catch {
+      related = [];
+    }
+
+    return { product: p, reviews, related };
   },
   head: ({ loaderData }) => ({
     meta: loaderData?.product
@@ -57,7 +68,7 @@ export const Route = createFileRoute("/product/$slug")({
 });
 
 function ProductPage() {
-  const { product: p, reviews: initialReviews } = Route.useLoaderData();
+  const { product: p, reviews: initialReviews, related } = Route.useLoaderData();
   const { user } = useAuth();
   const { add, toggleWish, wishlist } = useStore();
   const navigate = useNavigate();
@@ -497,14 +508,16 @@ function ProductPage() {
         </div>
       </div>
 
-      <h2 className="mt-16 text-xl font-bold tracking-brand">YOU MAY ALSO LIKE</h2>
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
-        {PRODUCTS.filter((x) => x.slug !== p.slug && x.category === p.category)
-          .slice(0, 4)
-          .map((x) => (
-            <ProductCard key={x.slug} p={x} />
-          ))}
-      </div>
+      {related.length > 0 && (
+        <>
+          <h2 className="mt-16 text-xl font-bold tracking-brand">YOU MAY ALSO LIKE</h2>
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
+            {related.map((x) => (
+              <ProductCard key={x.slug} p={x} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

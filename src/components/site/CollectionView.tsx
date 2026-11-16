@@ -3,7 +3,7 @@ import { ChevronRight, Grid2x2, Home, List, SlidersHorizontal } from "lucide-rea
 import { useMemo, useState } from "react";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
-import { PRODUCTS, SIZES, inStock, type Product } from "@/lib/products";
+import { SIZES, inStock, type Product } from "@/lib/products";
 import { formatINR } from "@/lib/pricing";
 import { ProductCard } from "./ProductCard";
 import { cn } from "@/lib/utils";
@@ -246,7 +246,14 @@ export function CollectionView({
           ))}
         </div>
 
-        {list.length === 0 ? (
+        {products.length === 0 ? (
+          <div className="py-24 text-center space-y-3">
+            <p className="font-serif text-2xl italic text-foreground">No Products Available</p>
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              Our artisans are currently preparing new silhouettes in the workshop. Please check back shortly or visit our collections.
+            </p>
+          </div>
+        ) : list.length === 0 ? (
           <p className="py-20 text-center text-muted-foreground">
             No products match these filters.
           </p>
@@ -299,4 +306,4 @@ function Pill({
   );
 }
 
-export const ALL_PRODUCTS = PRODUCTS;
+

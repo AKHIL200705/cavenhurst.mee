@@ -1,6 +1,6 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { CollectionView } from "@/components/site/CollectionView";
-import { COLLECTIONS, PRODUCTS, type CollectionSlug, type Product } from "@/lib/products";
+import { COLLECTIONS, type CollectionSlug, type Product } from "@/lib/products";
 import { meta } from "@/components/site/InfoPage";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 
@@ -9,14 +9,14 @@ export const Route = createFileRoute("/collections/$slug")({
     const c = COLLECTIONS[params.slug as CollectionSlug];
     if (!c) throw notFound();
 
-    let allProducts = PRODUCTS;
+    let allProducts: Product[] = [];
     try {
       const catalog = await getStoreCatalogServerFn();
-      if (catalog && catalog.length > 0) {
+      if (catalog) {
         allProducts = catalog;
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.error("[Collections] Error loading catalog from database:", err);
     }
 
     const filtered = allProducts.filter(c.filter);

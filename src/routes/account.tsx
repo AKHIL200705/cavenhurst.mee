@@ -1,17 +1,56 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Truck, Shield, MapPin } from "lucide-react";
+import { Truck, Shield, MapPin, Plus, Trash2, Edit2, Check, X, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
 import { useAuth } from "@/lib/auth";
 import { useStore } from "@/lib/store";
 import { getProduct, imageFor } from "@/lib/products";
 import { formatINR } from "@/lib/pricing";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  getCustomerAddressesServerFn,
+  getCustomerOrdersServerFn,
+  saveCustomerAddressServerFn,
+  deleteCustomerAddressServerFn,
+} from "@/server/customers";
 
 export const Route = createFileRoute("/account")({
   head: () => meta("My Account", "Your CAVENHURST saved bag, wishlist and order history."),
   component: Account,
 });
+
+const STATES = [
+  "Andhra Pradesh",
+  "Arunachal Pradesh",
+  "Assam",
+  "Bihar",
+  "Chhattisgarh",
+  "Delhi",
+  "Goa",
+  "Gujarat",
+  "Haryana",
+  "Himachal Pradesh",
+  "Jharkhand",
+  "Karnataka",
+  "Kerala",
+  "Madhya Pradesh",
+  "Maharashtra",
+  "Manipur",
+  "Meghalaya",
+  "Mizoram",
+  "Nagaland",
+  "Odisha",
+  "Punjab",
+  "Rajasthan",
+  "Sikkim",
+  "Tamil Nadu",
+  "Telangana",
+  "Tripura",
+  "Uttar Pradesh",
+  "Uttarakhand",
+  "West Bengal",
+];
 
 type Order = {
   id: string;
@@ -39,39 +78,46 @@ type Address = {
 };
 
 function Account() {
-  const { user, ready, signOut } = useAuth();
+  const { user, sessionToken, ready, signOut } = useAuth();
   const { cart, wishlist } = useStore();
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
+  // Address Form State
+  const [showAddressForm, setShowAddressForm] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [addressForm, setAddressForm] = useState({
+    fullName: "",
+    phone: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    isDefault: false,
+  });
+
+  const loadData = async () => {
     if (!user) return;
     if (user.isAdmin) {
       setIsAdmin(true);
     }
 
-    const filterQuery = user.email
-      ? `user_id.eq.${user.id},customer_email.eq.${user.email}`
-      : `user_id.eq.${user.id}`;
+    try {
+      const [addrs, ords] = await Promise.all([
+        getCustomerAddressesServerFn({ data: { authToken: sessionToken || undefined } }),
+        getCustomerOrdersServerFn({ data: { authToken: sessionToken || undefined } }),
+      ]);
+      setAddresses((addrs as Address[]) || []);
+      setOrders((ords as Order[]) || []);
+    } catch (err) {
+      console.error("[Account] Error fetching customer data:", err);
+    }
 
-    supabase
-      .from("orders")
-      .select(
-        "id,order_number,total,status,payment_status,shipment_status,awb_number,created_at,items",
-      )
-      .or(filterQuery)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => setOrders((data as Order[]) ?? []));
-
-    supabase
-      .from("customer_addresses")
-      .select("*")
-      .or(`customer_auth_uid.eq.${user.id}`)
-      .order("is_default", { ascending: false })
-      .then(({ data }) => setAddresses((data as Address[]) || []));
-
+    // Role check
     supabase
       .from("user_roles")
       .select("role")
@@ -81,7 +127,125 @@ function Account() {
       .then(({ data }) => {
         if (data) setIsAdmin(true);
       });
-  }, [user]);
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, [user, sessionToken]);
+
+  const resetForm = () => {
+    setAddressForm({
+      fullName: "",
+      phone: "",
+      addressLine1: "",
+      addressLine2: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      isDefault: false,
+    });
+    setEditingAddressId(null);
+    setShowAddressForm(false);
+  };
+
+  const handleEditAddress = (a: Address) => {
+    setAddressForm({
+      fullName: a.full_name,
+      phone: a.phone,
+      addressLine1: a.address_line1,
+      addressLine2: a.address_line2 || "",
+      city: a.city,
+      state: a.state,
+      postalCode: a.postal_code,
+      isDefault: a.is_default,
+    });
+    setEditingAddressId(a.id);
+    setShowAddressForm(true);
+  };
+
+  const handleSaveAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (addressForm.fullName.trim().length < 2) {
+      toast.error("Please enter full name");
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(addressForm.phone.replace(/\D/g, ""))) {
+      toast.error("Please enter a valid 10-digit mobile number");
+      return;
+    }
+    if (!addressForm.addressLine1.trim() || !addressForm.city.trim() || !addressForm.state.trim()) {
+      toast.error("Please fill required address details");
+      return;
+    }
+    if (!/^[1-9]\d{5}$/.test(addressForm.postalCode.trim())) {
+      toast.error("Please enter a valid 6-digit PIN code");
+      return;
+    }
+
+    setSavingAddress(true);
+    try {
+      await saveCustomerAddressServerFn({
+        data: {
+          authToken: sessionToken || undefined,
+          id: editingAddressId || undefined,
+          fullName: addressForm.fullName.trim(),
+          phone: addressForm.phone.trim(),
+          addressLine1: addressForm.addressLine1.trim(),
+          addressLine2: addressForm.addressLine2.trim() || undefined,
+          city: addressForm.city.trim(),
+          state: addressForm.state.trim(),
+          postalCode: addressForm.postalCode.trim(),
+          isDefault: addressForm.isDefault,
+        },
+      });
+      toast.success(editingAddressId ? "Address updated successfully" : "Address added to address book");
+      resetForm();
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save address");
+    } finally {
+      setSavingAddress(false);
+    }
+  };
+
+  const handleDeleteAddress = async (addressId: string) => {
+    if (!confirm("Are you sure you want to delete this address?")) return;
+    try {
+      await deleteCustomerAddressServerFn({
+        data: {
+          authToken: sessionToken || undefined,
+          addressId,
+        },
+      });
+      toast.success("Address removed");
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete address");
+    }
+  };
+
+  const handleSetDefault = async (a: Address) => {
+    try {
+      await saveCustomerAddressServerFn({
+        data: {
+          authToken: sessionToken || undefined,
+          id: a.id,
+          fullName: a.full_name,
+          phone: a.phone,
+          addressLine1: a.address_line1,
+          addressLine2: a.address_line2 || undefined,
+          city: a.city,
+          state: a.state,
+          postalCode: a.postal_code,
+          isDefault: true,
+        },
+      });
+      toast.success("Set as default address");
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update default address");
+    }
+  };
 
   if (!ready) return <div className="py-28 text-center text-muted-foreground">Loading…</div>;
   if (!user)
@@ -129,6 +293,7 @@ function Account() {
         </div>
       </div>
 
+      {/* SAVED BAG */}
       <section>
         <div className="mb-4 flex justify-between">
           <h2 className="text-sm font-bold tracking-brand">SAVED BAG ({cart.length})</h2>
@@ -142,23 +307,32 @@ function Account() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {cart.map((c) => {
               const p = getProduct(c.slug);
-              if (!p) return null;
+              const itemName = c.name || p?.name;
+              if (!itemName) return null;
+              const itemPrice = c.price ?? p?.price ?? 0;
+              const itemImage = c.image || (p ? imageFor(p, c.color) : "");
               return (
                 <li
                   key={`${c.slug}${c.size}${c.color}`}
                   className="flex gap-3 rounded-xl border border-border bg-card p-3"
                 >
-                  <img
-                    src={imageFor(p, c.color)}
-                    alt=""
-                    className="h-20 w-16 rounded object-cover"
-                  />
+                  {itemImage ? (
+                    <img
+                      src={itemImage}
+                      alt={itemName}
+                      className="h-20 w-16 rounded object-cover"
+                    />
+                  ) : (
+                    <div className="h-20 w-16 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                      CAV
+                    </div>
+                  )}
                   <div className="text-sm">
-                    <p className="font-semibold">{p.name}</p>
+                    <p className="font-semibold">{itemName}</p>
                     <p className="text-muted-foreground">
                       {c.color} · {c.size} · ×{c.qty}
                     </p>
-                    <p className="mt-1 font-bold">{formatINR(p.price * c.qty)}</p>
+                    <p className="mt-1 font-bold">{formatINR(itemPrice * c.qty)}</p>
                   </div>
                 </li>
               );
@@ -167,6 +341,7 @@ function Account() {
         )}
       </section>
 
+      {/* WISHLIST */}
       <section>
         <div className="mb-4 flex justify-between">
           <h2 className="text-sm font-bold tracking-brand">WISHLIST ({wishlist.length})</h2>
@@ -198,31 +373,206 @@ function Account() {
         )}
       </section>
 
+      {/* SAVED ADDRESSES */}
       <section>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-bold tracking-brand">SAVED ADDRESSES ({addresses.length})</h2>
+          {!showAddressForm && (
+            <button
+              onClick={() => {
+                resetForm();
+                setShowAddressForm(true);
+              }}
+              className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add New Address
+            </button>
+          )}
         </div>
-        {addresses.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No saved delivery addresses yet. Addresses used during checkout will be saved here automatically.</p>
+
+        {/* Add/Edit Address Form */}
+        {showAddressForm && (
+          <form
+            onSubmit={handleSaveAddress}
+            className="mb-6 rounded-xl border border-primary/40 bg-card p-5 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold">
+                {editingAddressId ? "Edit Address" : "Add New Delivery Address"}
+              </h3>
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">Full Name *</label>
+                <input
+                  required
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.fullName}
+                  onChange={(e) => setAddressForm({ ...addressForm, fullName: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">Mobile Phone *</label>
+                <input
+                  required
+                  type="tel"
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.phone}
+                  onChange={(e) => setAddressForm({ ...addressForm, phone: e.target.value })}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Address Line 1 (Flat, House, Building, Street) *
+                </label>
+                <input
+                  required
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.addressLine1}
+                  onChange={(e) => setAddressForm({ ...addressForm, addressLine1: e.target.value })}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Address Line 2 (Area, Landmark - Optional)
+                </label>
+                <input
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.addressLine2}
+                  onChange={(e) => setAddressForm({ ...addressForm, addressLine2: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">City *</label>
+                <input
+                  required
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.city}
+                  onChange={(e) => setAddressForm({ ...addressForm, city: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">State *</label>
+                <select
+                  required
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.state}
+                  onChange={(e) => setAddressForm({ ...addressForm, state: e.target.value })}
+                >
+                  <option value="">Select State</option>
+                  {STATES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">PIN Code *</label>
+                <input
+                  required
+                  maxLength={6}
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={addressForm.postalCode}
+                  onChange={(e) => setAddressForm({ ...addressForm, postalCode: e.target.value })}
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-6">
+                <input
+                  type="checkbox"
+                  id="isDefault"
+                  checked={addressForm.isDefault}
+                  onChange={(e) => setAddressForm({ ...addressForm, isDefault: e.target.checked })}
+                  className="h-4 w-4 rounded border-input"
+                />
+                <label htmlFor="isDefault" className="text-xs font-semibold cursor-pointer">
+                  Set as default address
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="rounded-md border border-border px-4 py-2 text-xs font-semibold hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingAddress}
+                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {savingAddress && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {editingAddressId ? "Save Changes" : "Save Address"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {addresses.length === 0 && !showAddressForm ? (
+          <p className="text-sm text-muted-foreground">
+            No saved delivery addresses yet. Addresses added here or used during checkout will be saved securely.
+          </p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {addresses.map((a) => (
-              <div key={a.id} className="rounded-xl border border-border bg-card p-4 text-xs space-y-1">
+              <div key={a.id} className="rounded-xl border border-border bg-card p-4 text-xs space-y-2 relative">
                 <div className="flex items-center justify-between font-semibold text-foreground">
                   <span>{a.full_name}</span>
                   {a.is_default && (
-                    <span className="rounded bg-gold/20 text-gold px-1.5 py-0.5 text-[10px] font-mono">DEFAULT</span>
+                    <span className="rounded bg-gold/20 text-gold px-1.5 py-0.5 text-[10px] font-mono">
+                      DEFAULT
+                    </span>
                   )}
                 </div>
                 <p className="text-muted-foreground">{a.phone}</p>
-                <p className="text-foreground">{a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}</p>
-                <p className="text-muted-foreground">{a.city}, {a.state} - {a.postal_code}</p>
+                <p className="text-foreground">
+                  {a.address_line1}
+                  {a.address_line2 ? `, ${a.address_line2}` : ""}
+                </p>
+                <p className="text-muted-foreground">
+                  {a.city}, {a.state} - {a.postal_code}
+                </p>
+
+                <div className="flex items-center gap-3 pt-2 border-t border-border/60">
+                  <button
+                    onClick={() => handleEditAddress(a)}
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    <Edit2 className="h-3 w-3" /> Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteAddress(a.id)}
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-sale"
+                  >
+                    <Trash2 className="h-3 w-3" /> Delete
+                  </button>
+                  {!a.is_default && (
+                    <button
+                      onClick={() => handleSetDefault(a)}
+                      className="ml-auto text-[11px] text-primary hover:underline"
+                    >
+                      Make Default
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
         )}
       </section>
 
+      {/* ORDER HISTORY */}
       <section>
         <h2 className="mb-4 text-sm font-bold tracking-brand">ORDER HISTORY</h2>
         {orders === null ? (

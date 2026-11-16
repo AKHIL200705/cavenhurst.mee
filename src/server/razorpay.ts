@@ -269,43 +269,67 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
           };
         }
 
-        // Verify status is captured (or authorized if auto-capture configured)
-        if (paymentData.status !== "captured" && paymentData.status !== "authorized") {
+        // Verify status is strictly captured (never treat authorized as captured!)
+        if (paymentData.status !== "captured") {
           return {
             success: false,
-            error: `Payment verification failed: Payment status is '${paymentData.status}', not captured.`,
+            error: `Payment verification failed: Payment status is '${paymentData.status}'. Payment must be fully captured to confirm order.`,
           };
         }
+      } else {
+        const errText = await rzpRes.text().catch(() => "");
+        console.error("[Razorpay API Verification Failed]", rzpRes.status, errText);
+        return {
+          success: false,
+          error: "Payment verification failed with provider API.",
+        };
       }
     } catch (err) {
-      console.warn(
-        "[Razorpay Verification] API check skipped due to network error, proceeding with valid HMAC signature:",
-        err,
-      );
+      console.error("[Razorpay Verification Error] Network or API failure:", err);
+      return {
+        success: false,
+        error: "Unable to verify payment status with payment gateway. Please contact support.",
+      };
     }
   }
 
-  // 6. Record verified payment in payments ledger
-  await supabaseAdmin.from("payments").insert({
-    order_id: input.orderId,
-    user_id: input.userId || existingOrder.user_id || null,
-    gateway: "razorpay",
-    payment_method: "online",
-    razorpay_order_id: input.razorpayOrderId,
-    razorpay_payment_id: input.razorpayPaymentId,
-    razorpay_signature: input.razorpaySignature,
-    amount: existingOrder.total,
-    amount_paise: existingOrder.total * 100,
-    currency: "INR",
-    status: "captured",
-    payload: input as unknown as Json,
-  });
+  // 6. Record verified payment in payments ledger (prevent duplicate records)
+  const { data: existingPayment } = await supabaseAdmin
+    .from("payments")
+    .select("id")
+    .eq("razorpay_payment_id", input.razorpayPaymentId)
+    .maybeSingle();
+
+  if (!existingPayment) {
+    await supabaseAdmin.from("payments").insert({
+      order_id: input.orderId,
+      user_id: input.userId || existingOrder.user_id || null,
+      gateway: "razorpay",
+      payment_method: "online",
+      razorpay_order_id: input.razorpayOrderId,
+      razorpay_payment_id: input.razorpayPaymentId,
+      razorpay_signature: input.razorpaySignature,
+      amount: existingOrder.total,
+      amount_paise: existingOrder.total * 100,
+      currency: "INR",
+      status: "captured",
+      payload: input as unknown as Json,
+    });
+  } else {
+    await supabaseAdmin
+      .from("payments")
+      .update({
+        status: "captured",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existingPayment.id);
+  }
 
   // 7. Update order state to paid & confirmed (never touch shipment_status!)
   await supabaseAdmin
     .from("orders")
     .update({
-      status: "paid",
+      status: "confirmed",
       payment_status: "paid",
       razorpay_order_id: input.razorpayOrderId,
       razorpay_payment_id: input.razorpayPaymentId,

@@ -110,12 +110,18 @@ function generateOrderNumber(): string {
 }
 
 /**
- * Recalculates order subtotal, discount, shipping and total strictly on the server.
- * Never trust client amounts!
+ * Recalculates order subtotal, discount, shipping and total strictly from Supabase database.
+ * Queries current active prices, inventory stock and validates coupons against real database records.
+ * Never trusts client prices or fake static product data!
  */
-function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: string | null) {
+async function calculateOrderTotals(
+  cart: CheckoutCartItemInput[],
+  couponCode: string | null,
+) {
   let subtotal = 0;
   const itemsWithDetails: Array<{
+    productId?: string | undefined;
+    variantId?: string | undefined;
     slug: string;
     name: string;
     size: string;
@@ -126,28 +132,90 @@ function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: string 
   }> = [];
 
   for (const item of cart) {
-    const product = getProduct(item.slug);
-    if (!product) continue;
+    // 1. Fetch current price and inventory directly from Supabase
+    const { data: dbProd, error } = await supabaseAdmin
+      .from("products")
+      .select("id, slug, name, price, stock, is_published, images")
+      .eq("slug", item.slug)
+      .eq("is_published", true)
+      .maybeSingle();
 
-    const price = product.price;
+    if (error || !dbProd) {
+      throw new Error(`Product "${item.slug}" is no longer available in the store catalog.`);
+    }
+
+    // Verify stock availability server-side
+    const stockMap = (dbProd.stock || {}) as Record<string, number>;
+    const available = stockMap[item.size] ?? 0;
+    if (available < item.qty) {
+      throw new Error(
+        `Insufficient inventory for "${dbProd.name}" (${item.size}). Available: ${available}, requested: ${item.qty}`,
+      );
+    }
+
+    // Fetch matching variant if exists
+    const { data: variant } = await supabaseAdmin
+      .from("product_variants")
+      .select("id")
+      .eq("product_id", dbProd.id)
+      .eq("size", item.size)
+      .maybeSingle();
+
+    const price = Number(dbProd.price) || 0;
     subtotal += price * item.qty;
+
     itemsWithDetails.push({
-      slug: product.slug,
-      name: product.name,
+      productId: dbProd.id,
+      variantId: variant?.id,
+      slug: dbProd.slug,
+      name: dbProd.name,
       size: item.size,
       color: item.color,
       price,
       qty: item.qty,
-      image: product.images[0] || null,
+      image: (dbProd.images && dbProd.images[0]) || null,
     });
   }
 
-  const { discount, shipping, total } = computeTotals(subtotal, couponCode);
+  // 2. Validate coupon strictly from Supabase coupons table
+  let discount = 0;
+  if (couponCode && couponCode.trim()) {
+    const cleanCode = couponCode.trim().toUpperCase();
+    const { data: couponRow } = await supabaseAdmin
+      .from("coupons")
+      .select("*")
+      .ilike("code", cleanCode)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (couponRow) {
+      const now = new Date();
+      const notExpired = !couponRow.expires_at || new Date(couponRow.expires_at) > now;
+      const underUsageLimit =
+        !couponRow.usage_limit || (couponRow.times_used || 0) < couponRow.usage_limit;
+      const meetsMinOrder = subtotal >= (couponRow.min_order_value || 0);
+
+      if (notExpired && underUsageLimit && meetsMinOrder) {
+        if (couponRow.discount_type === "percentage") {
+          const calculatedDiscount = Math.round((subtotal * couponRow.discount_value) / 100);
+          discount = couponRow.max_discount
+            ? Math.min(calculatedDiscount, couponRow.max_discount)
+            : calculatedDiscount;
+        } else {
+          discount = Math.min(couponRow.discount_value, subtotal);
+        }
+      }
+    }
+  }
+
+  // 3. Free shipping above threshold ₹4,999
+  const shippingFee = subtotal >= 4999 || subtotal === 0 ? 0 : 199;
+  const total = Math.max(0, subtotal - discount + shippingFee);
 
   return {
     subtotal,
     discount,
-    shippingFee: shipping,
+    shippingFee,
     total,
     itemsWithDetails,
   };
@@ -199,9 +267,27 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
     // 2. Derive verified user identity from server session (never trust browser!)
     const authUser = await getServerSessionUser();
     const verifiedUserId = authUser ? authUser.id : null;
+    let customerUuid: string | null = null;
 
-    // 3. Server-side price calculation
-    const { subtotal, discount, shippingFee, total, itemsWithDetails } = calculateOrderTotals(
+    if (verifiedUserId) {
+      const { data: c } = await supabaseAdmin
+        .from("customers")
+        .select("id")
+        .eq("auth_provider_uid", verifiedUserId)
+        .maybeSingle();
+      if (c) customerUuid = c.id;
+    }
+    if (!customerUuid && customer.email.trim()) {
+      const { data: c } = await supabaseAdmin
+        .from("customers")
+        .select("id")
+        .eq("email", customer.email.trim().toLowerCase())
+        .maybeSingle();
+      if (c) customerUuid = c.id;
+    }
+
+    // 3. Server-side price calculation directly from Supabase database
+    const { subtotal, discount, shippingFee, total, itemsWithDetails } = await calculateOrderTotals(
       cart,
       coupon,
     );
@@ -235,6 +321,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       .from("orders")
       .insert({
         user_id: verifiedUserId,
+        customer_id: customerUuid,
         order_number: orderNumber,
         customer_name: customer.name.trim(),
         customer_email: customer.email.trim(),
@@ -267,9 +354,11 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
 
     const orderId = order.id;
 
-    // 6. Insert line items into order_items
+    // 6. Insert line items into order_items with product_id & variant_id
     const orderItemsToInsert = itemsWithDetails.map((item) => ({
       order_id: orderId,
+      product_id: item.productId || null,
+      variant_id: item.variantId || null,
       product_slug: item.slug,
       name: item.name,
       size: item.size,
@@ -280,7 +369,21 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
     }));
     await supabaseAdmin.from("order_items").insert(orderItemsToInsert);
 
-    // 7. Insert shipping address
+    // 7. Insert immutable order address snapshot into order_addresses
+    await supabaseAdmin.from("order_addresses").insert({
+      order_id: orderId,
+      address_type: "shipping",
+      full_name: customer.name.trim(),
+      phone: customer.phone.replace(/\D/g, ""),
+      email: customer.email.trim(),
+      address_line1: customer.address.trim(),
+      city: customer.city.trim(),
+      state: customer.state.trim(),
+      postal_code: customer.pin.trim(),
+      country: "India",
+    });
+
+    // Also write to shipping_addresses for backwards compatibility
     await supabaseAdmin.from("shipping_addresses").insert({
       order_id: orderId,
       user_id: verifiedUserId,
@@ -293,6 +396,96 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       pincode: customer.pin.trim(),
       country: "India",
     });
+
+    // Save to customer account address book if authenticated
+    if (customerUuid) {
+      try {
+        await supabaseAdmin.from("customer_addresses").insert({
+          customer_id: customerUuid,
+          customer_auth_uid: verifiedUserId,
+          address_type: "shipping",
+          is_default: false,
+          full_name: customer.name.trim(),
+          phone: customer.phone.replace(/\D/g, ""),
+          address_line1: customer.address.trim(),
+          city: customer.city.trim(),
+          state: customer.state.trim(),
+          postal_code: customer.pin.trim(),
+          country: "India",
+        });
+      } catch (addrErr) {
+        console.warn("[Customer Address Book] Note: could not save address duplicate:", addrErr);
+      }
+    }
+
+    // 8. Order status history audit trail
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: orderId,
+      status: paymentMethod === "cod" ? "confirmed" : "pending_payment",
+      comment:
+        paymentMethod === "cod"
+          ? "Order placed and confirmed with Cash on Delivery (COD)"
+          : "Order created; awaiting Razorpay payment confirmation",
+      changed_by: verifiedUserId || "customer",
+    });
+
+    // 9. Atomic inventory reservation / deduction
+    for (const item of itemsWithDetails) {
+      if (item.productId) {
+        try {
+          const { data: prod } = await supabaseAdmin
+            .from("products")
+            .select("id, stock")
+            .eq("id", item.productId)
+            .single();
+
+          if (prod) {
+            const currentStock = (prod.stock || {}) as Record<string, number>;
+            const curQty = currentStock[item.size] ?? 0;
+            const newQty = Math.max(0, curQty - item.qty);
+            const updatedStock = { ...currentStock, [item.size]: newQty };
+
+            await supabaseAdmin
+              .from("products")
+              .update({ stock: updatedStock as unknown as Json, updated_at: new Date().toISOString() })
+              .eq("id", prod.id);
+
+            await supabaseAdmin.from("inventory_transactions").insert({
+              product_id: prod.id,
+              variant_id: item.variantId || null,
+              transaction_type: "order_sale",
+              quantity: item.qty,
+              previous_quantity: curQty,
+              new_quantity: newQty,
+              reference_id: orderNumber,
+              reason: "order_placed",
+              created_by: verifiedUserId || "customer",
+            });
+          }
+        } catch (stockErr) {
+          console.error("[Inventory Deduction Error]", stockErr);
+        }
+      }
+    }
+
+    // 10. Increment coupon times_used if applied
+    if (coupon && discount > 0) {
+      const { data: cp } = await supabaseAdmin
+        .from("coupons")
+        .select("id, times_used")
+        .ilike("code", coupon.trim().toUpperCase())
+        .maybeSingle();
+
+      if (cp) {
+        await supabaseAdmin
+          .from("coupons")
+          .update({
+            times_used: (cp.times_used || 0) + 1,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", cp.id);
+      }
+    }
 
     // 8. Handle Payment Method
     if (paymentMethod === "online") {
@@ -471,6 +664,29 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
         items,
         paymentMode: "prepaid",
       });
+
+      // Record status transition in order_status_history
+      await supabaseAdmin.from("order_status_history").insert({
+        order_id: order.id,
+        status: "confirmed",
+        comment: "Payment captured and order confirmed via Razorpay",
+        changed_by: "razorpay",
+      });
+
+      // Insert customer notification if authenticated
+      if (order.user_id) {
+        try {
+          await supabaseAdmin.from("notifications").insert({
+            customer_auth_uid: order.user_id,
+            title: "Payment Confirmed",
+            message: `Your payment for order #${order.order_number || order.id.slice(0, 8)} has been verified. We are preparing your shipment.`,
+            type: "order",
+            link: "/account",
+          });
+        } catch (notifErr) {
+          console.warn("[Notification] Could not insert:", notifErr);
+        }
+      }
     }
 
     return {

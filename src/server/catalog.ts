@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { PRODUCTS, type Product, type Size } from "@/lib/products";
+import { type Product, type Size } from "@/lib/products";
 import type { Json } from "@/integrations/supabase/types";
 
 /**
@@ -40,7 +40,8 @@ function mapDbProductToFrontend(row: any): Product {
 }
 
 /**
- * Returns all active products from Supabase, falling back to static PRODUCTS if offline.
+ * Returns all active products directly from Supabase.
+ * No hardcoded demo fallbacks - Supabase is the sole source of truth.
  */
 export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<Product[]> => {
@@ -51,20 +52,21 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
         .eq("is_published", true)
         .order("rank", { ascending: true });
 
-      if (error || !dbProducts || dbProducts.length === 0) {
-        return PRODUCTS;
+      if (error || !dbProducts) {
+        console.error("[Catalog ServerFn] Error querying products:", error);
+        return [];
       }
 
       return dbProducts.map(mapDbProductToFrontend);
     } catch (err) {
-      console.warn("[Catalog ServerFn] Falling back to static PRODUCTS:", err);
-      return PRODUCTS;
+      console.error("[Catalog ServerFn] Unexpected error:", err);
+      return [];
     }
   },
 );
 
 /**
- * Returns a single product by slug from Supabase, falling back to static PRODUCTS.
+ * Returns a single product by slug strictly from Supabase.
  */
 export const getProductBySlugServerFn = createServerFn({ method: "POST" })
   .validator((params: { slug: string }) => params)
@@ -74,17 +76,17 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
         .from("products")
         .select("*")
         .eq("slug", data.slug)
+        .eq("is_published", true)
         .maybeSingle();
 
       if (!error && row) {
         return mapDbProductToFrontend(row);
       }
+      return null;
     } catch (err) {
-      console.warn("[Product Detail ServerFn] DB error:", err);
+      console.error("[Product Detail ServerFn] DB error:", err);
+      return null;
     }
-
-    const fallback = PRODUCTS.find((p) => p.slug === data.slug);
-    return fallback || null;
   });
 
 /**

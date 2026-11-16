@@ -33,15 +33,27 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 }
 
 function createSupabaseAdminClient() {
-  const SUPABASE_URL =
+  const SUPABASE_URL = (
     process.env["SUPABASE_URL"] ||
     process.env["VITE_SUPABASE_URL"] ||
-    "https://placeholder.supabase.co";
-  const SUPABASE_SERVICE_ROLE_KEY =
-    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
-    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-    "placeholder-key";
+    ""
+  ).replace(/^["']|["']$/g, "").trim();
+
+  const SUPABASE_SERVICE_ROLE_KEY = (
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] || ""
+  ).replace(/^["']|["']$/g, "").trim();
+
+  if (!SUPABASE_URL) {
+    throw new Error(
+      "[Supabase Security Error] SUPABASE_URL is missing in server environment. Please configure it in your environment variables.",
+    );
+  }
+
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error(
+      "[Supabase Security Error] SUPABASE_SERVICE_ROLE_KEY is missing in server environment. Administrative and server-side operations require a dedicated, private service_role key to bypass RLS securely and must never fall back to public keys.",
+    );
+  }
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     global: {

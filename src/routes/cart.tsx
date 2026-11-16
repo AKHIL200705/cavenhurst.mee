@@ -41,25 +41,36 @@ function Cart() {
         <ul className="mt-8 divide-y divide-border">
           {cart.map((c, i) => {
             const p = getProduct(c.slug);
-            if (!p) return null;
+            const itemName = c.name || p?.name;
+            if (!itemName) return null;
+            const itemPrice = c.price ?? p?.price ?? 0;
+            const itemImage = c.image || (p ? imageFor(p, c.color) : "");
+            const maxStock = c.maxStock ?? (p?.stock?.[c.size] ?? 10);
+
             return (
               <li
                 key={`${c.slug}-${c.size}-${c.color}`}
                 className="flex gap-4 py-5 animate-in fade-in"
               >
-                <img
-                  src={imageFor(p, c.color)}
-                  alt={p.name}
-                  className="h-32 w-24 rounded-lg bg-paper object-cover"
-                />
+                {itemImage ? (
+                  <img
+                    src={itemImage}
+                    alt={itemName}
+                    className="h-32 w-24 rounded-lg bg-paper object-cover"
+                  />
+                ) : (
+                  <div className="h-32 w-24 rounded-lg bg-muted flex items-center justify-center text-xs text-muted-foreground">
+                    CAVENHURST
+                  </div>
+                )}
                 <div className="flex flex-1 flex-col">
-                  <Link to="/product/$slug" params={{ slug: p.slug }} className="font-bold">
-                    {p.name}
+                  <Link to="/product/$slug" params={{ slug: c.slug }} className="font-bold">
+                    {itemName}
                   </Link>
                   <p className="text-sm text-muted-foreground">
                     {c.color} · Size {c.size}
                   </p>
-                  <p className="mt-1 font-bold">{formatINR(p.price)}</p>
+                  <p className="mt-1 font-bold">{formatINR(itemPrice)}</p>
                   <div className="mt-auto flex items-center justify-between">
                     <div className="flex items-center rounded-md border border-border">
                       <button
@@ -73,7 +84,7 @@ function Cart() {
                       <button
                         aria-label="Increase"
                         onClick={() => {
-                          if (c.qty >= (p.stock[c.size] ?? 0))
+                          if (c.qty >= maxStock)
                             toast.error("No more stock in this size");
                           setQty(i, c.qty + 1);
                         }}

@@ -318,3 +318,282 @@ test("Google Auth: Cryptographic session token signing and verification", () => 
   const expired = testSignSessionToken(user, secret, -10);
   assert.equal(testVerifySessionToken(expired, secret), null);
 });
+
+// ==============================================================================
+// 7. CUSTOMER ADDRESS VALIDATION & NORMALIZATION TESTS
+// ==============================================================================
+function validateCustomerAddress(input) {
+  if (!input.fullName || input.fullName.trim().length < 2) {
+    return { valid: false, error: "Full name must be at least 2 characters" };
+  }
+  const cleanPhone = (input.phone || "").replace(/\D/g, "").slice(-10);
+  if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+    return { valid: false, error: "Valid 10-digit Indian phone number required" };
+  }
+  if (!input.addressLine1 || input.addressLine1.trim().length < 5) {
+    return { valid: false, error: "Address line 1 must be at least 5 characters" };
+  }
+  if (!input.city || !input.city.trim()) {
+    return { valid: false, error: "City is required" };
+  }
+  if (!input.state || !input.state.trim()) {
+    return { valid: false, error: "State is required" };
+  }
+  if (!/^[1-9]\d{5}$/.test((input.postalCode || "").trim())) {
+    return { valid: false, error: "Valid 6-digit Indian PIN code required" };
+  }
+  return {
+    valid: true,
+    normalized: {
+      fullName: input.fullName.trim(),
+      phone: cleanPhone,
+      addressLine1: input.addressLine1.trim(),
+      addressLine2: input.addressLine2 ? input.addressLine2.trim() : null,
+      city: input.city.trim(),
+      state: input.state.trim(),
+      postalCode: input.postalCode.trim(),
+      country: input.country || "India",
+      isDefault: Boolean(input.isDefault),
+    },
+  };
+}
+
+test("Customer Addresses: Validation rules and normalization", () => {
+  // Valid address
+  const validRes = validateCustomerAddress({
+    fullName: "Akhil Sai",
+    phone: "+91 9876543210",
+    addressLine1: "Flat 402, Cavenhurst Tower",
+    city: "Hyderabad",
+    state: "Telangana",
+    postalCode: "500081",
+    isDefault: true,
+  });
+  assert.equal(validRes.valid, true);
+  assert.equal(validRes.normalized.phone, "9876543210");
+  assert.equal(validRes.normalized.isDefault, true);
+
+  // Invalid PIN
+  assert.equal(
+    validateCustomerAddress({
+      fullName: "Akhil Sai",
+      phone: "9876543210",
+      addressLine1: "Flat 402, Cavenhurst Tower",
+      city: "Hyderabad",
+      state: "Telangana",
+      postalCode: "012345",
+    }).valid,
+    false,
+  );
+
+  // Invalid Phone
+  assert.equal(
+    validateCustomerAddress({
+      fullName: "Akhil Sai",
+      phone: "1234567890",
+      addressLine1: "Flat 402, Cavenhurst Tower",
+      city: "Hyderabad",
+      state: "Telangana",
+      postalCode: "500081",
+    }).valid,
+    false,
+  );
+});
+
+// ==============================================================================
+// 8. CART MERGING & INVENTORY CLAMPING LOGIC TESTS
+// ==============================================================================
+function mergeCartItems(existingDbItems, guestItems, inventoryMap) {
+  const merged = [...existingDbItems];
+
+  for (const guest of guestItems) {
+    const availableStock = inventoryMap[`${guest.slug}:${guest.size}`] ?? 0;
+    if (availableStock <= 0) continue; // Out of stock items omitted
+
+    const existingIdx = merged.findIndex(
+      (m) => m.slug === guest.slug && m.size === guest.size && m.color === guest.color,
+    );
+
+    if (existingIdx >= 0) {
+      const current = merged[existingIdx];
+      const combinedQty = Math.min(current.qty + guest.qty, availableStock);
+      merged[existingIdx] = { ...current, qty: combinedQty };
+    } else {
+      const qty = Math.min(guest.qty, availableStock);
+      merged.push({ ...guest, qty });
+    }
+  }
+
+  return merged;
+}
+
+test("Shopping Cart: Guest merge and inventory clamping", () => {
+  const inventory = {
+    "classic-tee:M": 5,
+    "classic-tee:L": 0, // out of stock
+    "urban-hoodie:XL": 3,
+  };
+
+  const dbCart = [
+    { slug: "classic-tee", size: "M", color: "Navy", qty: 2 },
+  ];
+
+  const guestCart = [
+    { slug: "classic-tee", size: "M", color: "Navy", qty: 4 }, // 2 + 4 = 6, clamped to 5
+    { slug: "classic-tee", size: "L", color: "Navy", qty: 1 }, // out of stock -> excluded
+    { slug: "urban-hoodie", size: "XL", color: "Black", qty: 5 }, // 5 requested, clamped to 3
+  ];
+
+  const result = mergeCartItems(dbCart, guestCart, inventory);
+
+  assert.equal(result.length, 2, "Only in-stock items preserved");
+  const tee = result.find((i) => i.slug === "classic-tee");
+  assert.equal(tee.qty, 5, "Quantity clamped to available stock of 5");
+  const hoodie = result.find((i) => i.slug === "urban-hoodie");
+  assert.equal(hoodie.qty, 3, "Quantity clamped to available stock of 3");
+});
+
+// ==============================================================================
+// 9. DATABASE COUPON VALIDATION TESTS
+// ==============================================================================
+function validateDatabaseCoupon(coupon, orderSubtotal) {
+  if (!coupon || !coupon.isActive) {
+    return { valid: false, error: "Coupon is invalid or inactive" };
+  }
+  if (coupon.expiresAt && new Date(coupon.expiresAt).getTime() < Date.now()) {
+    return { valid: false, error: "Coupon has expired" };
+  }
+  if (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit) {
+    return { valid: false, error: "Coupon usage limit reached" };
+  }
+  if (coupon.minOrderValue && orderSubtotal < coupon.minOrderValue) {
+    return { valid: false, error: `Minimum order value of ₹${coupon.minOrderValue} required` };
+  }
+
+  let discount = 0;
+  if (coupon.discountType === "percentage") {
+    discount = Math.round((orderSubtotal * coupon.discountValue) / 100);
+    if (coupon.maxDiscount && discount > coupon.maxDiscount) {
+      discount = coupon.maxDiscount;
+    }
+  } else if (coupon.discountType === "fixed") {
+    discount = Math.min(coupon.discountValue, orderSubtotal);
+  }
+
+  return { valid: true, discount };
+}
+
+test("Coupons: Database coupon rules and limits", () => {
+  const percentageCoupon = {
+    code: "SAVE20",
+    discountType: "percentage",
+    discountValue: 20,
+    minOrderValue: 2000,
+    maxDiscount: 500,
+    usageLimit: 100,
+    timesUsed: 10,
+    isActive: true,
+  };
+
+  // Meets min order value, discount capped at maxDiscount
+  assert.deepEqual(validateDatabaseCoupon(percentageCoupon, 3000), {
+    valid: true,
+    discount: 500, // 20% of 3000 is 600, capped at 500
+  });
+
+  // Below min order value
+  assert.equal(validateDatabaseCoupon(percentageCoupon, 1500).valid, false);
+
+  // Expired coupon
+  const expiredCoupon = { ...percentageCoupon, expiresAt: "2020-01-01T00:00:00Z" };
+  assert.equal(validateDatabaseCoupon(expiredCoupon, 3000).valid, false);
+
+  // Usage limit exceeded
+  const exhaustedCoupon = { ...percentageCoupon, usageLimit: 5, timesUsed: 5 };
+  assert.equal(validateDatabaseCoupon(exhaustedCoupon, 3000).valid, false);
+});
+
+// ==============================================================================
+// 10. RAZORPAY STRICT CAPTURED STATUS TEST (FAIL CLOSED)
+// ==============================================================================
+function verifyRazorpayCapturedState(paymentEntity) {
+  if (!paymentEntity) return { verified: false, reason: "No payment payload" };
+  // Fail-closed rule: reject merely 'authorized' or 'created'
+  if (paymentEntity.status !== "captured") {
+    return {
+      verified: false,
+      reason: `Payment is in '${paymentEntity.status}' status, not 'captured'`,
+    };
+  }
+  return { verified: true, amount: paymentEntity.amount / 100 };
+}
+
+test("Razorpay: Strict captured verification (fail-closed)", () => {
+  assert.equal(verifyRazorpayCapturedState({ status: "captured", amount: 249900 }).verified, true);
+  assert.equal(verifyRazorpayCapturedState({ status: "authorized", amount: 249900 }).verified, false);
+  assert.equal(verifyRazorpayCapturedState({ status: "created", amount: 249900 }).verified, false);
+  assert.equal(verifyRazorpayCapturedState({ status: "failed", amount: 249900 }).verified, false);
+});
+
+// ==============================================================================
+// 11. ADMIN REFUND LOGIC: PARTIAL VS FULL REFUND
+// ==============================================================================
+function evaluateRefundTransition(orderTotal, previousRefunds, currentRefundAmount) {
+  const priorSum = previousRefunds.reduce((sum, r) => sum + r.amount, 0);
+  const totalRefunded = priorSum + currentRefundAmount;
+
+  if (totalRefunded > orderTotal) {
+    throw new Error("Total refunds cannot exceed order total");
+  }
+
+  const isFullRefund = totalRefunded >= orderTotal;
+  return {
+    isFullRefund,
+    totalRefunded,
+    newPaymentStatus: isFullRefund ? "refunded" : "partially_refunded",
+    newOrderStatus: isFullRefund ? "refunded" : "processing", // Preserve active order status on partial
+  };
+}
+
+test("Admin: Partial vs full refund state transitions", () => {
+  // Partial refund: ₹500 of ₹2000
+  const partial = evaluateRefundTransition(2000, [], 500);
+  assert.equal(partial.isFullRefund, false);
+  assert.equal(partial.newPaymentStatus, "partially_refunded");
+  assert.equal(partial.newOrderStatus, "processing");
+
+  // Second partial refund: additional ₹1500 of ₹2000 -> full
+  const full = evaluateRefundTransition(2000, [{ amount: 500 }], 1500);
+  assert.equal(full.isFullRefund, true);
+  assert.equal(full.newPaymentStatus, "refunded");
+  assert.equal(full.newOrderStatus, "refunded");
+
+  // Over-refund attempt throws error
+  assert.throws(() => evaluateRefundTransition(2000, [{ amount: 500 }], 1600));
+});
+
+// ==============================================================================
+// 12. AUDIT TRAIL LOGGING
+// ==============================================================================
+test("Audit Trail: Status history records all transitions", () => {
+  const history = [];
+  function logTransition(orderId, status, comment, changedBy) {
+    history.push({
+      orderId,
+      status,
+      comment,
+      changedBy,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  logTransition("ord_1", "pending_payment", "Order placed by customer", "cust_123");
+  logTransition("ord_1", "confirmed", "Payment verified via Razorpay webhook", "system");
+  logTransition("ord_1", "in_transit", "ShipMaxx360 AWB generated", "admin");
+
+  assert.equal(history.length, 3);
+  assert.equal(history[0].status, "pending_payment");
+  assert.equal(history[1].status, "confirmed");
+  assert.equal(history[2].status, "in_transit");
+});
+

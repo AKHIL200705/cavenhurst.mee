@@ -9,7 +9,9 @@ export interface AdminCustomerItem {
   phone: string;
   orderCount: number;
   totalSpent: number;
-  createdAt?: string | undefined;
+  status?: string | null | undefined;
+  authUid?: string | null | undefined;
+  createdAt?: string | null | undefined;
 }
 
 interface CustomersTabProps {

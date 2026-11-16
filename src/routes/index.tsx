@@ -2,7 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Gem, RefreshCw, ShieldCheck, Truck } from "lucide-react";
 import { ProductCard } from "@/components/site/ProductCard";
 import { WingMark } from "@/components/site/Logo";
-import { PRODUCTS } from "@/lib/products";
+import type { Product } from "@/lib/products";
+import { getStoreCatalogServerFn } from "@/server/catalog";
 import hero from "@/assets/hero-urban-motion.jpg";
 import teeCream from "@/assets/tee-cream.jpg";
 import hoodie from "@/assets/hoodie-navy.jpg";
@@ -12,6 +13,15 @@ import teeNavy from "@/assets/tee-navy.jpg";
 import fabric from "@/assets/fabric-navy.jpg";
 
 export const Route = createFileRoute("/")({
+  loader: async (): Promise<{ products: Product[] }> => {
+    try {
+      const catalog = await getStoreCatalogServerFn();
+      return { products: catalog || [] };
+    } catch (err) {
+      console.error("[Home] Error loading store catalog from database:", err);
+      return { products: [] };
+    }
+  },
   head: () => ({
     meta: [
       { title: "CAVENHURST — Urban Motion | Premium Apparel" },
@@ -38,7 +48,8 @@ const collections = [
 ];
 
 function Home() {
-  const arrivals = PRODUCTS.filter((p) => p.isNew);
+  const { products } = Route.useLoaderData();
+  const arrivals = products.filter((p) => p.isNew);
   return (
     <>
       <section className="relative overflow-hidden">

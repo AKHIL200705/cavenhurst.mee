@@ -56,8 +56,13 @@ export function isWhitelistedAdminEmail(email?: string | null | undefined): bool
 }
 
 function getSessionSecret(): string {
-  const secret = getGoogleClientSecret();
-  return secret || "cavenhurst_secure_auth_session_fallback_secret_2026";
+  const secret = process.env["SESSION_SECRET"] || getGoogleClientSecret();
+  if (!secret) {
+    throw new Error(
+      "[Auth Security Error] SESSION_SECRET is missing. A dedicated production session secret (or GOOGLE_CLIENT_SECRET) is required.",
+    );
+  }
+  return secret;
 }
 
 async function createHmacSha256(data: string, secret: string): Promise<string> {
