@@ -61,6 +61,7 @@ import {
   getAdminUsersServerFn,
   getAdminAuditLogsServerFn,
   getAdminSettingsServerFn,
+  adminLoginServerFn,
 } from "@/server/admin";
 
 export const Route = createFileRoute("/admin")({
@@ -108,10 +109,10 @@ const NAV_TABS = [
 ] as const;
 
 function AdminDashboard() {
-  const { user, ready } = useAuth();
+  const { user, sessionToken, ready } = useAuth();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [authToken, setAuthToken] = useState<string | undefined>(undefined);
+  const [authToken, setAuthToken] = useState<string | undefined>(sessionToken || undefined);
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [loading, setLoading] = useState(false);
 
@@ -149,6 +150,14 @@ function AdminDashboard() {
   const verifyAdmin = useCallback(async () => {
     setAuthChecking(true);
     try {
+      // 0. Check stored admin token
+      if (typeof window !== "undefined") {
+        const adminTok = localStorage.getItem("cavenhurst_admin_token");
+        if (adminTok) {
+          setAuthToken(adminTok);
+        }
+      }
+
       // 1. Check for active direct Google session first
       if (typeof window !== "undefined") {
         const stored = localStorage.getItem("cavenhurst_google_session");
@@ -177,6 +186,7 @@ function AdminDashboard() {
 
       // 2. Check current useAuth user
       if (user) {
+        if (sessionToken) setAuthToken(sessionToken);
         if (
           user.isAdmin ||
           (user.email &&
@@ -235,7 +245,7 @@ function AdminDashboard() {
     } finally {
       setAuthChecking(false);
     }
-  }, [user]);
+  }, [user, sessionToken]);
 
   useEffect(() => {
     if (ready) {
@@ -251,6 +261,10 @@ function AdminDashboard() {
     try {
       let token = authToken;
       if (!token && typeof window !== "undefined") {
+        const adminTok = localStorage.getItem("cavenhurst_admin_token");
+        if (adminTok) token = adminTok;
+      }
+      if (!token && typeof window !== "undefined") {
         try {
           const stored = localStorage.getItem("cavenhurst_google_session");
           if (stored) {
@@ -261,12 +275,35 @@ function AdminDashboard() {
           /* ignore */
         }
       }
+      if (!token && sessionToken) {
+        token = sessionToken;
+      }
       if (!token) {
         const {
           data: { session },
         } = await supabase.auth.getSession();
         token = session?.access_token;
       }
+
+      const userEmail = user?.email?.toLowerCase();
+      if (
+        !token &&
+        userEmail &&
+        ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail)
+      ) {
+        try {
+          const authRes = await adminLoginServerFn({ data: { email: userEmail } });
+          if (authRes?.sessionToken) {
+            token = authRes.sessionToken;
+            if (typeof window !== "undefined") {
+              localStorage.setItem("cavenhurst_admin_token", token);
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
       setAuthToken(token);
 
       switch (activeTab) {

@@ -3,6 +3,7 @@ import { ShieldAlert, ShieldCheck, Lock, Mail, ArrowRight, RefreshCw, UserCheck 
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { adminLoginServerFn } from "@/server/admin";
 
 interface AdminAuthGateProps {
   onAuthenticated: () => void;
@@ -22,9 +23,24 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         user.email.toLowerCase(),
       ));
 
-  const handleCurrentSessionLogin = () => {
-    toast.success("Administrator session verified from active account.");
-    onAuthenticated();
+  const handleCurrentSessionLogin = async () => {
+    setLoading(true);
+    try {
+      if (user?.email) {
+        const res = await adminLoginServerFn({
+          data: { email: user.email.toLowerCase().trim() },
+        });
+        if (res.sessionToken) {
+          localStorage.setItem("cavenhurst_admin_token", res.sessionToken);
+        }
+      }
+      toast.success("Administrator session verified from active account.");
+      onAuthenticated();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to verify admin account");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -91,6 +107,25 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         );
         toast.error("Access denied: Not an administrator.");
         return;
+      }
+
+      if (data.session?.access_token) {
+        localStorage.setItem("cavenhurst_admin_token", data.session.access_token);
+      }
+
+      // Also get server signed token for seamless server functions access
+      try {
+        const serverAuth = await adminLoginServerFn({
+          data: {
+            email: userEmail!,
+            authToken: data.session?.access_token,
+          },
+        });
+        if (serverAuth.sessionToken) {
+          localStorage.setItem("cavenhurst_admin_token", serverAuth.sessionToken);
+        }
+      } catch {
+        // Fallback to supabase access token
       }
 
       toast.success("Administrator session verified.");

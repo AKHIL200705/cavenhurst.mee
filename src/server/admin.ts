@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
-import { verifyGoogleSessionOrToken } from "./auth";
+import { verifyGoogleSessionOrToken, signSessionToken } from "./auth";
 import type { Json, Database } from "@/integrations/supabase/types";
 
 type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];
@@ -1617,8 +1617,17 @@ export const adminLoginServerFn = createServerFn({ method: "POST" })
         .eq("id", adminUser.id);
     }
 
+    const sessionToken = await signSessionToken({
+      sub: adminUser?.id || "admin_root",
+      email,
+      name: adminUser?.full_name || "Administrator",
+      picture: null,
+      isAdmin: true,
+    });
+
     return {
       success: true,
+      sessionToken,
       user: {
         email,
         name: adminUser?.full_name || "Administrator",
