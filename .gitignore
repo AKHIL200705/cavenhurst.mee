@@ -1,4 +1,7 @@
-# Environment variables
+# Database backups
+supabase/backups/
+*.dump
+*.sql.bak
 .env
 .env*.local
 !.env.example

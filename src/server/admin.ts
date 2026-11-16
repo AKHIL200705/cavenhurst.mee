@@ -233,7 +233,24 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
 
     const dailySales = Array.from(dailySalesMap.values());
 
+    const [custCountRes, prodCountRes, recentOrdersRes, recentCustRes] = await Promise.all([
+      supabaseAdmin.from("customers").select("id", { count: "exact", head: true }),
+      supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
+      supabaseAdmin
+        .from("orders")
+        .select("id, order_number, customer_name, customer_email, total, status, payment_status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(5),
+      supabaseAdmin
+        .from("customers")
+        .select("id, full_name, email, phone, created_at")
+        .order("created_at", { ascending: false })
+        .limit(5),
+    ]);
+
     return {
+      totalCustomers: custCountRes.count ?? 0,
+      totalProducts: prodCountRes.count ?? 0,
       totalOrders,
       totalPaidRevenue,
       totalCodRevenue,
@@ -249,6 +266,8 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       lowStockCount,
       lowStockAlerts,
       dailySales,
+      recentOrders: recentOrdersRes.data || [],
+      recentRegistrations: recentCustRes.data || [],
     };
   });
 
@@ -955,21 +974,32 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const [customersRes, ordersRes] = await Promise.all([
+    const [customersRes, profilesRes, ordersRes] = await Promise.all([
       supabaseAdmin
         .from("customers")
         .select(
-          "id, auth_provider_uid, full_name, email, phone, account_status, registration_date, created_at",
+          "id, auth_provider_uid, full_name, email, phone, account_status, registration_date, created_at, updated_at",
         )
         .order("created_at", { ascending: false })
         .limit(200),
       supabaseAdmin
+        .from("profiles")
+        .select("id, email, phone, full_name, auth_provider, account_status, created_at, updated_at"),
+      supabaseAdmin
         .from("orders")
-        .select("id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status"),
+        .select("id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status, created_at"),
     ]);
 
     const orders = ordersRes.data || [];
+    const profiles = profilesRes.data || [];
+    const profileMap = new Map(profiles.map((p) => [p.id, p]));
+    const profileEmailMap = new Map(profiles.map((p) => [p.email?.toLowerCase(), p]));
+
     const customerList = (customersRes.data || []).map((c) => {
+      const matchedProfile =
+        (c.auth_provider_uid ? profileMap.get(c.auth_provider_uid) : null) ||
+        (c.email ? profileEmailMap.get(c.email.toLowerCase()) : null);
+
       const customerOrders = orders.filter(
         (o) =>
           o.customer_id === c.id ||
@@ -981,18 +1011,74 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
 
       return {
         id: c.id,
-        authUid: c.auth_provider_uid,
-        name: c.full_name || "Customer",
-        email: c.email || "",
-        phone: c.phone || "",
+        authUid: matchedProfile?.id || c.auth_provider_uid,
+        name: c.full_name || matchedProfile?.full_name || "Customer",
+        email: c.email || matchedProfile?.email || "",
+        phone: c.phone || matchedProfile?.phone || "",
+        loginProvider: matchedProfile?.auth_provider || "email",
         orderCount: customerOrders.length,
         totalSpent,
-        status: c.account_status || "active",
-        createdAt: c.registration_date || c.created_at,
+        status: c.account_status || matchedProfile?.account_status || "active",
+        createdAt: c.registration_date || c.created_at || matchedProfile?.created_at,
+        lastLogin: matchedProfile?.updated_at || c.updated_at || null,
       };
     });
 
     return customerList;
+  });
+
+export const getAdminCustomerDetailsServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; customerId: string }) => params)
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+
+    const { data: customer } = await supabaseAdmin
+      .from("customers")
+      .select("*")
+      .eq("id", data.customerId)
+      .maybeSingle();
+
+    if (!customer) throw new Error("Customer not found");
+
+    const orAddrClauses: string[] = [`customer_id.eq.${customer.id}`];
+    if (customer.auth_provider_uid) orAddrClauses.push(`customer_auth_uid.eq.${customer.auth_provider_uid}`);
+
+    const orOrderClauses: string[] = [`customer_id.eq.${customer.id}`];
+    if (customer.auth_provider_uid) orOrderClauses.push(`user_id.eq.${customer.auth_provider_uid}`);
+    if (customer.email) orOrderClauses.push(`customer_email.eq.${customer.email.toLowerCase()}`);
+
+    const [addressesRes, ordersRes] = await Promise.all([
+      supabaseAdmin
+        .from("customer_addresses")
+        .select("*")
+        .or(orAddrClauses.join(","))
+        .order("is_default", { ascending: false }),
+      supabaseAdmin
+        .from("orders")
+        .select("id, order_number, total, status, payment_status, shipment_status, awb_number, created_at, items")
+        .or(orOrderClauses.join(","))
+        .order("created_at", { ascending: false }),
+    ]);
+
+    const orders = ordersRes.data || [];
+    const orderIds = orders.map((o) => o.id);
+
+    let payments: any[] = [];
+    if (orderIds.length > 0) {
+      const { data: pmts } = await supabaseAdmin
+        .from("payments")
+        .select("*")
+        .in("order_id", orderIds)
+        .order("created_at", { ascending: false });
+      payments = pmts || [];
+    }
+
+    return {
+      customer,
+      addresses: addressesRes.data || [],
+      orders,
+      payments,
+    };
   });
 
 // -----------------------------------------------------------------------------
@@ -1176,3 +1262,368 @@ export const updateAdminSettingsServerFn = createServerFn({ method: "POST" })
 
     return { success: true, settings: updated };
   });
+
+// -----------------------------------------------------------------------------
+// 13. CATEGORIES MANAGEMENT
+// -----------------------------------------------------------------------------
+
+export const getAdminCategoriesServerFn = createServerFn({ method: "POST" })
+  .validator((params?: AdminAuthParams | undefined) => params || {})
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+    const { data: cats, error } = await supabaseAdmin
+      .from("product_categories")
+      .select("*")
+      .order("name", { ascending: true });
+    if (error) throw new Error(error.message);
+    return cats || [];
+  });
+
+export const saveAdminCategoryServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      id?: string | undefined;
+      slug: string;
+      name: string;
+      description?: string | undefined;
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const categoryData = {
+      slug: data.slug.toLowerCase().trim(),
+      name: data.name.trim(),
+      description: data.description?.trim() || null,
+    };
+
+    if (data.id) {
+      const { data: updated, error } = await supabaseAdmin
+        .from("product_categories")
+        .update(categoryData)
+        .eq("id", data.id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await recordAdminAuditLog(admin, "category_update", "category", data.id, categoryData);
+      return { success: true, category: updated };
+    } else {
+      const { data: created, error } = await supabaseAdmin
+        .from("product_categories")
+        .insert(categoryData)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await recordAdminAuditLog(admin, "category_create", "category", created.id, categoryData);
+      return { success: true, category: created };
+    }
+  });
+
+export const deleteAdminCategoryServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; id: string }) => params)
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const { error } = await supabaseAdmin.from("product_categories").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    await recordAdminAuditLog(admin, "category_delete", "category", data.id, {});
+    return { success: true };
+  });
+
+// -----------------------------------------------------------------------------
+// 14. PRODUCT VARIANTS MANAGEMENT
+// -----------------------------------------------------------------------------
+
+export const getAdminVariantsServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; productId?: string | undefined }) => params)
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+    let query = supabaseAdmin
+      .from("product_variants")
+      .select("*, products(name, slug)")
+      .order("created_at", { ascending: false });
+
+    if (data.productId) {
+      query = query.eq("product_id", data.productId);
+    }
+
+    const { data: variants, error } = await query.limit(300);
+    if (error) throw new Error(error.message);
+    return variants || [];
+  });
+
+export const saveAdminVariantServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      id?: string | undefined;
+      productId: string;
+      sku: string;
+      size: string;
+      color: string;
+      colorHex?: string | undefined;
+      stockQuantity: number;
+      additionalPrice?: number | undefined;
+      isAvailable?: boolean | undefined;
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const variantPayload = {
+      product_id: data.productId,
+      sku: data.sku.trim(),
+      size: data.size.trim(),
+      color: data.color.trim(),
+      color_hex: data.colorHex?.trim() || null,
+      stock_quantity: Math.max(0, data.stockQuantity),
+      additional_price: data.additionalPrice || 0,
+      is_available: data.isAvailable ?? true,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.id) {
+      const { data: updated, error } = await supabaseAdmin
+        .from("product_variants")
+        .update(variantPayload)
+        .eq("id", data.id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await recordAdminAuditLog(admin, "variant_update", "variant", data.id, variantPayload);
+      return { success: true, variant: updated };
+    } else {
+      const { data: created, error } = await supabaseAdmin
+        .from("product_variants")
+        .insert(variantPayload)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await recordAdminAuditLog(admin, "variant_create", "variant", created.id, variantPayload);
+      return { success: true, variant: created };
+    }
+  });
+
+export const deleteAdminVariantServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; id: string }) => params)
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const { error } = await supabaseAdmin.from("product_variants").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    await recordAdminAuditLog(admin, "variant_delete", "variant", data.id, {});
+    return { success: true };
+  });
+
+// -----------------------------------------------------------------------------
+// 15. RETURNS MANAGEMENT
+// -----------------------------------------------------------------------------
+
+export const getAdminReturnsServerFn = createServerFn({ method: "POST" })
+  .validator((params?: AdminAuthParams | undefined) => params || {})
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+    const { data: returns, error } = await supabaseAdmin
+      .from("returns")
+      .select("*, orders(order_number, total, customer_name, customer_email, customer_phone)")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return returns || [];
+  });
+
+export const updateAdminReturnStatusServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      returnId: string;
+      status: string;
+      adminNotes?: string | undefined;
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const { data: updated, error } = await supabaseAdmin
+      .from("returns")
+      .update({
+        status: data.status,
+        admin_notes: data.adminNotes ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", data.returnId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    await recordAdminAuditLog(admin, "return_status_update", "return", data.returnId, { status: data.status });
+    return { success: true, returnRecord: updated };
+  });
+
+// -----------------------------------------------------------------------------
+// 16. REVIEWS MODERATION
+// -----------------------------------------------------------------------------
+
+export const getAdminReviewsServerFn = createServerFn({ method: "POST" })
+  .validator((params?: AdminAuthParams | undefined) => params || {})
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+    const { data: reviews, error } = await supabaseAdmin
+      .from("product_reviews")
+      .select("*, products(name, slug)")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return reviews || [];
+  });
+
+export const updateAdminReviewStatusServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      reviewId: string;
+      status: "approved" | "pending" | "rejected";
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const { data: updated, error } = await supabaseAdmin
+      .from("product_reviews")
+      .update({
+        status: data.status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", data.reviewId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    await recordAdminAuditLog(admin, "review_status_update", "review", data.reviewId, { status: data.status });
+    return { success: true, review: updated };
+  });
+
+export const deleteAdminReviewServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; reviewId: string }) => params)
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const { error } = await supabaseAdmin.from("product_reviews").delete().eq("id", data.reviewId);
+    if (error) throw new Error(error.message);
+    await recordAdminAuditLog(admin, "review_delete", "review", data.reviewId, {});
+    return { success: true };
+  });
+
+// -----------------------------------------------------------------------------
+// 17. ADMIN USERS & ACCESS CONTROL
+// -----------------------------------------------------------------------------
+
+export const getAdminUsersServerFn = createServerFn({ method: "POST" })
+  .validator((params?: AdminAuthParams | undefined) => params || {})
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+    const { data: users, error } = await supabaseAdmin
+      .from("admin_users")
+      .select("*")
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    return users || [];
+  });
+
+export const saveAdminUserServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      id?: string | undefined;
+      email: string;
+      fullName: string;
+      role: string;
+      isActive?: boolean | undefined;
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const email = data.email.toLowerCase().trim();
+    if (!email) throw new Error("Email required.");
+
+    const payload = {
+      email,
+      full_name: data.fullName.trim(),
+      role: data.role || "admin",
+      is_active: data.isActive ?? true,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (data.id) {
+      const { data: updated, error } = await supabaseAdmin
+        .from("admin_users")
+        .update(payload)
+        .eq("id", data.id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await recordAdminAuditLog(admin, "admin_user_update", "admin_user", data.id, payload);
+      return { success: true, adminUser: updated };
+    } else {
+      const { data: created, error } = await supabaseAdmin
+        .from("admin_users")
+        .insert({
+          ...payload,
+          permissions: ["*"],
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      await recordAdminAuditLog(admin, "admin_user_create", "admin_user", created.id, payload);
+      return { success: true, adminUser: created };
+    }
+  });
+
+export const toggleAdminUserStatusServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; id: string; isActive: boolean }) => params)
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+    const { data: updated, error } = await supabaseAdmin
+      .from("admin_users")
+      .update({ is_active: data.isActive, updated_at: new Date().toISOString() })
+      .eq("id", data.id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    await recordAdminAuditLog(admin, "admin_user_toggle", "admin_user", data.id, { is_active: data.isActive });
+    return { success: true, adminUser: updated };
+  });
+
+// -----------------------------------------------------------------------------
+// 18. ADMIN LOGIN
+// -----------------------------------------------------------------------------
+
+export const adminLoginServerFn = createServerFn({ method: "POST" })
+  .validator((input: { email: string; password?: string; authToken?: string }) => input)
+  .handler(async ({ data }) => {
+    const email = data.email.toLowerCase().trim();
+    if (!email) throw new Error("Email address required.");
+
+    const isWhitelisted = isWhitelistedAdminEmail(email);
+    const { data: adminUser } = await supabaseAdmin
+      .from("admin_users")
+      .select("id, email, full_name, role, is_active")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (!isWhitelisted && (!adminUser || !adminUser.is_active)) {
+      throw new Error("Access Denied: You do not have administrator permissions for CAVENHURST.");
+    }
+
+    if (data.authToken) {
+      await verifyAdminSession(data.authToken);
+    }
+
+    if (adminUser) {
+      await supabaseAdmin
+        .from("admin_users")
+        .update({ last_login: new Date().toISOString() })
+        .eq("id", adminUser.id);
+    }
+
+    return {
+      success: true,
+      user: {
+        email,
+        name: adminUser?.full_name || "Administrator",
+        role: adminUser?.role || (isWhitelisted ? "superadmin" : "admin"),
+      },
+    };
+  });
+

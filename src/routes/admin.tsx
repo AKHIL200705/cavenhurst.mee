@@ -8,22 +8,28 @@ import {
   LayoutDashboard,
   Package,
   Tags,
+  FolderTree,
+  Layers,
   Boxes,
   CreditCard,
   Truck,
+  RotateCcw,
   Users,
   Ticket,
+  MessageSquare,
+  ShieldCheck,
   ScrollText,
   Sliders,
   LogOut,
   RefreshCw,
-  ShieldCheck,
 } from "lucide-react";
 
 import { AdminAuthGate } from "@/components/admin/AdminAuthGate";
 import { OverviewTab, type OverviewData } from "@/components/admin/OverviewTab";
 import { OrdersTab, type AdminOrderItem } from "@/components/admin/OrdersTab";
 import { ProductsTab, type AdminProductListItem } from "@/components/admin/ProductsTab";
+import { CategoriesTab, type AdminCategoryItem } from "@/components/admin/CategoriesTab";
+import { VariantsTab, type AdminVariantItem } from "@/components/admin/VariantsTab";
 import {
   InventoryTab,
   type AdminInventoryItem,
@@ -31,8 +37,11 @@ import {
 } from "@/components/admin/InventoryTab";
 import { PaymentsTab, type AdminPaymentItem } from "@/components/admin/PaymentsTab";
 import { ShipmentsTab, type AdminShipmentItem } from "@/components/admin/ShipmentsTab";
+import { ReturnsTab, type AdminReturnItem } from "@/components/admin/ReturnsTab";
 import { CustomersTab, type AdminCustomerItem } from "@/components/admin/CustomersTab";
 import { CouponsTab, type AdminCouponItem } from "@/components/admin/CouponsTab";
+import { ReviewsTab, type AdminReviewItem } from "@/components/admin/ReviewsTab";
+import { AdminUsersTab, type AdminUserRecord } from "@/components/admin/AdminUsersTab";
 import { AuditLogsTab, type AdminAuditLogItem } from "@/components/admin/AuditLogsTab";
 import { SettingsTab, type AdminSettingsData } from "@/components/admin/SettingsTab";
 
@@ -40,11 +49,16 @@ import {
   getAdminOverviewServerFn,
   getAdminOrdersServerFn,
   getAdminProductsServerFn,
+  getAdminCategoriesServerFn,
+  getAdminVariantsServerFn,
   getAdminInventoryServerFn,
   getAdminPaymentsServerFn,
   getAdminShipmentsServerFn,
+  getAdminReturnsServerFn,
   getAdminCustomersServerFn,
   getAdminCouponsServerFn,
+  getAdminReviewsServerFn,
+  getAdminUsersServerFn,
   getAdminAuditLogsServerFn,
   getAdminSettingsServerFn,
 } from "@/server/admin";
@@ -62,25 +76,35 @@ type AdminTab =
   | "overview"
   | "orders"
   | "products"
+  | "categories"
+  | "variants"
   | "inventory"
   | "payments"
   | "shipments"
+  | "returns"
   | "customers"
   | "coupons"
-  | "audit"
-  | "settings";
+  | "reviews"
+  | "admin_users"
+  | "settings"
+  | "audit";
 
 const NAV_TABS = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "orders", label: "Orders", icon: Package },
   { id: "products", label: "Products", icon: Tags },
+  { id: "categories", label: "Categories", icon: FolderTree },
+  { id: "variants", label: "Variants", icon: Layers },
   { id: "inventory", label: "Inventory", icon: Boxes },
   { id: "payments", label: "Payments", icon: CreditCard },
   { id: "shipments", label: "Logistics", icon: Truck },
+  { id: "returns", label: "Returns", icon: RotateCcw },
   { id: "customers", label: "Customers", icon: Users },
   { id: "coupons", label: "Coupons", icon: Ticket },
-  { id: "audit", label: "Audit Logs", icon: ScrollText },
+  { id: "reviews", label: "Reviews", icon: MessageSquare },
+  { id: "admin_users", label: "Admin Roles", icon: ShieldCheck },
   { id: "settings", label: "Settings", icon: Sliders },
+  { id: "audit", label: "Audit Logs", icon: ScrollText },
 ] as const;
 
 function AdminDashboard() {
@@ -103,16 +127,21 @@ function AdminDashboard() {
 
   // Products & Inventory state
   const [products, setProducts] = useState<AdminProductListItem[]>([]);
+  const [categories, setCategories] = useState<AdminCategoryItem[]>([]);
+  const [variants, setVariants] = useState<AdminVariantItem[]>([]);
   const [inventory, setInventory] = useState<AdminInventoryItem[]>([]);
   const [inventoryMovements, setInventoryMovements] = useState<AdminInventoryMovement[]>([]);
 
-  // Payments & Shipments state
+  // Payments, Shipments & Returns state
   const [payments, setPayments] = useState<AdminPaymentItem[]>([]);
   const [shipments, setShipments] = useState<AdminShipmentItem[]>([]);
+  const [returns, setReturns] = useState<AdminReturnItem[]>([]);
 
-  // Customers & Coupons & Logs & Settings
+  // Customers, Coupons, Reviews, Admin Users, Logs & Settings
   const [customers, setCustomers] = useState<AdminCustomerItem[]>([]);
   const [coupons, setCoupons] = useState<AdminCouponItem[]>([]);
+  const [reviews, setReviews] = useState<AdminReviewItem[]>([]);
+  const [adminUsers, setAdminUsers] = useState<AdminUserRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLogItem[]>([]);
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
 
@@ -265,6 +294,18 @@ function AdminDashboard() {
           setProducts(res as unknown as AdminProductListItem[]);
           break;
         }
+        case "categories": {
+          const res = await getAdminCategoriesServerFn({ data: { authToken: token } });
+          setCategories(res as unknown as AdminCategoryItem[]);
+          break;
+        }
+        case "variants": {
+          const res = await getAdminVariantsServerFn({ data: { authToken: token } });
+          setVariants(res as unknown as AdminVariantItem[]);
+          const prodRes = await getAdminProductsServerFn({ data: { authToken: token } });
+          setProducts(prodRes as unknown as AdminProductListItem[]);
+          break;
+        }
         case "inventory": {
           const res = await getAdminInventoryServerFn({ data: { authToken: token } });
           setInventory(res.inventory as AdminInventoryItem[]);
@@ -281,6 +322,11 @@ function AdminDashboard() {
           setShipments(res);
           break;
         }
+        case "returns": {
+          const res = await getAdminReturnsServerFn({ data: { authToken: token } });
+          setReturns(res as unknown as AdminReturnItem[]);
+          break;
+        }
         case "customers": {
           const res = await getAdminCustomersServerFn({ data: { authToken: token } });
           setCustomers(res);
@@ -289,6 +335,16 @@ function AdminDashboard() {
         case "coupons": {
           const res = await getAdminCouponsServerFn({ data: { authToken: token } });
           setCoupons(res as unknown as AdminCouponItem[]);
+          break;
+        }
+        case "reviews": {
+          const res = await getAdminReviewsServerFn({ data: { authToken: token } });
+          setReviews(res as unknown as AdminReviewItem[]);
+          break;
+        }
+        case "admin_users": {
+          const res = await getAdminUsersServerFn({ data: { authToken: token } });
+          setAdminUsers(res as unknown as AdminUserRecord[]);
           break;
         }
         case "audit": {
@@ -443,6 +499,27 @@ function AdminDashboard() {
           />
         )}
 
+        {activeTab === "categories" && (
+          <CategoriesTab
+            categories={categories}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+            authToken={authToken}
+          />
+        )}
+
+        {activeTab === "variants" && (
+          <VariantsTab
+            variants={variants}
+            products={products
+              .filter((p): p is typeof p & { id: string } => Boolean(p.id))
+              .map((p) => ({ id: p.id, name: p.name }))}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+            authToken={authToken}
+          />
+        )}
+
         {activeTab === "inventory" && (
           <InventoryTab
             inventory={inventory}
@@ -470,6 +547,15 @@ function AdminDashboard() {
           />
         )}
 
+        {activeTab === "returns" && (
+          <ReturnsTab
+            returns={returns}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+            authToken={authToken}
+          />
+        )}
+
         {activeTab === "customers" && (
           <CustomersTab
             customers={customers}
@@ -484,6 +570,24 @@ function AdminDashboard() {
             loading={loading}
             authToken={authToken}
             onRefresh={() => void loadActiveTabData()}
+          />
+        )}
+
+        {activeTab === "reviews" && (
+          <ReviewsTab
+            reviews={reviews}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+            authToken={authToken}
+          />
+        )}
+
+        {activeTab === "admin_users" && (
+          <AdminUsersTab
+            adminUsers={adminUsers}
+            loading={loading}
+            onRefresh={() => void loadActiveTabData()}
+            authToken={authToken}
           />
         )}
 

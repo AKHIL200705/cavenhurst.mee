@@ -102,7 +102,11 @@ function Account() {
 
   const loadData = async () => {
     if (!user) return;
-    if (user.isAdmin) {
+    const userEmail = user.email?.toLowerCase();
+    if (
+      user.isAdmin ||
+      (userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail))
+    ) {
       setIsAdmin(true);
     }
 
@@ -118,6 +122,19 @@ function Account() {
     }
 
     // Role check
+    if (userEmail) {
+      const { data: adminRow } = await supabase
+        .from("admin_users")
+        .select("id")
+        .or(`email.eq.${userEmail},auth_user_id.eq.${user.id}`)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (adminRow) {
+        setIsAdmin(true);
+      }
+    }
+
     supabase
       .from("user_roles")
       .select("role")

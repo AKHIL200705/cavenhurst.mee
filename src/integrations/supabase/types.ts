@@ -6,6 +6,60 @@ export type Database = {
   };
   public: {
     Tables: {
+      addresses: {
+        Row: {
+          id: string | null;
+          customer_id: string | null;
+          user_id: string | null;
+          full_name: string | null;
+          phone: string | null;
+          address_line1: string | null;
+          address_line2: string | null;
+          city: string | null;
+          state: string | null;
+          postal_code: string | null;
+          country: string | null;
+          address_type: string | null;
+          is_default: boolean | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string | null;
+          customer_id?: string | null;
+          user_id?: string | null;
+          full_name?: string | null;
+          phone?: string | null;
+          address_line1?: string | null;
+          address_line2?: string | null;
+          city?: string | null;
+          state?: string | null;
+          postal_code?: string | null;
+          country?: string | null;
+          address_type?: string | null;
+          is_default?: boolean | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string | null;
+          customer_id?: string | null;
+          user_id?: string | null;
+          full_name?: string | null;
+          phone?: string | null;
+          address_line1?: string | null;
+          address_line2?: string | null;
+          city?: string | null;
+          state?: string | null;
+          postal_code?: string | null;
+          country?: string | null;
+          address_type?: string | null;
+          is_default?: boolean | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
       admin_audit_logs: {
         Row: {
           id: string;
@@ -35,6 +89,30 @@ export type Database = {
           target_type?: string | null;
           target_id?: string | null;
           details?: Json | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
+      admin_roles: {
+        Row: {
+          id: string;
+          user_id: string | null;
+          email: string;
+          role: string;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string | null;
+          email: string;
+          role?: string;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string | null;
+          user_id?: string | null;
+          email?: string | null;
+          role?: string | null;
           created_at?: string | null;
         };
         Relationships: [];
@@ -210,6 +288,30 @@ export type Database = {
           status?: string | null;
           created_at?: string | null;
           updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      categories: {
+        Row: {
+          id: string | null;
+          slug: string | null;
+          name: string | null;
+          description: string | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string | null;
+          slug?: string | null;
+          name?: string | null;
+          description?: string | null;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string | null;
+          slug?: string | null;
+          name?: string | null;
+          description?: string | null;
+          created_at?: string | null;
         };
         Relationships: [];
       };
@@ -1224,6 +1326,42 @@ export type Database = {
         };
         Relationships: [];
       };
+      profiles: {
+        Row: {
+          id: string;
+          email: string | null;
+          phone: string | null;
+          full_name: string | null;
+          avatar_url: string | null;
+          auth_provider: string | null;
+          account_status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          email?: string | null;
+          phone?: string | null;
+          full_name?: string | null;
+          avatar_url?: string | null;
+          auth_provider?: string | null;
+          account_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          full_name?: string | null;
+          avatar_url?: string | null;
+          auth_provider?: string | null;
+          account_status?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
       promotional_sections: {
         Row: {
           id: string;
@@ -1393,6 +1531,54 @@ export type Database = {
           awb_number?: string | null;
           courier_partner?: string | null;
           admin_notes?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Relationships: [];
+      };
+      reviews: {
+        Row: {
+          id: string | null;
+          product_id: string | null;
+          customer_id: string | null;
+          user_id: string | null;
+          customer_name: string | null;
+          rating: number | null;
+          title: string | null;
+          review_text: string | null;
+          is_verified_purchase: boolean | null;
+          status: string | null;
+          helpful_votes: number | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string | null;
+          product_id?: string | null;
+          customer_id?: string | null;
+          user_id?: string | null;
+          customer_name?: string | null;
+          rating?: number | null;
+          title?: string | null;
+          review_text?: string | null;
+          is_verified_purchase?: boolean | null;
+          status?: string | null;
+          helpful_votes?: number | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string | null;
+          product_id?: string | null;
+          customer_id?: string | null;
+          user_id?: string | null;
+          customer_name?: string | null;
+          rating?: number | null;
+          title?: string | null;
+          review_text?: string | null;
+          is_verified_purchase?: boolean | null;
+          status?: string | null;
+          helpful_votes?: number | null;
           created_at?: string | null;
           updated_at?: string | null;
         };

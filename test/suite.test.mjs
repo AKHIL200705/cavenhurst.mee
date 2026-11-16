@@ -597,3 +597,119 @@ test("Audit Trail: Status history records all transitions", () => {
   assert.equal(history[2].status, "in_transit");
 });
 
+// ==============================================================================
+// 13. CATEGORY SLUG NORMALIZATION & VALIDATION
+// ==============================================================================
+function slugifyCategory(name) {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+test("Categories: Slug normalization and URL compliance", () => {
+  assert.equal(slugifyCategory("Heritage Knitwear"), "heritage-knitwear");
+  assert.equal(slugifyCategory("Formal & Tailored!"), "formal-tailored");
+  assert.equal(slugifyCategory("  Special--Collections   "), "special-collections");
+});
+
+// ==============================================================================
+// 14. PRODUCT VARIANT INVENTORY & SKU VALIDATION
+// ==============================================================================
+function generateVariantSku(productSlug, size, color) {
+  const p = productSlug.toUpperCase().slice(0, 4);
+  const c = color.toUpperCase().slice(0, 3);
+  const s = size.toUpperCase();
+  return `CVH-${p}-${c}-${s}`;
+}
+
+test("Variants: SKU generation and stock constraints", () => {
+  const sku = generateVariantSku("oxford-classic-shirt", "XL", "Navy Blue");
+  assert.equal(sku, "CVH-OXFO-NAV-XL");
+
+  // Stock clamping
+  function validateVariantStock(qty) {
+    if (typeof qty !== "number" || isNaN(qty) || qty < 0) return 0;
+    return Math.floor(qty);
+  }
+  assert.equal(validateVariantStock(15), 15);
+  assert.equal(validateVariantStock(-5), 0);
+  assert.equal(validateVariantStock(4.8), 4);
+});
+
+// ==============================================================================
+// 15. RETURN LIFECYCLE STATE TRANSITIONS
+// ==============================================================================
+const VALID_RETURN_TRANSITIONS = {
+  requested: ["approved", "rejected", "cancelled"],
+  approved: ["pickup_scheduled", "in_transit", "rejected", "cancelled"],
+  pickup_scheduled: ["in_transit", "cancelled"],
+  in_transit: ["received", "cancelled"],
+  received: ["inspected", "rejected"],
+  inspected: ["refunded", "replacement_issued", "rejected"],
+  refunded: [],
+  replacement_issued: [],
+  rejected: [],
+  cancelled: [],
+};
+
+function canTransitionReturn(currentStatus, newStatus) {
+  const allowed = VALID_RETURN_TRANSITIONS[currentStatus] || [];
+  return allowed.includes(newStatus);
+}
+
+test("Returns: Allowed lifecycle transitions and terminal states", () => {
+  assert.equal(canTransitionReturn("requested", "approved"), true);
+  assert.equal(canTransitionReturn("requested", "rejected"), true);
+  assert.equal(canTransitionReturn("approved", "in_transit"), true);
+  assert.equal(canTransitionReturn("inspected", "refunded"), true);
+
+  // Invalid backward or cross-state transitions
+  assert.equal(canTransitionReturn("refunded", "requested"), false);
+  assert.equal(canTransitionReturn("rejected", "refunded"), false);
+  assert.equal(canTransitionReturn("requested", "refunded"), false); // must inspect first
+});
+
+// ==============================================================================
+// 16. REVIEW MODERATION WORKFLOW
+// ==============================================================================
+test("Reviews: Content moderation and public visibility rules", () => {
+  function isReviewPublic(review) {
+    return review.status === "approved";
+  }
+
+  assert.equal(isReviewPublic({ status: "approved", rating: 5 }), true);
+  assert.equal(isReviewPublic({ status: "pending", rating: 5 }), false);
+  assert.equal(isReviewPublic({ status: "rejected", rating: 1 }), false);
+});
+
+// ==============================================================================
+// 17. ADMIN ROLE AUTHORIZATION
+// ==============================================================================
+test("Admin Roles: Privilege verification by role", () => {
+  const ADMIN_PERMISSIONS = {
+    super_admin: ["all"],
+    admin: ["orders", "products", "customers", "inventory", "reviews", "returns", "coupons", "settings"],
+    fulfillment_manager: ["orders", "shipments", "inventory", "returns"],
+    support_agent: ["orders", "customers", "reviews"],
+  };
+
+  function hasAdminPermission(role, module) {
+    if (!role || !ADMIN_PERMISSIONS[role]) return false;
+    const perms = ADMIN_PERMISSIONS[role];
+    return perms.includes("all") || perms.includes(module);
+  }
+
+  assert.equal(hasAdminPermission("super_admin", "admin_users"), true);
+  assert.equal(hasAdminPermission("super_admin", "settings"), true);
+  assert.equal(hasAdminPermission("admin", "orders"), true);
+  assert.equal(hasAdminPermission("admin", "admin_users"), false);
+  assert.equal(hasAdminPermission("fulfillment_manager", "shipments"), true);
+  assert.equal(hasAdminPermission("fulfillment_manager", "settings"), false);
+  assert.equal(hasAdminPermission("support_agent", "reviews"), true);
+  assert.equal(hasAdminPermission("customer", "orders"), false);
+});
+
+

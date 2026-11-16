@@ -36,6 +36,23 @@ export interface OverviewData {
   lowStockCount: number;
   lowStockAlerts: Array<{ name: string; slug: string; size: string; stock: number }>;
   dailySales: Array<{ date: string; revenue: number; orders: number }>;
+  totalCustomers?: number;
+  totalProducts?: number;
+  recentOrders?: Array<{
+    id: string;
+    order_number: string | null;
+    total: number;
+    status: string;
+    created_at: string;
+    customer_name: string | null;
+  }>;
+  recentRegistrations?: Array<{
+    id: string;
+    full_name: string;
+    email: string | null;
+    phone: string | null;
+    created_at: string | null;
+  }>;
 }
 
 interface OverviewTabProps {
@@ -104,6 +121,34 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
             {data.deliveredOrders} delivered to date
           </span>
         </div>
+
+        {typeof data.totalCustomers === "number" && (
+          <div className="rounded-xl border border-border bg-card p-5 relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase tracking-brand text-silver">CUSTOMERS</span>
+              <TrendingUp className="h-4 w-4 text-primary" />
+            </div>
+            <p className="mt-2 font-mono text-3xl font-bold text-foreground">
+              {data.totalCustomers}
+            </p>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Active verified profiles
+            </span>
+          </div>
+        )}
+
+        {typeof data.totalProducts === "number" && (
+          <div className="rounded-xl border border-border bg-card p-5 relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase tracking-brand text-silver">CATALOG ITEMS</span>
+              <Package className="h-4 w-4 text-gold" />
+            </div>
+            <p className="mt-2 font-mono text-3xl font-bold text-gold">{data.totalProducts}</p>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Live products in store
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Secondary Status Badges */}
@@ -275,6 +320,88 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
           >
             Manage Inventory & Restock
           </button>
+        </div>
+      </div>
+
+      {/* Recent Orders & Recent Customer Registrations */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Recent Orders */}
+        <div className="rounded-xl border border-border bg-card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-serif text-lg italic text-foreground">Recent Orders</h2>
+            <button
+              onClick={() => onNavigateTab("orders")}
+              className="text-xs font-semibold text-primary hover:underline"
+            >
+              View all orders
+            </button>
+          </div>
+          {(!data.recentOrders || data.recentOrders.length === 0) ? (
+            <p className="text-xs text-muted-foreground py-6 text-center italic">
+              No recent orders found.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {data.recentOrders.map((order) => (
+                <div
+                  key={order.id}
+                  className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 p-3 text-xs"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-foreground">{order.order_number}</span>
+                      <span className="rounded bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary capitalize">
+                        {order.status}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {order.customer_name} • {new Date(order.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                  </div>
+                  <span className="font-mono font-bold text-foreground">
+                    {formatINR(order.total)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Recent Customer Registrations */}
+        <div className="rounded-xl border border-border bg-card p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-serif text-lg italic text-foreground">Recent Customer Registrations</h2>
+            <button
+              onClick={() => onNavigateTab("customers")}
+              className="text-xs font-semibold text-primary hover:underline"
+            >
+              View all customers
+            </button>
+          </div>
+          {(!data.recentRegistrations || data.recentRegistrations.length === 0) ? (
+            <p className="text-xs text-muted-foreground py-6 text-center italic">
+              No recent registrations found.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {data.recentRegistrations.map((cust) => (
+                <div
+                  key={cust.id}
+                  className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 p-3 text-xs"
+                >
+                  <div>
+                    <p className="font-medium text-foreground">{cust.full_name}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">
+                      {cust.email} {cust.phone ? `• ${cust.phone}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    {cust.created_at ? new Date(cust.created_at).toLocaleDateString("en-IN", { month: "short", day: "numeric" }) : "Recently"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>
