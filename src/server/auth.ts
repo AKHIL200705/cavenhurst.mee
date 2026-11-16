@@ -313,6 +313,73 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
     }
 
     const isAdmin = isWhitelistedAdminEmail(googleUser.email);
+
+    // Synchronize customer record into Supabase PostgreSQL tables
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      
+      // Upsert into customers table
+      const { data: cust } = await supabaseAdmin
+        .from("customers")
+        .upsert(
+          {
+            auth_provider_uid: googleUser.sub,
+            full_name: googleUser.name || "Customer",
+            email: googleUser.email,
+            profile_image: googleUser.picture,
+            account_status: "active",
+            last_login: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "auth_provider_uid" }
+        )
+        .select("id")
+        .maybeSingle();
+
+      if (cust?.id) {
+        // Upsert into customer_auth_providers
+        await supabaseAdmin.from("customer_auth_providers").upsert(
+          {
+            customer_id: cust.id,
+            provider: "google",
+            provider_uid: googleUser.sub,
+            email: googleUser.email,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "provider,provider_uid" }
+        );
+      }
+
+      // Keep customer_profiles backward-compatible
+      await supabaseAdmin.from("customer_profiles").upsert(
+        {
+          id: googleUser.sub,
+          full_name: googleUser.name || "Customer",
+          avatar_url: googleUser.picture,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+
+      // If user is admin, ensure admin_users has a record
+      if (isAdmin) {
+        await supabaseAdmin.from("admin_users").upsert(
+          {
+            email: googleUser.email.toLowerCase(),
+            full_name: googleUser.name || "Admin",
+            role: "admin",
+            permissions: ["*"],
+            is_active: true,
+            last_login: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "email" }
+        );
+      }
+    } catch (syncErr) {
+      console.error("[Customer Auth Sync Error]:", syncErr);
+    }
+
     const sessionToken = await signSessionToken({
       sub: googleUser.sub,
       email: googleUser.email,

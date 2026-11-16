@@ -1,13 +1,26 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { CollectionView } from "@/components/site/CollectionView";
-import { COLLECTIONS, PRODUCTS, type CollectionSlug } from "@/lib/products";
+import { COLLECTIONS, PRODUCTS, type CollectionSlug, type Product } from "@/lib/products";
 import { meta } from "@/components/site/InfoPage";
+import { getStoreCatalogServerFn } from "@/server/catalog";
 
 export const Route = createFileRoute("/collections/$slug")({
-  loader: ({ params }) => {
+  loader: async ({ params }): Promise<{ slug: string; title: string; tagline: string; products: Product[] }> => {
     const c = COLLECTIONS[params.slug as CollectionSlug];
     if (!c) throw notFound();
-    return { slug: params.slug, title: c.title, tagline: c.tagline };
+
+    let allProducts = PRODUCTS;
+    try {
+      const catalog = await getStoreCatalogServerFn();
+      if (catalog && catalog.length > 0) {
+        allProducts = catalog;
+      }
+    } catch {
+      // Fallback
+    }
+
+    const filtered = allProducts.filter(c.filter);
+    return { slug: params.slug, title: c.title, tagline: c.tagline, products: filtered };
   },
   head: ({ loaderData }) => ({
     meta: loaderData
@@ -28,8 +41,7 @@ export const Route = createFileRoute("/collections/$slug")({
 });
 
 function Collection() {
-  const { slug, title, tagline } = Route.useLoaderData();
-  const products = PRODUCTS.filter(COLLECTIONS[slug as CollectionSlug].filter);
+  const { slug, title, tagline, products } = Route.useLoaderData();
   return (
     <CollectionView key={slug} title={title} tagline={tagline} products={products} current={slug} />
   );

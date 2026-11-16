@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Truck, Shield } from "lucide-react";
+import { Truck, Shield, MapPin } from "lucide-react";
 import { meta } from "@/components/site/InfoPage";
 import { useAuth } from "@/lib/auth";
 import { useStore } from "@/lib/store";
@@ -25,10 +25,24 @@ type Order = {
   items: unknown;
 };
 
+type Address = {
+  id: string;
+  address_type: string;
+  is_default: boolean;
+  full_name: string;
+  phone: string;
+  address_line1: string;
+  address_line2: string | null;
+  city: string;
+  state: string;
+  postal_code: string;
+};
+
 function Account() {
   const { user, ready, signOut } = useAuth();
   const { cart, wishlist } = useStore();
   const [orders, setOrders] = useState<Order[] | null>(null);
+  const [addresses, setAddresses] = useState<Address[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
 
@@ -37,13 +51,26 @@ function Account() {
     if (user.isAdmin) {
       setIsAdmin(true);
     }
+
+    const filterQuery = user.email
+      ? `user_id.eq.${user.id},customer_email.eq.${user.email}`
+      : `user_id.eq.${user.id}`;
+
     supabase
       .from("orders")
       .select(
         "id,order_number,total,status,payment_status,shipment_status,awb_number,created_at,items",
       )
+      .or(filterQuery)
       .order("created_at", { ascending: false })
       .then(({ data }) => setOrders((data as Order[]) ?? []));
+
+    supabase
+      .from("customer_addresses")
+      .select("*")
+      .or(`customer_auth_uid.eq.${user.id}`)
+      .order("is_default", { ascending: false })
+      .then(({ data }) => setAddresses((data as Address[]) || []));
 
     supabase
       .from("user_roles")
@@ -168,6 +195,31 @@ function Account() {
               );
             })}
           </ul>
+        )}
+      </section>
+
+      <section>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-sm font-bold tracking-brand">SAVED ADDRESSES ({addresses.length})</h2>
+        </div>
+        {addresses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No saved delivery addresses yet. Addresses used during checkout will be saved here automatically.</p>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {addresses.map((a) => (
+              <div key={a.id} className="rounded-xl border border-border bg-card p-4 text-xs space-y-1">
+                <div className="flex items-center justify-between font-semibold text-foreground">
+                  <span>{a.full_name}</span>
+                  {a.is_default && (
+                    <span className="rounded bg-gold/20 text-gold px-1.5 py-0.5 text-[10px] font-mono">DEFAULT</span>
+                  )}
+                </div>
+                <p className="text-muted-foreground">{a.phone}</p>
+                <p className="text-foreground">{a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}</p>
+                <p className="text-muted-foreground">{a.city}, {a.state} - {a.postal_code}</p>
+              </div>
+            ))}
+          </div>
         )}
       </section>
 

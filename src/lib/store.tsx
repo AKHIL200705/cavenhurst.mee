@@ -85,6 +85,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .from("customer_carts")
         .upsert({ user_id: user.id, items: cart, wishlist, updated_at: new Date().toISOString() })
         .then(() => {});
+
+      supabase
+        .from("carts")
+        .upsert({ customer_auth_uid: user.id, status: "active", updated_at: new Date().toISOString() })
+        .then(() => {});
     }, 400);
     return () => clearTimeout(t);
   }, [cart, wishlist, synced, user]);

@@ -18,6 +18,16 @@ export interface AdminAuthParams {
   authToken?: string | undefined;
 }
 
+const WHITELISTED_ADMIN_EMAILS = [
+  "akhilsaiabbireddy2007@gmail.com",
+  "cavenhurst@gmail.com",
+];
+
+function isWhitelistedAdminEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return WHITELISTED_ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
+
 /**
  * Strict server-side verification of admin identity.
  */
@@ -68,17 +78,33 @@ async function verifyAdminSession(providedToken?: string | undefined): Promise<A
     } = await supabaseAdmin.auth.getUser(token);
 
     if (!error && user) {
-      if (user.email && isWhitelistedAdminEmail(user.email)) {
+      const email = user.email?.toLowerCase();
+      if (email && isWhitelistedAdminEmail(email)) {
         return {
           userId: user.id,
-          email: user.email,
+          email: user.email || null,
+        };
+      }
+
+      // Check admin_users table
+      const { data: adminUser } = await supabaseAdmin
+        .from("admin_users")
+        .select("id, role, is_active")
+        .or(`email.eq.${email},auth_user_id.eq.${user.id}`)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (adminUser) {
+        return {
+          userId: user.id,
+          email: user.email || null,
         };
       }
 
       const { data: roleRow, error: roleError } = await supabaseAdmin
         .from("user_roles")
         .select("role")
-        .or(`user_id.eq.${user.id},user_id.eq.${user.email?.toLowerCase()}`)
+        .or(`user_id.eq.${user.id},user_id.eq.${email}`)
         .eq("role", "admin")
         .maybeSingle();
 

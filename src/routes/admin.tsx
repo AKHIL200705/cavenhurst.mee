@@ -128,7 +128,13 @@ function AdminDashboard() {
             const parsed = JSON.parse(stored);
             if (parsed?.sessionToken && parsed?.user) {
               setAuthToken(parsed.sessionToken);
-              if (parsed.user.isAdmin || (parsed.user.email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(parsed.user.email.toLowerCase()))) {
+              if (
+                parsed.user.isAdmin ||
+                (parsed.user.email &&
+                  ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(
+                    parsed.user.email.toLowerCase(),
+                  ))
+              ) {
                 setIsAdmin(true);
                 setAuthChecking(false);
                 return;
@@ -142,7 +148,13 @@ function AdminDashboard() {
 
       // 2. Check current useAuth user
       if (user) {
-        if (user.isAdmin || (user.email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(user.email.toLowerCase()))) {
+        if (
+          user.isAdmin ||
+          (user.email &&
+            ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(
+              user.email.toLowerCase(),
+            ))
+        ) {
           setIsAdmin(true);
           setAuthChecking(false);
           return;
@@ -163,6 +175,19 @@ function AdminDashboard() {
 
       const email = session.user.email?.toLowerCase();
       if (email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(email)) {
+        setIsAdmin(true);
+        setAuthChecking(false);
+        return;
+      }
+
+      const { data: adminRow } = await supabase
+        .from("admin_users")
+        .select("id")
+        .or(`email.eq.${email},auth_user_id.eq.${session.user.id}`)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (adminRow) {
         setIsAdmin(true);
         setAuthChecking(false);
         return;
@@ -231,7 +256,7 @@ function AdminDashboard() {
               limit: 25,
             },
           });
-          setOrders(res.orders);
+          setOrders(res.orders as unknown as AdminOrderItem[]);
           setTotalOrdersCount(res.totalCount);
           break;
         }
@@ -263,7 +288,7 @@ function AdminDashboard() {
         }
         case "coupons": {
           const res = await getAdminCouponsServerFn({ data: { authToken: token } });
-          setCoupons(res);
+          setCoupons(res as unknown as AdminCouponItem[]);
           break;
         }
         case "audit": {

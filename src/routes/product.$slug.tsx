@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Heart, Minus, Plus, Truck } from "lucide-react";
+import { ChevronRight, Heart, Minus, Plus, Truck, Star } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -10,25 +10,44 @@ import {
 } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProductCard } from "@/components/site/ProductCard";
-import { PRODUCTS, SIZES, getProduct, imageFor, type Size } from "@/lib/products";
+import { PRODUCTS, SIZES, getProduct, imageFor, type Size, type Product } from "@/lib/products";
 import { discountPercent, formatINR } from "@/lib/pricing";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { meta } from "@/components/site/InfoPage";
+import {
+  getProductBySlugServerFn,
+  getProductReviewsServerFn,
+  submitProductReviewServerFn,
+} from "@/server/catalog";
+import { useAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/product/$slug")({
-  loader: ({ params }) => {
-    const p = getProduct(params.slug);
+  loader: async ({ params }): Promise<{ product: Product; reviews: any[] }> => {
+    let p: Product | null = null;
+    try {
+      p = await getProductBySlugServerFn({ data: { slug: params.slug } });
+    } catch {
+      p = getProduct(params.slug) || null;
+    }
     if (!p) throw notFound();
-    return { slug: p.slug, name: p.name, description: p.description };
+
+    let reviews: any[] = [];
+    try {
+      reviews = await getProductReviewsServerFn({ data: { productSlug: params.slug } });
+    } catch {
+      reviews = [];
+    }
+
+    return { product: p, reviews };
   },
   head: ({ loaderData }) => ({
-    meta: loaderData
+    meta: loaderData?.product
       ? [
-          { title: `${loaderData.name} | CAVENHURST` },
-          { name: "description", content: loaderData.description },
-          { property: "og:title", content: `${loaderData.name} | CAVENHURST` },
-          { property: "og:description", content: loaderData.description },
+          { title: `${loaderData.product.name} | CAVENHURST` },
+          { name: "description", content: loaderData.product.description },
+          { property: "og:title", content: `${loaderData.product.name} | CAVENHURST` },
+          { property: "og:description", content: loaderData.product.description },
           { property: "og:type", content: "product" },
           { name: "twitter:card", content: "summary_large_image" },
         ]
@@ -38,20 +57,68 @@ export const Route = createFileRoute("/product/$slug")({
 });
 
 function ProductPage() {
-  const { slug } = Route.useLoaderData();
-  const p = getProduct(slug)!;
+  const { product: p, reviews: initialReviews } = Route.useLoaderData();
+  const { user } = useAuth();
   const { add, toggleWish, wishlist } = useStore();
   const navigate = useNavigate();
   const [img, setImg] = useState(0);
-  const [color, setColor] = useState(p.colors[0]!.name);
+  const [color, setColor] = useState(p.colors[0]?.name || "Default");
   const [size, setSize] = useState<Size | null>(null);
   const [qty, setQty] = useState(1);
   const [pin, setPin] = useState("");
   const [pinMsg, setPinMsg] = useState("");
+  const [reviewsList, setReviewsList] = useState(initialReviews);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewName, setReviewName] = useState(user?.user_metadata?.full_name || "");
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewTitle, setReviewTitle] = useState("");
+  const [reviewText, setReviewText] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+
   const off = discountPercent(p.price, p.mrp);
   const stock = size ? (p.stock[size] ?? 0) : 0;
   const main = imageFor(p, color);
   const gallery = [main, ...p.images.filter((i) => i !== main), main, main].slice(0, 4);
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewText.trim()) {
+      toast.error("Please provide review text.");
+      return;
+    }
+    setSubmittingReview(true);
+    try {
+      await submitProductReviewServerFn({
+        data: {
+          productSlug: p.slug,
+          customerName: reviewName.trim() || "Verified Buyer",
+          rating: reviewRating,
+          title: reviewTitle.trim() || undefined,
+          reviewText: reviewText.trim(),
+          customerAuthUid: user?.id,
+        },
+      });
+      toast.success("Thank you! Your review has been submitted.");
+      setReviewsList([
+        {
+          id: Math.random().toString(),
+          customer_name: reviewName.trim() || "Verified Buyer",
+          rating: reviewRating,
+          title: reviewTitle.trim(),
+          review_text: reviewText.trim(),
+          created_at: new Date().toISOString(),
+        },
+        ...reviewsList,
+      ]);
+      setReviewText("");
+      setReviewTitle("");
+      setShowReviewForm(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit review");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   const addToBag = (buy = false) => {
     if (!size) {
@@ -322,9 +389,108 @@ function ProductPage() {
               </AccordionContent>
             </AccordionItem>
             <AccordionItem value="reviews">
-              <AccordionTrigger>Customer reviews</AccordionTrigger>
-              <AccordionContent className="text-muted-foreground">
-                No reviews yet. Be the first to review after your purchase.
+              <AccordionTrigger className="flex items-center justify-between">
+                <span>Customer reviews ({reviewsList.length})</span>
+              </AccordionTrigger>
+              <AccordionContent className="space-y-4 pt-2 text-muted-foreground">
+                {reviewsList.length === 0 ? (
+                  <p className="text-xs">No reviews yet. Be the first to review this piece.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {reviewsList.map((r: any) => (
+                      <div key={r.id} className="rounded-lg border border-border/50 bg-card/40 p-3 space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-foreground">{r.customer_name}</span>
+                          <div className="flex items-center text-gold">
+                            {Array.from({ length: r.rating || 5 }).map((_, i) => (
+                              <Star key={i} className="h-3 w-3 fill-current" />
+                            ))}
+                          </div>
+                        </div>
+                        {r.title && <p className="text-xs font-medium text-foreground">{r.title}</p>}
+                        <p className="text-xs text-muted-foreground">{r.review_text}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!showReviewForm ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowReviewForm(true)}
+                    className="mt-2 text-xs font-semibold text-gold underline hover:opacity-80"
+                  >
+                    + Write a Review
+                  </button>
+                ) : (
+                  <form onSubmit={handleReviewSubmit} className="mt-3 space-y-3 rounded-lg border border-border bg-card/60 p-3">
+                    <div className="text-xs font-bold text-foreground">Write Your Review</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs">Rating:</span>
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            type="button"
+                            key={star}
+                            onClick={() => setReviewRating(star)}
+                            className="p-0.5 text-gold"
+                          >
+                            <Star
+                              className={cn(
+                                "h-4 w-4",
+                                star <= reviewRating ? "fill-current" : "text-muted-foreground",
+                              )}
+                            />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Your name"
+                        value={reviewName}
+                        onChange={(e) => setReviewName(e.target.value)}
+                        className="w-full rounded border border-input bg-background/50 px-2.5 py-1.5 text-xs outline-none focus:border-gold"
+                      />
+                    </div>
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Review title (e.g. Exceptional fabric & drape)"
+                        value={reviewTitle}
+                        onChange={(e) => setReviewTitle(e.target.value)}
+                        className="w-full rounded border border-input bg-background/50 px-2.5 py-1.5 text-xs outline-none focus:border-gold"
+                      />
+                    </div>
+                    <div>
+                      <textarea
+                        rows={3}
+                        required
+                        placeholder="Share your thoughts on the fit, quality and craftsmanship..."
+                        value={reviewText}
+                        onChange={(e) => setReviewText(e.target.value)}
+                        className="w-full rounded border border-input bg-background/50 px-2.5 py-1.5 text-xs outline-none focus:border-gold"
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowReviewForm(false)}
+                        className="rounded px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={submittingReview}
+                        className="rounded bg-primary px-3 py-1 text-xs font-bold text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                      >
+                        {submittingReview ? "Submitting..." : "Submit Review"}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </AccordionContent>
             </AccordionItem>
           </Accordion>

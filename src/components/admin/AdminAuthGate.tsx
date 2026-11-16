@@ -57,6 +57,16 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
       let isAdminUser = Boolean(isAllowedEmail);
 
       if (!isAdminUser) {
+        const { data: adminRow } = await supabase
+          .from("admin_users")
+          .select("id")
+          .or(`email.eq.${userEmail},auth_user_id.eq.${data.user.id}`)
+          .eq("is_active", true)
+          .maybeSingle();
+        isAdminUser = Boolean(adminRow);
+      }
+
+      if (!isAdminUser) {
         const { data: roleRow } = await supabase
           .from("user_roles")
           .select("role")
