@@ -362,11 +362,11 @@ WHERE lower(au.email) = lower(u.email);
 
 
 -- -----------------------------------------------------------------------------
--- 6. CANONICAL VIEWS FOR LOGICAL TABLE NAMES
+-- 6. CANONICAL VIEWS FOR LOGICAL TABLE NAMES (WITH SECURITY INVOKER)
 -- -----------------------------------------------------------------------------
 
 -- Logical table: addresses -> views customer_addresses
-CREATE OR REPLACE VIEW public.addresses AS
+CREATE OR REPLACE VIEW public.addresses WITH (security_invoker = true) AS
 SELECT 
   id,
   customer_id,
@@ -386,7 +386,7 @@ SELECT
 FROM public.customer_addresses;
 
 -- Logical table: categories -> views product_categories
-CREATE OR REPLACE VIEW public.categories AS
+CREATE OR REPLACE VIEW public.categories WITH (security_invoker = true) AS
 SELECT 
   id,
   slug,
@@ -396,7 +396,7 @@ SELECT
 FROM public.product_categories;
 
 -- Logical table: reviews -> views product_reviews
-CREATE OR REPLACE VIEW public.reviews AS
+CREATE OR REPLACE VIEW public.reviews WITH (security_invoker = true) AS
 SELECT 
   id,
   product_id,
