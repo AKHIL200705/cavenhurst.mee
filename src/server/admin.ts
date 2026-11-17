@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { getDb } from "@/server/db";
 import { type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
@@ -150,10 +151,191 @@ async function recordAdminAuditLog(
 // 1. DASHBOARD OVERVIEW & ANALYTICS
 // -----------------------------------------------------------------------------
 
+interface DbOrderOverviewRow {
+  id: string;
+  total: number;
+  status: string;
+  payment_method: string;
+  payment_status: string;
+  shipment_status: string;
+  created_at: string;
+}
+
+interface DbRefundRow {
+  amount: number;
+}
+
+interface DbProductRow {
+  slug: string;
+  name: string;
+  stock: Record<string, number> | null;
+}
+
+interface DbCountRow {
+  count: number;
+}
+
+interface DbRecentOrderRow {
+  id: string;
+  order_number: string | null;
+  customer_name: string | null;
+  customer_email: string | null;
+  total: number;
+  status: string;
+  payment_status: string;
+  created_at: string;
+}
+
+interface DbRecentCustomerRow {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  created_at: string | null;
+}
+
 export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
   .validator((params?: AdminAuthParams | undefined) => params || {})
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
+
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [
+          orders,
+          refunds,
+          products,
+          custCountRows,
+          prodCountRows,
+          recentOrders,
+          recentCust,
+        ] = await Promise.all([
+          sql<DbOrderOverviewRow[]>`
+            SELECT id, total, status, payment_method, payment_status, shipment_status, created_at
+            FROM orders
+          `,
+          sql<DbRefundRow[]>`SELECT amount FROM refunds`,
+          sql<DbProductRow[]>`SELECT slug, name, stock FROM products`,
+          sql<DbCountRow[]>`SELECT count(*)::int as count FROM customers`,
+          sql<DbCountRow[]>`SELECT count(*)::int as count FROM products`,
+          sql<DbRecentOrderRow[]>`
+            SELECT id, order_number, customer_name, customer_email, total, status, payment_status, created_at
+            FROM orders
+            ORDER BY created_at DESC
+            LIMIT 5
+          `,
+          sql<DbRecentCustomerRow[]>`
+            SELECT id, full_name, email, phone, created_at
+            FROM customers
+            ORDER BY created_at DESC
+            LIMIT 5
+          `,
+        ]);
+
+        const allOrders = orders || [];
+        const totalOrders = allOrders.length;
+
+        const paidOrders = allOrders.filter((o) => o.payment_status === "paid");
+        const codOrders = allOrders.filter((o) => o.payment_method === "cod");
+
+        const totalRefunded = (refunds || []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+        const totalPaidRevenue = Math.max(
+          0,
+          paidOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0) - totalRefunded,
+        );
+        const totalCodRevenue = codOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+        const pendingPayments = allOrders.filter((o) => o.payment_status === "pending").length;
+        const processingOrders = allOrders.filter((o) => o.status === "processing").length;
+        const shippedOrders = allOrders.filter((o) =>
+          ["shipped", "in_transit", "out_for_delivery"].includes(o.shipment_status || ""),
+        ).length;
+        const deliveredOrders = allOrders.filter((o) => o.shipment_status === "delivered").length;
+        const cancelledOrders = allOrders.filter((o) => o.status === "cancelled").length;
+        const rtoOrders = allOrders.filter((o) =>
+          ["rto_initiated", "rto_delivered"].includes(o.shipment_status || ""),
+        ).length;
+        const returnOrders = allOrders.filter((o) => o.status === "returned").length;
+
+        const productList = products || [];
+        let lowStockCount = 0;
+        const lowStockAlerts: Array<{ name: string; slug: string; size: string; stock: number }> = [];
+
+        for (const p of productList) {
+          const stockObj = (p.stock || {}) as Record<string, number>;
+          for (const [size, count] of Object.entries(stockObj)) {
+            if (typeof count === "number" && count <= 3) {
+              lowStockCount++;
+              if (lowStockAlerts.length < 10) {
+                lowStockAlerts.push({ name: p.name, slug: p.slug, size, stock: count });
+              }
+            }
+          }
+        }
+
+        const dailySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
+        const today = new Date();
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          const key = d.toISOString().slice(0, 10);
+          dailySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
+        }
+
+        for (const o of allOrders) {
+          const dateKey = (o.created_at ? new Date(o.created_at).toISOString() : "").slice(0, 10);
+          const entry = dailySalesMap.get(dateKey);
+          if (entry) {
+            entry.orders += 1;
+            if (o.payment_status === "paid") {
+              entry.revenue += Number(o.total) || 0;
+            }
+          }
+        }
+
+        const dailySales = Array.from(dailySalesMap.values());
+
+        return {
+          totalCustomers: custCountRows[0]?.count ?? 0,
+          totalProducts: prodCountRows[0]?.count ?? 0,
+          totalOrders,
+          totalPaidRevenue,
+          totalCodRevenue,
+          totalPaidOrders: paidOrders.length,
+          totalCodOrders: codOrders.length,
+          pendingPayments,
+          processingOrders,
+          shippedOrders,
+          deliveredOrders,
+          cancelledOrders,
+          rtoOrders,
+          returnOrders,
+          lowStockCount,
+          lowStockAlerts,
+          dailySales,
+          recentOrders: (recentOrders || []).map((o) => ({
+            id: o.id,
+            order_number: o.order_number,
+            customer_name: o.customer_name,
+            customer_email: o.customer_email,
+            total: Number(o.total) || 0,
+            status: o.status,
+            payment_status: o.payment_status,
+            created_at: o.created_at ? new Date(o.created_at).toISOString() : new Date().toISOString(),
+          })),
+          recentRegistrations: (recentCust || []).map((c) => ({
+            id: c.id,
+            full_name: c.full_name || "Customer",
+            email: c.email,
+            phone: c.phone,
+            created_at: c.created_at ? new Date(c.created_at).toISOString() : null,
+          })),
+        };
+      } catch (dbErr) {
+        console.error("[Admin Overview] Direct DB error, falling back to Supabase REST client:", dbErr);
+      }
+    }
 
     const { data: orders, error: ordersError } = await supabaseAdmin
       .from("orders")
@@ -161,7 +343,7 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
 
     if (ordersError) {
       console.error("[Admin Overview] Orders query error:", ordersError);
-      throw new Error("Failed to load overview data");
+      throw new Error(`Failed to load overview data: ${ordersError.message || ordersError.details || "Orders query failed"}`);
     }
 
     const allOrders = orders || [];
@@ -969,10 +1151,100 @@ export const getAdminShipmentsServerFn = createServerFn({ method: "POST" })
 // 9. CUSTOMERS DIRECTORY
 // -----------------------------------------------------------------------------
 
+interface DbCustomerRow {
+  id: string;
+  auth_provider_uid: string | null;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  account_status: string | null;
+  registration_date: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+interface DbProfileRow {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  full_name: string | null;
+  auth_provider: string | null;
+  account_status: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+interface DbOrderSummaryRow {
+  id: string;
+  user_id: string | null;
+  customer_id: string | null;
+  customer_email: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  total: number;
+  status: string;
+  created_at: string;
+}
+
 export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
   .validator((params?: AdminAuthParams | undefined) => params || {})
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
+
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [customers, profiles, orders] = await Promise.all([
+          sql<DbCustomerRow[]>`
+            SELECT id, auth_provider_uid, full_name, email, phone, account_status, registration_date, created_at, updated_at
+            FROM customers
+            ORDER BY created_at DESC
+            LIMIT 200
+          `,
+          sql<DbProfileRow[]>`
+            SELECT id, email, phone, full_name, auth_provider, account_status, created_at, updated_at
+            FROM profiles
+          `,
+          sql<DbOrderSummaryRow[]>`
+            SELECT id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status, created_at
+            FROM orders
+          `,
+        ]);
+        const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
+        const profileEmailMap = new Map((profiles || []).map((p) => [p.email?.toLowerCase(), p]));
+
+        return (customers || []).map((c) => {
+          const matchedProfile =
+            (c.auth_provider_uid ? profileMap.get(c.auth_provider_uid) : null) ||
+            (c.email ? profileEmailMap.get(c.email.toLowerCase()) : null);
+
+          const customerOrders = (orders || []).filter(
+            (o) =>
+              o.customer_id === c.id ||
+              (c.auth_provider_uid && o.user_id === c.auth_provider_uid) ||
+              (c.email && o.customer_email?.toLowerCase() === c.email.toLowerCase()),
+          );
+
+          const totalSpent = customerOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+          return {
+            id: c.id,
+            authUid: matchedProfile?.id || c.auth_provider_uid,
+            name: c.full_name || matchedProfile?.full_name || "Customer",
+            email: c.email || matchedProfile?.email || "",
+            phone: c.phone || matchedProfile?.phone || "",
+            loginProvider: matchedProfile?.auth_provider || "email",
+            orderCount: customerOrders.length,
+            totalSpent,
+            status: c.account_status || matchedProfile?.account_status || "active",
+            createdAt: c.registration_date || c.created_at || matchedProfile?.created_at,
+            lastLogin: matchedProfile?.updated_at || c.updated_at || null,
+          };
+        });
+      } catch (err) {
+        console.error("[Admin Customers] Direct DB error, falling back to Supabase client:", err);
+      }
+    }
 
     const [customersRes, profilesRes, ordersRes] = await Promise.all([
       supabaseAdmin
