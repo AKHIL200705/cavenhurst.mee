@@ -387,6 +387,33 @@ export type Database = {
         };
         Relationships: [];
       };
+      coupon_redemptions: {
+        Row: {
+          id: string;
+          coupon_id: string;
+          customer_id: string | null;
+          order_id: string;
+          discount_amount: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          coupon_id: string;
+          customer_id?: string | null;
+          order_id: string;
+          discount_amount?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string | null;
+          coupon_id?: string | null;
+          customer_id?: string | null;
+          order_id?: string | null;
+          discount_amount?: number | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
       customer_addresses: {
         Row: {
           id: string;
@@ -666,6 +693,39 @@ export type Database = {
           reference_id?: string | null;
           admin_user_id?: string | null;
           created_at?: string | null;
+        };
+        Relationships: [];
+      };
+      inventory_reservations: {
+        Row: {
+          id: string;
+          order_id: string | null;
+          variant_id: string;
+          quantity: number;
+          status: string;
+          expires_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id?: string | null;
+          variant_id: string;
+          quantity: number;
+          status?: string;
+          expires_at: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string | null;
+          order_id?: string | null;
+          variant_id?: string | null;
+          quantity?: number | null;
+          status?: string | null;
+          expires_at?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
         };
         Relationships: [];
       };
@@ -1257,6 +1317,7 @@ export type Database = {
           slug: string;
           name: string;
           category_slug: string | null;
+          category_id: string | null;
           price: number;
           mrp: number;
           fabric: string | null;
@@ -1281,6 +1342,7 @@ export type Database = {
           slug: string;
           name: string;
           category_slug?: string | null;
+          category_id?: string | null;
           price: number;
           mrp: number;
           fabric?: string | null;
@@ -1305,6 +1367,7 @@ export type Database = {
           slug?: string | null;
           name?: string | null;
           category_slug?: string | null;
+          category_id?: string | null;
           price?: number | null;
           mrp?: number | null;
           fabric?: string | null;

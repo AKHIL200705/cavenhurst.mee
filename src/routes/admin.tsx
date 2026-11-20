@@ -409,6 +409,40 @@ function AdminDashboard() {
     }
   }, [isAdmin, activeTab, loadActiveTabData]);
 
+  // 3. Supabase Realtime subscription for live operational updates
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const channel = supabase
+      .channel("admin-live-updates")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "orders" },
+        () => {
+          void loadActiveTabData();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "payments" },
+        () => {
+          void loadActiveTabData();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "inventory_movements" },
+        () => {
+          void loadActiveTabData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [isAdmin, loadActiveTabData]);
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setIsAdmin(false);

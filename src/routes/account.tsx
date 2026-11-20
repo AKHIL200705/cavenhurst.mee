@@ -150,6 +150,29 @@ function Account() {
     void loadData();
   }, [user, sessionToken]);
 
+  // Real-time updates for customer orders
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`customer-orders-${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+        },
+        () => {
+          void loadData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   const resetForm = () => {
     setAddressForm({
       fullName: "",

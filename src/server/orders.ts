@@ -468,7 +468,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       }
     }
 
-    // 10. Increment coupon times_used if applied
+    // 10. Increment coupon times_used and log redemption if applied
     if (coupon && discount > 0) {
       const { data: cp } = await supabaseAdmin
         .from("coupons")
@@ -484,6 +484,17 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
             updated_at: new Date().toISOString(),
           })
           .eq("id", cp.id);
+
+        try {
+          await supabaseAdmin.from("coupon_redemptions").insert({
+            coupon_id: cp.id,
+            customer_id: customerUuid,
+            order_id: orderId,
+            discount_amount: discount,
+          });
+        } catch (crErr) {
+          console.warn("[Coupon Redemptions] Log note:", crErr);
+        }
       }
     }
 

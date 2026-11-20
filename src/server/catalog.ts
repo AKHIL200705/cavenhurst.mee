@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { getDb } from "@/server/db";
 import { type Product, type Size } from "@/lib/products";
 import type { Json } from "@/integrations/supabase/types";
 
@@ -45,6 +46,23 @@ function mapDbProductToFrontend(row: any): Product {
  */
 export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<Product[]> => {
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql`
+          SELECT *
+          FROM products
+          WHERE is_published = true
+          ORDER BY rank ASC
+        `;
+        if (rows && rows.length > 0) {
+          return (rows as any[]).map(mapDbProductToFrontend);
+        }
+      } catch (dbErr) {
+        console.error("[Catalog ServerFn] Direct DB error, falling back to Supabase client:", dbErr);
+      }
+    }
+
     try {
       const { data: dbProducts, error } = await supabaseAdmin
         .from("products")
@@ -71,6 +89,23 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
 export const getProductBySlugServerFn = createServerFn({ method: "POST" })
   .validator((params: { slug: string }) => params)
   .handler(async ({ data }): Promise<Product | null> => {
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [row] = await sql`
+          SELECT *
+          FROM products
+          WHERE slug = ${data.slug} AND is_published = true
+          LIMIT 1
+        `;
+        if (row) {
+          return mapDbProductToFrontend(row);
+        }
+      } catch (dbErr) {
+        console.error("[Product Detail ServerFn] Direct DB error, falling back to Supabase client:", dbErr);
+      }
+    }
+
     try {
       const { data: row, error } = await supabaseAdmin
         .from("products")
