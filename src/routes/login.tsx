@@ -40,7 +40,9 @@ function GoogleIcon({ className }: { className?: string }) {
 
 function Login() {
   const [tab, setTab] = useState<"login" | "signup">("login");
+  const [method, setMethod] = useState<"phone" | "email">("phone");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -184,18 +186,64 @@ function Login() {
   };
 
   const verify = async () => {
-    if (!/^\d{6}$/.test(code)) {
+    if (!/^\d{6}$/.test(code.trim())) {
       toast.error("Enter the 6-digit code");
       return;
     }
     setBusy(true);
     const { error } = await supabase.auth.verifyOtp({
       phone: `+91${phone}`,
-      token: code,
+      token: code.trim(),
       type: "sms",
     });
     setBusy(false);
-    if (error) toast.error("That code didn't work. Check it and try again.");
+    if (error) {
+      toast.error("That code didn't work. Check it and try again.");
+    } else {
+      toast.success("Welcome back!");
+      void navigate({ to: "/account" });
+    }
+  };
+
+  const sendEmailCode = async () => {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      toast.error("Enter a valid email address");
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim().toLowerCase(),
+      options: {
+        shouldCreateUser: true,
+      },
+    });
+    setBusy(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setSent(true);
+    toast.success("Verification code sent to " + email);
+  };
+
+  const verifyEmailCode = async () => {
+    if (!/^\d{6}$/.test(code.trim())) {
+      toast.error("Enter the 6-digit code");
+      return;
+    }
+    setBusy(true);
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim().toLowerCase(),
+      token: code.trim(),
+      type: "email",
+    });
+    setBusy(false);
+    if (error) {
+      toast.error(error.message || "Invalid or expired code.");
+    } else {
+      toast.success("Welcome back!");
+      void navigate({ to: "/account" });
+    }
   };
 
   const signInWithGoogleDirect = () => {
@@ -292,28 +340,87 @@ function Login() {
               ? "Continue to shop, track orders and more."
               : "Create your account in seconds."}
           </p>
-          {!sent ? (
-            <>
-              <div className="mt-6 flex items-center rounded-xl border border-input">
-                <span className="flex items-center gap-2 border-r border-input px-4 py-4 text-sm">
-                  🇮🇳 +91
-                </span>
-                <input
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                  inputMode="numeric"
-                  placeholder="Enter mobile number"
-                  className="flex-1 bg-transparent px-4 outline-none"
-                />
-              </div>
+
+          {!sent && (
+            <div className="mt-4 flex justify-center gap-2">
               <button
-                disabled={busy}
-                onClick={sendCode}
-                className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
+                type="button"
+                onClick={() => {
+                  setMethod("phone");
+                  setSent(false);
+                  setCode("");
+                }}
+                className={cn(
+                  "px-4 py-1.5 text-xs rounded-full border transition",
+                  method === "phone"
+                    ? "bg-primary/10 border-primary font-bold text-foreground"
+                    : "border-border text-muted-foreground hover:bg-accent",
+                )}
               >
-                {busy ? "Sending…" : "Continue with Mobile"} <ArrowRight className="h-4 w-4" />
+                Mobile Number
               </button>
-            </>
+              <button
+                type="button"
+                onClick={() => {
+                  setMethod("email");
+                  setSent(false);
+                  setCode("");
+                }}
+                className={cn(
+                  "px-4 py-1.5 text-xs rounded-full border transition",
+                  method === "email"
+                    ? "bg-primary/10 border-primary font-bold text-foreground"
+                    : "border-border text-muted-foreground hover:bg-accent",
+                )}
+              >
+                Email Address
+              </button>
+            </div>
+          )}
+
+          {!sent ? (
+            method === "phone" ? (
+              <>
+                <div className="mt-4 flex items-center rounded-xl border border-input">
+                  <span className="flex items-center gap-2 border-r border-input px-4 py-4 text-sm">
+                    🇮🇳 +91
+                  </span>
+                  <input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    inputMode="numeric"
+                    placeholder="Enter mobile number"
+                    className="flex-1 bg-transparent px-4 outline-none text-sm"
+                  />
+                </div>
+                <button
+                  disabled={busy}
+                  onClick={sendCode}
+                  className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
+                >
+                  {busy ? "Sending…" : "Continue with Mobile"} <ArrowRight className="h-4 w-4" />
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="mt-4 flex items-center rounded-xl border border-input">
+                  <input
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    type="email"
+                    placeholder="Enter email address (e.g. name@gmail.com)"
+                    className="flex-1 bg-transparent px-4 py-4 outline-none text-sm"
+                  />
+                </div>
+                <button
+                  disabled={busy}
+                  onClick={sendEmailCode}
+                  className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
+                >
+                  {busy ? "Sending…" : "Continue with Email"} <ArrowRight className="h-4 w-4" />
+                </button>
+              </>
+            )
           ) : (
             <>
               <input
@@ -326,7 +433,7 @@ function Login() {
               />
               <button
                 disabled={busy}
-                onClick={verify}
+                onClick={method === "email" ? verifyEmailCode : verify}
                 className="mt-4 w-full rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
               >
                 {busy ? "Checking…" : "Verify & Continue"}
@@ -338,7 +445,7 @@ function Login() {
                 }}
                 className="mt-3 w-full text-sm text-muted-foreground underline"
               >
-                Change number / resend
+                Change {method === "email" ? "email" : "number"} / resend
               </button>
             </>
           )}

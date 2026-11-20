@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { getDb } from "@/server/db";
 
 export interface GoogleSessionPayload {
   sub: string;
@@ -318,75 +319,161 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
     }
 
     const isAdmin = isWhitelistedAdminEmail(googleUser.email);
+    const emailLower = googleUser.email.toLowerCase().trim();
+    let authUserId: string = googleUser.sub;
 
-    // Synchronize customer record into Supabase PostgreSQL tables
-    try {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      
-      // Upsert into customers table
-      const { data: cust } = await supabaseAdmin
-        .from("customers")
-        .upsert(
-          {
-            auth_provider_uid: googleUser.sub,
+    // Direct superuser database synchronization into auth.users, profiles, and customers
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [existing] = await sql`
+          SELECT id, email FROM auth.users WHERE lower(email) = ${emailLower} LIMIT 1
+        `;
+
+        if (existing) {
+          authUserId = existing["id"] as string;
+          await sql`
+            UPDATE auth.users SET
+              last_sign_in_at = now(),
+              updated_at = now(),
+              raw_user_meta_data = raw_user_meta_data || ${JSON.stringify({
+                sub: googleUser.sub,
+                full_name: googleUser.name || "Customer",
+                avatar_url: googleUser.picture,
+              })}::jsonb
+            WHERE id = ${authUserId}
+          `;
+        } else {
+          const rawAppMeta = JSON.stringify({ provider: "google", providers: ["google"] });
+          const rawUserMeta = JSON.stringify({
+            sub: googleUser.sub,
+            email: emailLower,
             full_name: googleUser.name || "Customer",
-            email: googleUser.email,
-            profile_image: googleUser.picture,
-            account_status: "active",
-            last_login: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "auth_provider_uid" }
-        )
-        .select("id")
-        .maybeSingle();
+            name: googleUser.name || "Customer",
+            avatar_url: googleUser.picture,
+            picture: googleUser.picture,
+            email_verified: true,
+          });
 
-      if (cust?.id) {
-        // Upsert into customer_auth_providers
-        await supabaseAdmin.from("customer_auth_providers").upsert(
-          {
-            customer_id: cust.id,
-            provider: "google",
-            provider_uid: googleUser.sub,
-            email: googleUser.email,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "provider,provider_uid" }
-        );
+          const [inserted] = await sql`
+            INSERT INTO auth.users (
+              id,
+              instance_id,
+              aud,
+              role,
+              email,
+              encrypted_password,
+              email_confirmed_at,
+              raw_app_meta_data,
+              raw_user_meta_data,
+              is_super_admin,
+              created_at,
+              updated_at,
+              last_sign_in_at
+            ) VALUES (
+              gen_random_uuid(),
+              '00000000-0000-0000-0000-000000000000',
+              'authenticated',
+              'authenticated',
+              ${emailLower},
+              '',
+              now(),
+              ${rawAppMeta}::jsonb,
+              ${rawUserMeta}::jsonb,
+              false,
+              now(),
+              now(),
+              now()
+            )
+            RETURNING id
+          `;
+          if (inserted?.["id"]) {
+            authUserId = inserted["id"] as string;
+          }
+        }
+
+        // Link identity in auth.identities
+        try {
+          await sql`
+            INSERT INTO auth.identities (
+              id,
+              user_id,
+              identity_data,
+              provider,
+              provider_id,
+              last_sign_in_at,
+              created_at,
+              updated_at
+            ) VALUES (
+              gen_random_uuid(),
+              ${authUserId},
+              ${JSON.stringify({ sub: googleUser.sub, email: emailLower })}::jsonb,
+              'google',
+              ${googleUser.sub},
+              now(),
+              now(),
+              now()
+            )
+            ON CONFLICT (provider_id, provider) DO UPDATE SET
+              last_sign_in_at = now(),
+              updated_at = now()
+          `;
+        } catch (idErr) {
+          console.warn("[Auth Identities Sync Note]:", idErr);
+        }
+
+        // Ensure public.profiles is fully populated
+        await sql`
+          INSERT INTO public.profiles (
+            id, email, full_name, avatar_url, auth_provider, account_status, created_at, updated_at
+          ) VALUES (
+            ${authUserId}, ${emailLower}, ${googleUser.name || "Customer"}, ${googleUser.picture}, 'google', 'active', now(), now()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            email = COALESCE(EXCLUDED.email, public.profiles.email),
+            full_name = CASE WHEN EXCLUDED.full_name IS NOT NULL AND EXCLUDED.full_name <> 'Customer' THEN EXCLUDED.full_name ELSE public.profiles.full_name END,
+            avatar_url = COALESCE(EXCLUDED.avatar_url, public.profiles.avatar_url),
+            updated_at = now()
+        `;
+
+        // Ensure public.customers is fully populated
+        await sql`
+          INSERT INTO public.customers (
+            id, auth_provider_uid, full_name, email, profile_image, account_status, last_login, created_at, updated_at
+          ) VALUES (
+            ${authUserId}, ${googleUser.sub}, ${googleUser.name || "Customer"}, ${emailLower}, ${googleUser.picture}, 'active', now(), now(), now()
+          )
+          ON CONFLICT (auth_provider_uid) DO UPDATE SET
+            email = COALESCE(EXCLUDED.email, public.customers.email),
+            full_name = CASE WHEN EXCLUDED.full_name IS NOT NULL AND EXCLUDED.full_name <> 'Customer' THEN EXCLUDED.full_name ELSE public.customers.full_name END,
+            profile_image = COALESCE(EXCLUDED.profile_image, public.customers.profile_image),
+            last_login = now(),
+            updated_at = now()
+        `;
+
+        // If user is admin, ensure admin_users has an active record
+        if (isAdmin) {
+          await sql`
+            INSERT INTO public.admin_users (
+              auth_user_id, email, full_name, role, permissions, is_active, last_login, created_at, updated_at
+            ) VALUES (
+              ${authUserId}, ${emailLower}, ${googleUser.name || "Admin"}, 'admin', ${JSON.stringify(["*"])}::jsonb, true, now(), now(), now()
+            )
+            ON CONFLICT (email) DO UPDATE SET
+              auth_user_id = EXCLUDED.auth_user_id,
+              full_name = COALESCE(EXCLUDED.full_name, public.admin_users.full_name),
+              is_active = true,
+              last_login = now(),
+              updated_at = now()
+          `;
+        }
+      } catch (dbSyncErr) {
+        console.error("[Customer DB Auth Sync Error]:", dbSyncErr);
       }
-
-      // Keep customer_profiles backward-compatible
-      await supabaseAdmin.from("customer_profiles").upsert(
-        {
-          id: googleUser.sub,
-          full_name: googleUser.name || "Customer",
-          avatar_url: googleUser.picture,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
-
-      // If user is admin, ensure admin_users has a record
-      if (isAdmin) {
-        await supabaseAdmin.from("admin_users").upsert(
-          {
-            email: googleUser.email.toLowerCase(),
-            full_name: googleUser.name || "Admin",
-            role: "admin",
-            permissions: ["*"],
-            is_active: true,
-            last_login: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "email" }
-        );
-      }
-    } catch (syncErr) {
-      console.error("[Customer Auth Sync Error]:", syncErr);
     }
 
     const sessionToken = await signSessionToken({
-      sub: googleUser.sub,
+      sub: authUserId,
       email: googleUser.email,
       name: googleUser.name,
       picture: googleUser.picture,
@@ -394,7 +481,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
     });
 
     const user = formatAuthUser({
-      sub: googleUser.sub,
+      sub: authUserId,
       email: googleUser.email,
       name: googleUser.name,
       picture: googleUser.picture,

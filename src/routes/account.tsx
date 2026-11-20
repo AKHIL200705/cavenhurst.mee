@@ -13,6 +13,8 @@ import {
   getCustomerOrdersServerFn,
   saveCustomerAddressServerFn,
   deleteCustomerAddressServerFn,
+  getCustomerProfileServerFn,
+  updateCustomerProfileServerFn,
 } from "@/server/customers";
 
 export const Route = createFileRoute("/account")({
@@ -85,6 +87,19 @@ function Account() {
   const [isAdmin, setIsAdmin] = useState(false);
   const navigate = useNavigate();
 
+  // Profile State
+  const [profileData, setProfileData] = useState<{
+    fullName: string;
+    email: string;
+    phone: string;
+  }>({
+    fullName: "",
+    email: "",
+    phone: "",
+  });
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+
   // Address Form State
   const [showAddressForm, setShowAddressForm] = useState(false);
   const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
@@ -102,7 +117,7 @@ function Account() {
 
   const loadData = async () => {
     if (!user) return;
-    const userEmail = user.email?.toLowerCase();
+    const userEmail = (user.email || profileData.email)?.toLowerCase();
     if (
       user.isAdmin ||
       (userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail))
@@ -111,12 +126,20 @@ function Account() {
     }
 
     try {
-      const [addrs, ords] = await Promise.all([
+      const [addrs, ords, prof] = await Promise.all([
         getCustomerAddressesServerFn({ data: { authToken: sessionToken || undefined } }),
         getCustomerOrdersServerFn({ data: { authToken: sessionToken || undefined } }),
+        getCustomerProfileServerFn({ data: { authToken: sessionToken || undefined } }),
       ]);
       setAddresses((addrs as Address[]) || []);
       setOrders((ords as Order[]) || []);
+      if (prof) {
+        setProfileData({
+          fullName: prof.fullName || (user.user_metadata?.full_name as string) || "",
+          email: prof.email || user.email || "",
+          phone: prof.phone || user.phone || "",
+        });
+      }
     } catch (err) {
       console.error("[Account] Error fetching customer data:", err);
     }
@@ -287,6 +310,32 @@ function Account() {
     }
   };
 
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (profileData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileData.email.trim())) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      await updateCustomerProfileServerFn({
+        data: {
+          authToken: sessionToken || undefined,
+          fullName: profileData.fullName.trim() || undefined,
+          email: profileData.email.trim().toLowerCase() || undefined,
+          phone: profileData.phone.trim() || undefined,
+        },
+      });
+      toast.success("Profile details saved successfully!");
+      setIsEditingProfile(false);
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update profile");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   if (!ready) return <div className="py-28 text-center text-muted-foreground">Loading…</div>;
   if (!user)
     return (
@@ -332,6 +381,109 @@ function Account() {
           </button>
         </div>
       </div>
+
+      {/* PERSONAL PROFILE & CONTACT */}
+      <section className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-bold tracking-brand">ACCOUNT DETAILS</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your registered email, name, and contact information.
+            </p>
+          </div>
+          {!isEditingProfile && (
+            <button
+              onClick={() => setIsEditingProfile(true)}
+              className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-xs font-semibold hover:bg-accent"
+            >
+              <Edit2 className="h-3.5 w-3.5" /> Edit Profile
+            </button>
+          )}
+        </div>
+
+        {isEditingProfile ? (
+          <form onSubmit={handleSaveProfile} className="mt-6 space-y-4 max-w-xl">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">Full Name</label>
+                <input
+                  type="text"
+                  value={profileData.fullName}
+                  onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
+                  placeholder="e.g. John Doe"
+                  className="mt-1 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">Email Address</label>
+                <input
+                  type="email"
+                  value={profileData.email}
+                  onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                  placeholder="name@example.com"
+                  className="mt-1 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground">Mobile Phone</label>
+              <input
+                type="tel"
+                value={profileData.phone}
+                onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
+                placeholder="10-digit mobile"
+                className="mt-1 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={savingProfile}
+                className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50"
+              >
+                {savingProfile ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                Save Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingProfile(false)}
+                className="rounded-lg border border-border px-4 py-2 text-xs hover:bg-accent"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="mt-6 grid gap-4 sm:grid-cols-3 text-sm">
+            <div className="rounded-xl border border-border/60 bg-background/50 p-3">
+              <span className="text-xs text-muted-foreground">Name</span>
+              <p className="mt-1 font-semibold">{profileData.fullName || "Not provided"}</p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-background/50 p-3">
+              <span className="text-xs text-muted-foreground">Email Address</span>
+              <p className="mt-1 font-semibold">{profileData.email || user.email || "No email registered"}</p>
+            </div>
+            <div className="rounded-xl border border-border/60 bg-background/50 p-3">
+              <span className="text-xs text-muted-foreground">Phone Number</span>
+              <p className="mt-1 font-semibold">{profileData.phone || user.phone || "Not provided"}</p>
+            </div>
+          </div>
+        )}
+
+        {!profileData.email && !user.email && (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex items-center justify-between gap-3">
+            <span>Please add your email address so you can receive order confirmations and invoice receipts.</span>
+            {!isEditingProfile && (
+              <button
+                onClick={() => setIsEditingProfile(true)}
+                className="underline font-bold text-amber-100 hover:text-white"
+              >
+                Add Email
+              </button>
+            )}
+          </div>
+        )}
+      </section>
 
       {/* SAVED BAG */}
       <section>

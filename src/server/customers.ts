@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { getDb } from "@/server/db";
 import { verifyGoogleSessionOrToken } from "./auth";
 
 /**
@@ -281,5 +282,143 @@ export const deleteCustomerAddressServerFn = createServerFn({ method: "POST" })
       );
 
     if (error) throw new Error(error.message);
+    return { success: true };
+  });
+
+export interface CustomerProfileData {
+  id: string;
+  fullName: string | null;
+  email: string | null;
+  phone: string | null;
+  avatarUrl: string | null;
+}
+
+/**
+ * Server Function: Get customer profile
+ */
+export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
+  .validator((params?: { authToken?: string | undefined }) => params || {})
+  .handler(async ({ data }): Promise<CustomerProfileData | null> => {
+    const auth = await getAuthenticatedCustomerId(data?.authToken);
+    if (!auth) return null;
+
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [profile] = await sql`
+          SELECT p.id, p.full_name, p.email, p.phone, p.avatar_url
+          FROM public.profiles p
+          WHERE p.id = ${auth.id}::uuid
+          LIMIT 1
+        `;
+        if (profile) {
+          return {
+            id: profile["id"] as string,
+            fullName: (profile["full_name"] as string | null) ?? null,
+            email: (profile["email"] as string | null) ?? null,
+            phone: (profile["phone"] as string | null) ?? null,
+            avatarUrl: (profile["avatar_url"] as string | null) ?? null,
+          };
+        }
+
+        const [cust] = await sql`
+          SELECT c.id, c.full_name, c.email, c.phone, c.profile_image
+          FROM public.customers c
+          WHERE c.id = ${auth.customerUuid || auth.id}::uuid OR c.auth_provider_uid = ${auth.id}
+          LIMIT 1
+        `;
+        if (cust) {
+          return {
+            id: cust["id"] as string,
+            fullName: (cust["full_name"] as string | null) ?? null,
+            email: (cust["email"] as string | null) ?? null,
+            phone: (cust["phone"] as string | null) ?? null,
+            avatarUrl: (cust["profile_image"] as string | null) ?? null,
+          };
+        }
+      } catch (dbErr) {
+        console.warn("[getCustomerProfileServerFn] DB notice:", dbErr);
+      }
+    }
+
+    return {
+      id: auth.id,
+      fullName: null,
+      email: auth.email || null,
+      phone: null,
+      avatarUrl: null,
+    };
+  });
+
+/**
+ * Server Function: Update customer profile details
+ */
+export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      fullName?: string | undefined;
+      email?: string | undefined;
+      phone?: string | undefined;
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const auth = await getAuthenticatedCustomerId(data.authToken);
+    if (!auth) throw new Error("Authentication required.");
+
+    const sql = getDb();
+    if (!sql) throw new Error("Database connection unavailable.");
+
+    const cleanEmail = data.email?.toLowerCase().trim() || null;
+    const cleanName = data.fullName?.trim() || null;
+    const cleanPhone = data.phone?.replace(/\D/g, "").slice(-10) || null;
+
+    // 1. Update public.profiles
+    try {
+      await sql`
+        UPDATE public.profiles SET
+          email = COALESCE(${cleanEmail}, email),
+          full_name = COALESCE(${cleanName}, full_name),
+          phone = COALESCE(${cleanPhone}, phone),
+          updated_at = now()
+        WHERE id = ${auth.id}::uuid
+      `;
+    } catch (err) {
+      console.warn("[updateProfile] profiles update note:", err);
+    }
+
+    // 2. Update public.customers
+    try {
+      await sql`
+        UPDATE public.customers SET
+          email = COALESCE(${cleanEmail}, email),
+          full_name = COALESCE(${cleanName}, full_name),
+          phone = COALESCE(${cleanPhone}, phone),
+          updated_at = now()
+        WHERE id = ${auth.customerUuid || auth.id}::uuid OR auth_provider_uid = ${auth.id}
+      `;
+    } catch (err) {
+      console.warn("[updateProfile] customers update note:", err);
+    }
+
+    // 3. Update auth.users if cleanEmail is provided
+    try {
+      if (cleanEmail) {
+        await sql`
+          UPDATE auth.users SET
+            email = ${cleanEmail},
+            email_confirmed_at = COALESCE(email_confirmed_at, now()),
+            updated_at = now(),
+            raw_user_meta_data = raw_user_meta_data || ${JSON.stringify({
+              email: cleanEmail,
+              full_name: cleanName,
+            })}::jsonb
+          WHERE id = ${auth.id}::uuid
+        `;
+      }
+    } catch (err) {
+      console.warn("[updateProfile] auth.users update note:", err);
+    }
+
     return { success: true };
   });
