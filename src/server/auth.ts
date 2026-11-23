@@ -505,7 +505,13 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
         }
       } catch (dbSyncErr) {
         console.error("[Customer DB Auth Sync Error]:", dbSyncErr);
+        throw new Error(
+          "Failed to synchronize customer into database: " +
+            (dbSyncErr instanceof Error ? dbSyncErr.message : String(dbSyncErr)),
+        );
       }
+    } else {
+      throw new Error("Database connection is currently unavailable. Please verify DATABASE_URL.");
     }
 
     const sessionToken = await signSessionToken({
