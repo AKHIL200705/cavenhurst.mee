@@ -436,18 +436,54 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             updated_at = now()
         `;
 
-        // Ensure public.customers is fully populated
+        // Ensure public.customers is safely populated without pkey or unique conflicts
+        const [existingCust] = await sql`
+          SELECT id FROM public.customers
+          WHERE id = ${authUserId}::uuid
+             OR auth_provider_uid = ${googleUser.sub}
+             OR auth_provider_uid = ${authUserId}
+             OR (email IS NOT NULL AND lower(email) = ${emailLower})
+          LIMIT 1
+        `;
+
+        if (existingCust) {
+          await sql`
+            UPDATE public.customers SET
+              auth_provider_uid = ${googleUser.sub},
+              email = ${emailLower},
+              full_name = CASE WHEN ${googleUser.name || "Customer"} <> 'Customer' THEN ${googleUser.name} ELSE full_name END,
+              profile_image = COALESCE(${googleUser.picture}, profile_image),
+              last_login = now(),
+              updated_at = now()
+            WHERE id = ${existingCust["id"]}
+          `;
+        } else {
+          await sql`
+            INSERT INTO public.customers (
+              id, auth_provider_uid, full_name, email, profile_image, account_status, last_login, created_at, updated_at
+            ) VALUES (
+              ${authUserId}, ${googleUser.sub}, ${googleUser.name || "Customer"}, ${emailLower}, ${googleUser.picture}, 'active', now(), now(), now()
+            )
+            ON CONFLICT (id) DO UPDATE SET
+              auth_provider_uid = EXCLUDED.auth_provider_uid,
+              email = EXCLUDED.email,
+              full_name = EXCLUDED.full_name,
+              profile_image = EXCLUDED.profile_image,
+              last_login = now(),
+              updated_at = now()
+          `;
+        }
+
+        // Link customer in customer_auth_providers
         await sql`
-          INSERT INTO public.customers (
-            id, auth_provider_uid, full_name, email, profile_image, account_status, last_login, created_at, updated_at
+          INSERT INTO public.customer_auth_providers (
+            customer_id, provider, provider_uid, email, updated_at
           ) VALUES (
-            ${authUserId}, ${googleUser.sub}, ${googleUser.name || "Customer"}, ${emailLower}, ${googleUser.picture}, 'active', now(), now(), now()
+            ${existingCust ? existingCust["id"] : authUserId}, 'google', ${googleUser.sub}, ${emailLower}, now()
           )
-          ON CONFLICT (auth_provider_uid) DO UPDATE SET
-            email = COALESCE(EXCLUDED.email, public.customers.email),
-            full_name = CASE WHEN EXCLUDED.full_name IS NOT NULL AND EXCLUDED.full_name <> 'Customer' THEN EXCLUDED.full_name ELSE public.customers.full_name END,
-            profile_image = COALESCE(EXCLUDED.profile_image, public.customers.profile_image),
-            last_login = now(),
+          ON CONFLICT (provider, provider_uid) DO UPDATE SET
+            email = EXCLUDED.email,
+            customer_id = EXCLUDED.customer_id,
             updated_at = now()
         `;
 

@@ -8,7 +8,14 @@ let _sql: ReturnType<typeof postgres> | undefined;
  */
 export function getDb(): ReturnType<typeof postgres> | null {
   if (_sql) return _sql;
-  const dbUrl = (process.env["DATABASE_URL"] || "").replace(/^["']|["']$/g, "").trim();
+  const dbUrl = (
+    process.env["DATABASE_URL"] ||
+    process.env["POSTGRES_URL"] ||
+    process.env["SUPABASE_DB_URL"] ||
+    "postgresql://postgres.ewlsrypetobkwrwtmmgh:cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+  )
+    .replace(/^["']|["']$/g, "")
+    .trim();
   if (!dbUrl) return null;
   try {
     _sql = postgres(dbUrl, {

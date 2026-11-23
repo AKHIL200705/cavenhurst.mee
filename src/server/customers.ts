@@ -28,7 +28,27 @@ export async function getAuthenticatedCustomerId(passedToken?: string | null): P
     // 1. Google session check
     const googleSession = await verifyGoogleSessionOrToken(token);
     if (googleSession) {
-      // Find matching customer row in public.customers
+      const sql = getDb();
+      if (sql) {
+        try {
+          const [cust] = await sql`
+            SELECT id, email FROM public.customers
+            WHERE auth_provider_uid = ${googleSession.sub}
+               OR auth_provider_uid = ${googleSession.sub.toString()}
+               OR (email IS NOT NULL AND lower(email) = ${googleSession.email.toLowerCase().trim()})
+            LIMIT 1
+          `;
+          return {
+            id: googleSession.sub,
+            customerUuid: cust ? (cust["id"] as string) : undefined,
+            email: googleSession.email,
+          };
+        } catch (dbErr) {
+          console.warn("[getAuthenticatedCustomerId] Direct DB query fallback note:", dbErr);
+        }
+      }
+
+      // Fallback to supabaseAdmin
       let { data: cust } = await supabaseAdmin
         .from("customers")
         .select("id, email")
