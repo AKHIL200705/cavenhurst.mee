@@ -5,7 +5,7 @@ import { getDb } from "@/server/db";
 import { type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
-import { verifyGoogleSessionOrToken, signSessionToken } from "./auth";
+import { verifyGoogleSessionOrToken, signSessionToken } from "./auth-helpers";
 import type { Json, Database } from "@/integrations/supabase/types";
 
 type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];

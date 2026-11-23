@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/auth";
 import { verifyGoogleAuthServerFn } from "@/server/auth";
 import { adminLoginServerFn } from "@/server/admin";
 
-export const Route = createFileRoute("/admin/login" as any)({
+export const Route = createFileRoute("/admin/login")({
   head: () => meta("Admin Portal Login", "Restricted access for CAVENHURST executive management."),
   component: AdminLogin,
 });

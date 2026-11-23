@@ -3,7 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProduct, type Size } from "@/lib/products";
 import { computeTotals } from "@/lib/pricing";
-import { verifyGoogleSessionOrToken } from "./auth";
+import { verifyGoogleSessionOrToken } from "./auth-helpers";
 import {
   createRazorpayOrder,
   confirmVerifiedPayment,

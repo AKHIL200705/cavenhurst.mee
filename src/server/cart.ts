@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { getAuthenticatedCustomerId } from "./customers";
+import { getAuthenticatedCustomerId } from "./auth-helpers";
 import type { Size } from "@/lib/products";
 
 export interface CartItemData {
