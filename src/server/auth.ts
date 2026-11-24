@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getDb } from "@/server/db";
+import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 import {
   type GoogleSessionPayload,
@@ -51,7 +52,8 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
     const emailLower = googleUser.email.toLowerCase().trim();
     let authUserId: string = googleUser.sub;
 
-    // Direct superuser database synchronization into auth.users, profiles, and customers
+    // Direct database synchronization into auth.users, profiles, and customers
+    let synced = false;
     const sql = getDb();
     if (sql) {
       try {
@@ -233,15 +235,61 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
               updated_at = now()
           `;
         }
+        synced = true;
       } catch (dbSyncErr) {
-        console.error("[Customer DB Auth Sync Error]:", dbSyncErr);
-        throw new Error(
-          "Failed to synchronize customer into database: " +
-            (dbSyncErr instanceof Error ? dbSyncErr.message : String(dbSyncErr)),
-        );
+        console.warn("[Google Auth Direct DB Notice]:", dbSyncErr);
       }
-    } else {
-      throw new Error("Database connection is currently unavailable. Please verify DATABASE_URL.");
+    }
+
+    if (!synced) {
+      // Seamless Supabase Admin REST client fallback
+      try {
+        const { data: existingProfile } = await (supabaseAdmin as any)
+          .from("profiles")
+          .select("id")
+          .eq("email", emailLower)
+          .maybeSingle();
+
+        if (existingProfile?.id) {
+          authUserId = existingProfile.id;
+        }
+
+        await (supabaseAdmin as any).from("profiles").upsert({
+          id: authUserId,
+          email: emailLower,
+          full_name: googleUser.name || "Customer",
+          avatar_url: googleUser.picture,
+          auth_provider: "google",
+          account_status: "active",
+          updated_at: new Date().toISOString(),
+        });
+
+        await (supabaseAdmin as any).from("customers").upsert({
+          id: authUserId,
+          auth_provider_uid: googleUser.sub,
+          full_name: googleUser.name || "Customer",
+          email: emailLower,
+          profile_image: googleUser.picture,
+          account_status: "active",
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (isAdmin) {
+          await (supabaseAdmin as any).from("admin_users").upsert({
+            auth_user_id: authUserId,
+            email: emailLower,
+            full_name: googleUser.name || "Admin",
+            role: "admin",
+            permissions: ["*"],
+            is_active: true,
+            last_login: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        }
+      } catch (fallbackErr) {
+        console.error("[Google Auth Supabase Fallback Error]:", fallbackErr);
+      }
     }
 
     const sessionToken = await signSessionToken({

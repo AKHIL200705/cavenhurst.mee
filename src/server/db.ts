@@ -1,13 +1,10 @@
 import postgres from "postgres";
+import fs from "node:fs";
+import path from "node:path";
 
 let _sql: ReturnType<typeof postgres> | undefined;
 
-/**
- * Returns a pooled PostgreSQL client using DATABASE_URL if configured.
- * Guarantees direct, high-performance database access for server functions.
- */
-export function getDb(): ReturnType<typeof postgres> | null {
-  if (_sql) return _sql;
+function resolveDbUrl(): string {
   let dbUrl = (
     process.env["DATABASE_URL"] ||
     process.env["POSTGRES_URL"] ||
@@ -17,9 +14,24 @@ export function getDb(): ReturnType<typeof postgres> | null {
     .replace(/^["']|["']$/g, "")
     .trim();
 
-  if (!dbUrl) {
-    return null;
+  // If not in process.env, inspect local .env file directly (covers Vite SSR dev environments)
+  if (!dbUrl && typeof process !== "undefined") {
+    try {
+      const envPath = path.resolve(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf8");
+        const match = content.match(/^DATABASE_URL=["']?([^"'\r\n]+)["']?/m);
+        if (match && match[1]) {
+          dbUrl = match[1].trim();
+          process.env["DATABASE_URL"] = dbUrl;
+        }
+      }
+    } catch {
+      // Ignore filesystem access limitations
+    }
   }
+
+  if (!dbUrl) return "";
 
   // Normalize IPv6-only direct host to IPv4/IPv6 dual-stack pooler
   if (dbUrl.includes("db.ewlsrypetobkwrwtmmgh.supabase.co")) {
@@ -33,7 +45,21 @@ export function getDb(): ReturnType<typeof postgres> | null {
     dbUrl = dbUrl.replace("://postgres:", "://postgres.ewlsrypetobkwrwtmmgh:");
   }
 
-  if (!dbUrl) return null;
+  return dbUrl;
+}
+
+/**
+ * Returns a pooled PostgreSQL client using DATABASE_URL if configured.
+ * Guarantees direct, high-performance database access for server functions.
+ */
+export function getDb(): ReturnType<typeof postgres> | null {
+  if (_sql) return _sql;
+  const dbUrl = resolveDbUrl();
+
+  if (!dbUrl) {
+    return null;
+  }
+
   try {
     _sql = postgres(dbUrl, {
       ssl: { rejectUnauthorized: false },
