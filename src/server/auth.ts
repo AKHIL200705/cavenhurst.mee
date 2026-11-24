@@ -471,17 +471,48 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
       }
     }
 
-    // Authenticate password with Supabase
-    const { data: signInRes, error: signInErr } = await supabaseAdmin.auth.signInWithPassword({
-      email: cleanEmail,
-      password,
-    });
+    // Authenticate password with Supabase (with direct database cryptographic fallback)
+    let authenticated = false;
+    let authUserId = authUser?.id || "";
+    let supabaseSession: any = null;
 
-    if (signInErr || !signInRes?.user) {
+    try {
+      const { data: signInRes, error: signInErr } = await supabaseAdmin.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
+
+      if (!signInErr && signInRes?.user) {
+        authenticated = true;
+        authUserId = signInRes.user.id;
+        supabaseSession = signInRes.session;
+      }
+    } catch (err) {
+      console.warn("[Supabase Auth API Sign-In Warning]:", err);
+    }
+
+    // Direct Database Authentication Fallback (using pgcrypto crypt on auth.users)
+    if (!authenticated && sql && authUser?.id) {
+      try {
+        const [verified] = await sql<any[]>`
+          SELECT id, (encrypted_password = crypt(${password}, encrypted_password)) AS password_matches
+          FROM auth.users
+          WHERE id = ${authUser.id}
+        `;
+        if (verified && verified.password_matches === true) {
+          authenticated = true;
+          authUserId = verified.id;
+        }
+      } catch (dbAuthErr) {
+        console.warn("[Postgres Direct Auth Check Warning]:", dbAuthErr);
+      }
+    }
+
+    if (!authenticated || !authUserId) {
       throw new Error("Invalid email or password. Please verify your credentials.");
     }
 
-    const userId = signInRes.user.id;
+    const userId = authUserId;
     const isAdmin = isWhitelistedAdminEmail(cleanEmail);
 
     const sessionToken = await signSessionToken({
@@ -505,7 +536,7 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
       sessionToken,
       user,
       isAdmin,
-      supabaseSession: signInRes.session,
+      supabaseSession,
     };
   });
 
@@ -623,21 +654,52 @@ export const resetPasswordWithOtpServerFn = createServerFn({ method: "POST" })
     }
 
     if (!userId) {
-      const { data: users } = await supabaseAdmin.auth.admin.listUsers();
-      const matched = users?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
-      if (matched) userId = matched.id;
+      try {
+        const { data: users } = await supabaseAdmin.auth.admin.listUsers();
+        const matched = users?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+        if (matched) userId = matched.id;
+      } catch {
+        /* ignore */
+      }
     }
 
     if (!userId) {
       throw new Error("Account not found for password reset.");
     }
 
-    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-      password: newPassword,
-    });
+    let updated = false;
 
-    if (updateErr) {
-      throw new Error(`Failed to update password: ${updateErr.message}`);
+    // 1. Authoritative Direct PostgreSQL Password Update (pgcrypto bcrypt)
+    if (sql) {
+      try {
+        await sql`
+          UPDATE auth.users SET
+            encrypted_password = crypt(${newPassword}, gen_salt('bf')),
+            updated_at = now()
+          WHERE id = ${userId}
+        `;
+        updated = true;
+      } catch (dbErr) {
+        console.error("[Postgres Password Update Error]:", dbErr);
+      }
+    }
+
+    // 2. Best-effort sync to Supabase GoTrue Auth service (if configured and reachable)
+    try {
+      const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        password: newPassword,
+      });
+      if (!updateErr) {
+        updated = true;
+      } else {
+        console.warn("[Supabase Auth Admin Update Warning]:", updateErr.message);
+      }
+    } catch (apiErr: any) {
+      console.warn("[Supabase Auth Admin API Notice]:", apiErr?.message);
+    }
+
+    if (!updated) {
+      throw new Error("Failed to update password. Database connection unavailable.");
     }
 
     return {

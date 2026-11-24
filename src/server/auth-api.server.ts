@@ -154,49 +154,120 @@ export async function executeVerifyRegistrationOtp(data: VerifyRegistrationOtpDa
 
   const { email: verifiedEmail, fullName, phone, password } = verifyRes.record;
 
-  // Create user securely via Supabase Admin API with confirmed email
-  const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-    email: verifiedEmail,
-    password,
-    email_confirm: true,
-    user_metadata: {
-      full_name: fullName,
-      name: fullName,
-      phone,
-      mobile_number: phone,
-      profile_completed: true,
-      email_verified: true,
-    },
-  });
+  let userId = "";
 
-  if (createErr || !newUser?.user) {
-    console.error("[Create User Error]:", createErr);
-    throw new Error(`Registration failed: ${createErr?.message || "Could not create user account"}`);
+  // 1. Try Supabase Admin GoTrue API
+  try {
+    const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      email: verifiedEmail,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        name: fullName,
+        phone,
+        mobile_number: phone,
+        profile_completed: true,
+        email_verified: true,
+      },
+    });
+
+    if (!createErr && newUser?.user) {
+      userId = newUser.user.id;
+    } else {
+      console.warn("[Supabase Create User Notice]:", createErr?.message);
+    }
+  } catch (err) {
+    console.warn("[Supabase Create User Exception]:", err);
   }
 
-  const userId = newUser.user.id;
+  // 2. Direct PostgreSQL Authoritative Creation Fallback (using pgcrypto crypt)
+  const sql = getDb();
+  if (!userId && sql) {
+    try {
+      const appMetaObj = { provider: "email", providers: ["email"] };
+      const userMetaObj = {
+        email: verifiedEmail,
+        full_name: fullName,
+        name: fullName,
+        phone,
+        mobile_number: phone,
+        profile_completed: true,
+        email_verified: true,
+      };
+
+      const [inserted] = await sql`
+        INSERT INTO auth.users (
+          id,
+          instance_id,
+          aud,
+          role,
+          email,
+          encrypted_password,
+          email_confirmed_at,
+          raw_app_meta_data,
+          raw_user_meta_data,
+          is_super_admin,
+          created_at,
+          updated_at,
+          last_sign_in_at
+        ) VALUES (
+          gen_random_uuid(),
+          '00000000-0000-0000-0000-000000000000',
+          'authenticated',
+          'authenticated',
+          ${verifiedEmail},
+          crypt(${password}, gen_salt('bf')),
+          now(),
+          ${sql.json(appMetaObj)},
+          ${sql.json(userMetaObj)},
+          false,
+          now(),
+          now(),
+          now()
+        )
+        RETURNING id
+      `;
+      if (inserted?.["id"]) {
+        userId = inserted["id"] as string;
+      }
+    } catch (dbInsertErr) {
+      console.error("[Postgres User Creation Error]:", dbInsertErr);
+    }
+  }
+
+  if (!userId) {
+    throw new Error("Registration failed: Unable to provision account in database.");
+  }
 
   // Ensure public.profiles and public.customers are explicitly synchronized
-  const sql = getDb();
   if (sql) {
     try {
       await sql`
-        UPDATE public.profiles SET
-          phone = ${phone},
-          mobile_number = ${phone},
-          full_name = ${fullName},
+        INSERT INTO public.profiles (
+          id, email, full_name, phone, mobile_number, auth_provider, account_status, profile_completed, created_at, updated_at
+        ) VALUES (
+          ${userId}, ${verifiedEmail}, ${fullName}, ${phone}, ${phone}, 'email', 'active', true, now(), now()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          phone = EXCLUDED.phone,
+          mobile_number = EXCLUDED.mobile_number,
+          full_name = EXCLUDED.full_name,
           profile_completed = true,
           account_status = 'active',
           updated_at = now()
-        WHERE id = ${userId}
       `;
       await sql`
-        UPDATE public.customers SET
-          phone = ${phone},
-          full_name = ${fullName},
+        INSERT INTO public.customers (
+          id, auth_provider_uid, full_name, email, phone, account_status, last_login, created_at, updated_at
+        ) VALUES (
+          ${userId}, ${userId}, ${fullName}, ${verifiedEmail}, ${phone}, 'active', now(), now(), now()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          phone = EXCLUDED.phone,
+          full_name = EXCLUDED.full_name,
           account_status = 'active',
           updated_at = now()
-        WHERE id = ${userId}::uuid OR email = ${verifiedEmail}
       `;
     } catch (syncErr) {
       console.warn("[Profile Sync Warning]:", syncErr);
