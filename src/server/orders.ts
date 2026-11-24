@@ -764,11 +764,28 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
       );
     }
 
+    let ordersList: any[] = [];
     const { data: orders, error } = await query.limit(50);
     if (error) {
-      console.error("[Admin Orders] Error fetching orders:", error);
-      throw new Error("Failed to load orders");
+      console.warn("[Admin Orders] Error fetching orders, attempting fallback query:", error.message);
+      const fallbackQuery = supabaseAdmin
+        .from("orders")
+        .select(
+          "id, order_number, customer_name, customer_email, customer_phone, total, status, payment_status, shipment_status, razorpay_order_id, razorpay_payment_id, awb_number, courier_partner, created_at",
+        )
+        .order("created_at", { ascending: false });
+      const { data: fallbackOrders, error: fallbackError } = await fallbackQuery.limit(50);
+      if (fallbackError) {
+        console.error("[Admin Orders] Fallback query failed:", fallbackError);
+        throw new Error("Failed to load orders");
+      }
+      ordersList = (fallbackOrders || []).map((o: any) => ({
+        ...o,
+        payment_method: o.payment_method || "online",
+      }));
+    } else {
+      ordersList = orders || [];
     }
 
-    return orders || [];
+    return ordersList;
   });

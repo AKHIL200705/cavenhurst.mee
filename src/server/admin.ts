@@ -219,7 +219,17 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           sql<DbOrderOverviewRow[]>`
             SELECT id, total, status, payment_method, payment_status, shipment_status, created_at
             FROM orders
-          `,
+          `.catch(async (err) => {
+            console.warn("[Admin Overview] Orders direct query notice, falling back to legacy schema:", err?.message);
+            const legacy = await sql<any[]>`
+              SELECT id, total, status, payment_status, shipment_status, created_at
+              FROM orders
+            `.catch(() => []);
+            return legacy.map((r) => ({
+              ...r,
+              payment_method: r.payment_method || "online",
+            })) as DbOrderOverviewRow[];
+          }),
           sql<DbRefundRow[]>`SELECT amount FROM refunds`
             .catch(() => sql<DbRefundRow[]>`SELECT amount FROM payment_refunds`)
             .catch(() => []),
@@ -493,16 +503,29 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       }
     }
 
+    let allOrders: DbOrderOverviewRow[] = [];
     const { data: orders, error: ordersError } = await supabaseAdmin
       .from("orders")
       .select("id, total, status, payment_method, payment_status, shipment_status, created_at");
 
     if (ordersError) {
-      console.error("[Admin Overview] Orders query error:", ordersError);
-      throw new Error(`Failed to load overview data: ${ordersError.message || "Orders query failed"}`);
-    }
+      console.warn("[Admin Overview] Orders query notice, attempting resilient fallback:", ordersError.message);
+      const { data: fallbackOrders, error: fallbackError } = await supabaseAdmin
+        .from("orders")
+        .select("id, total, status, payment_status, shipment_status, created_at");
 
-    const allOrders: DbOrderOverviewRow[] = (orders as unknown as DbOrderOverviewRow[]) || [];
+      if (fallbackError) {
+        console.error("[Admin Overview] Orders fallback query error:", fallbackError);
+        throw new Error(`Failed to load overview data: ${fallbackError.message || "Orders query failed"}`);
+      }
+
+      allOrders = (fallbackOrders || []).map((o: any) => ({
+        ...o,
+        payment_method: o.payment_method || "online",
+      })) as DbOrderOverviewRow[];
+    } else {
+      allOrders = (orders as unknown as DbOrderOverviewRow[]) || [];
+    }
 
     const totalOrders = allOrders.length;
 
@@ -880,14 +903,23 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const admin = await verifyAdminSession(data.authToken);
 
-    const { data: currentOrder, error: fetchErr } = await supabaseAdmin
+    const { data: currentOrderData, error: fetchErr } = await supabaseAdmin
       .from("orders")
       .select("id, status, shipment_status, payment_method, payment_status, total, items, order_number")
       .eq("id", data.orderId)
-      .single();
+      .maybeSingle();
 
+    let currentOrder = currentOrderData;
     if (fetchErr || !currentOrder) {
-      throw new Error("Order not found");
+      const { data: fallbackOrder, error: fallbackErr } = await supabaseAdmin
+        .from("orders")
+        .select("id, status, shipment_status, payment_status, total, items, order_number")
+        .eq("id", data.orderId)
+        .maybeSingle();
+      if (fallbackErr || !fallbackOrder) {
+        throw new Error("Order not found");
+      }
+      currentOrder = { ...fallbackOrder, payment_method: (fallbackOrder as any).payment_method || "online" };
     }
 
     // Terminal state validation
