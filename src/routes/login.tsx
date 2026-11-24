@@ -1,13 +1,30 @@
 import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowRight, LoaderCircle, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2 } from "lucide-react";
+import {
+  ArrowRight,
+  LoaderCircle,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  User,
+  Phone,
+  ShieldCheck,
+  RotateCcw,
+} from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { WingMark } from "@/components/site/Logo";
 import { meta } from "@/components/site/InfoPage";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { verifyGoogleAuthServerFn } from "@/server/auth";
+import {
+  verifyGoogleAuthServerFn,
+  sendRegistrationOtpServerFn,
+  verifyRegistrationOtpServerFn,
+  loginWithPhoneEmailServerFn,
+  sendForgotPasswordOtpServerFn,
+  resetPasswordWithOtpServerFn,
+} from "@/server/auth";
 import fabric from "@/assets/fabric-navy.jpg";
 
 export const Route = createFileRoute("/login")({
@@ -40,34 +57,75 @@ function GoogleIcon({ className }: { className?: string }) {
 
 function Login() {
   const [tab, setTab] = useState<"login" | "signup">("login");
-  const [authMode, setAuthMode] = useState<"password" | "otp">("password");
+  const [viewState, setViewState] = useState<"form" | "otp_verify" | "forgot_password">("form");
 
-  // Form Fields
+  // Registration Form Fields
   const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  const [regPhone, setRegPhone] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regConfirmPassword, setRegConfirmPassword] = useState("");
+  const [showRegPassword, setShowRegPassword] = useState(false);
+  const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
 
-  // OTP State
-  const [otpCode, setOtpCode] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpType, setOtpType] = useState<"phone" | "email">("phone");
+  // Login Form Fields
+  const [loginPhone, setLoginPhone] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
 
-  // Loading States
+  // OTP Verification State
+  const [otpDigits, setOtpDigits] = useState(["", "", "", "", "", ""]);
+  const [otpTimerSec, setOtpTimerSec] = useState(300); // 5 minutes
+  const [resendCooldownSec, setResendCooldownSec] = useState(60);
+
+  // Forgot Password State
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotPhone, setForgotPhone] = useState("");
+  const [forgotOtp, setForgotOtp] = useState(["", "", "", "", "", ""]);
+  const [forgotNewPassword, setForgotNewPassword] = useState("");
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
+  const [showForgotNewPassword, setShowForgotNewPassword] = useState(false);
+  const [forgotStep, setForgotStep] = useState<"request" | "reset">("request");
+
+  // General UI States
   const [busy, setBusy] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [signupSuccessNote, setSignupSuccessNote] = useState<string | null>(null);
 
   const { setGoogleSession, refreshProfile } = useAuth();
   const search = useSearch({ strict: false });
-  const returnTo = typeof (search as Record<string, unknown>)?.["returnTo"] === "string" ? (search as Record<string, unknown>)["returnTo"] as string : undefined;
+  const returnTo = typeof (search as Record<string, unknown>)?.["returnTo"] === "string"
+    ? ((search as Record<string, unknown>)["returnTo"] as string)
+    : undefined;
   const navigate = useNavigate();
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
+  const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const googleClientId = ((import.meta.env["VITE_GOOGLE_CLIENT_ID"] || "") as string)
     .replace(/^["']|["']$/g, "")
     .trim();
+
+  // ---------------------------------------------------------------------------
+  // TIMERS (OTP Expiry & Resend Cooldown)
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
+    if (viewState === "otp_verify" || (viewState === "forgot_password" && forgotStep === "reset")) {
+      interval = setInterval(() => {
+        setOtpTimerSec((prev) => (prev > 0 ? prev - 1 : 0));
+        setResendCooldownSec((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [viewState, forgotStep]);
+
+  const formatTimer = (totalSeconds: number) => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
 
   const handlePostLoginRedirect = useCallback(
     async (isAdmin: boolean) => {
@@ -82,13 +140,15 @@ function Login() {
           search: { returnTo },
         });
       } else {
-        await navigate({ to: returnTo || "/account" });
+        await navigate({ to: returnTo || "/" });
       }
     },
     [navigate, refreshProfile, returnTo],
   );
 
-  // Handle verified Google response
+  // ---------------------------------------------------------------------------
+  // GOOGLE IDENTITY SERVICES (GIS) FOR EXISTING USERS
+  // ---------------------------------------------------------------------------
   const handleGoogleSuccess = useCallback(
     async (credentials: { idToken?: string; accessToken?: string }) => {
       setGoogleLoading(true);
@@ -117,9 +177,8 @@ function Login() {
     [setGoogleSession, handlePostLoginRedirect],
   );
 
-  // Initialize Google Identity Services (GIS)
   useEffect(() => {
-    if (!googleClientId) return;
+    if (!googleClientId || tab !== "login") return;
 
     let unmounted = false;
 
@@ -157,7 +216,7 @@ function Login() {
             theme: "outline",
             size: "large",
             width: 360,
-            text: tab === "login" ? "signin_with" : "signup_with",
+            text: "signin_with",
             shape: "rectangular",
           });
         }
@@ -190,236 +249,9 @@ function Login() {
     };
   }, [googleClientId, tab, handleGoogleSuccess]);
 
-  // ---------------------------------------------------------------------------
-  // SIGN UP (Email + Password + Profile Details)
-  // ---------------------------------------------------------------------------
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSignupSuccessNote(null);
-
-    const cleanName = fullName.trim();
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
-
-    if (!cleanName) {
-      toast.error("Please enter your full name");
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      toast.error("Please enter a valid email address");
-      return;
-    }
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      // Clear any legacy Google local storage session
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("cavenhurst_google_session");
-      }
-
-      const { data, error } = await supabase.auth.signUp({
-        email: cleanEmail,
-        password: password,
-        options: {
-          data: {
-            full_name: cleanName,
-            phone: cleanPhone || undefined,
-          },
-        },
-      });
-
-      if (error) {
-        if (error.message.toLowerCase().includes("already registered")) {
-          toast.error("An account with this email already exists. Please log in.");
-          setTab("login");
-        } else {
-          toast.error(error.message);
-        }
-        return;
-      }
-
-      if (data.user) {
-        // Direct profile upsert via client RLS if authenticated session is returned
-        if (data.session) {
-          try {
-            await supabase.from("profiles").upsert({
-              id: data.user.id,
-              full_name: cleanName,
-              email: cleanEmail,
-              phone: cleanPhone || null,
-              auth_provider: "email",
-              account_status: "active",
-              updated_at: new Date().toISOString(),
-            });
-          } catch {
-            // DB trigger handle_auth_user_sync ensures profile creation regardless
-          }
-
-          toast.success(`Welcome to CAVENHURST, ${cleanName}!`);
-          await handlePostLoginRedirect(false);
-        } else {
-          // Email confirmation is required by Supabase Auth project configuration
-          setSignupSuccessNote(
-            `Account created for ${cleanEmail}! Please check your email inbox to confirm your address, then sign in.`,
-          );
-          toast.success("Account created! Check your email to confirm your account.");
-          setTab("login");
-          setPassword("");
-        }
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Registration failed. Please try again.";
-      toast.error(msg);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // SIGN IN (Email + Password)
-  // ---------------------------------------------------------------------------
-  const handleSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSignupSuccessNote(null);
-
-    const cleanEmail = email.trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      toast.error("Please enter a valid email address");
-      return;
-    }
-    if (!password) {
-      toast.error("Please enter your password");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      // Clear any legacy Google local storage session
-      if (typeof window !== "undefined") {
-        localStorage.removeItem("cavenhurst_google_session");
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password: password,
-      });
-
-      if (error) {
-        if (
-          error.message.toLowerCase().includes("invalid login credentials") ||
-          error.message.toLowerCase().includes("invalid_credentials")
-        ) {
-          toast.error("Invalid email or password. Please verify your details.");
-        } else if (error.message.toLowerCase().includes("email not confirmed")) {
-          toast.error("Please check your email and click the confirmation link before signing in.");
-        } else {
-          toast.error(error.message);
-        }
-        return;
-      }
-
-      if (data.session && data.user) {
-        toast.success("Welcome back!");
-
-        const userEmail = data.user.email?.toLowerCase();
-        const isAdminEmail =
-          userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail);
-
-        await handlePostLoginRedirect(Boolean(isAdminEmail));
-      }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Sign in failed. Please try again.";
-      toast.error(msg);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
-  // OTP AUTHENTICATION (Mobile / Email fallback)
-  // ---------------------------------------------------------------------------
-  const sendOtpCode = async () => {
-    if (otpType === "phone") {
-      const cleanPhone = phone.replace(/\D/g, "").slice(-10);
-      if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
-        toast.error("Enter a valid 10-digit mobile number");
-        return;
-      }
-      setBusy(true);
-      const { error } = await supabase.auth.signInWithOtp({ phone: `+91${cleanPhone}` });
-      setBusy(false);
-      if (error) {
-        toast.error(
-          error.message.includes("provider")
-            ? "SMS service is currently unavailable. Please use email or Google login."
-            : error.message,
-        );
-        return;
-      }
-      setOtpSent(true);
-      toast.success("Code sent to +91 " + cleanPhone);
-    } else {
-      const cleanEmail = email.trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        toast.error("Enter a valid email address");
-        return;
-      }
-      setBusy(true);
-      const { error } = await supabase.auth.signInWithOtp({
-        email: cleanEmail,
-        options: { shouldCreateUser: true },
-      });
-      setBusy(false);
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-      setOtpSent(true);
-      toast.success("Code sent to " + cleanEmail);
-    }
-  };
-
-  const verifyOtpCode = async () => {
-    if (!/^\d{6}$/.test(otpCode.trim())) {
-      toast.error("Enter the 6-digit code");
-      return;
-    }
-    setBusy(true);
-
-    let verifyPromise;
-    if (otpType === "phone") {
-      const cleanPhone = phone.replace(/\D/g, "").slice(-10);
-      verifyPromise = supabase.auth.verifyOtp({
-        phone: `+91${cleanPhone}`,
-        token: otpCode.trim(),
-        type: "sms",
-      });
-    } else {
-      verifyPromise = supabase.auth.verifyOtp({
-        email: email.trim().toLowerCase(),
-        token: otpCode.trim(),
-        type: "email",
-      });
-    }
-
-    const { error } = await verifyPromise;
-    setBusy(false);
-
-    if (error) {
-      toast.error(error.message || "Invalid or expired code.");
-    } else {
-      toast.success("Welcome back!");
-      void handlePostLoginRedirect(false);
-    }
-  };
-
   const signInWithGoogleDirect = () => {
     if (!googleClientId) {
-      toast.error("Google Client ID is not configured in .env");
+      toast.error("Google Client ID is not configured.");
       return;
     }
 
@@ -443,7 +275,6 @@ function Login() {
       return;
     }
 
-    // Standard OAuth2 Popup flow
     if (googleObj.accounts.oauth2) {
       try {
         const tokenClient = googleObj.accounts.oauth2.initTokenClient({
@@ -473,369 +304,867 @@ function Login() {
     }
   };
 
+  // ---------------------------------------------------------------------------
+  // 1. NEW USER REGISTRATION: SEND OTP
+  // ---------------------------------------------------------------------------
+  const handleSendRegistrationOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const cleanName = fullName.trim();
+    const cleanPhone = regPhone.replace(/\D/g, "").slice(-10);
+    const cleanEmail = regEmail.trim().toLowerCase();
+
+    if (!cleanName || cleanName.length < 2) {
+      toast.error("Please enter your full legal name (at least 2 characters).");
+      return;
+    }
+
+    if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      toast.error("Please enter a valid 10-digit Indian mobile number (+91).");
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+
+    if (regPassword.length < 6) {
+      toast.error("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (regPassword !== regConfirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await sendRegistrationOtpServerFn({
+        data: {
+          fullName: cleanName,
+          phone: cleanPhone,
+          email: cleanEmail,
+          password: regPassword,
+          confirmPassword: regConfirmPassword,
+        },
+      });
+
+      if (res.success) {
+        setViewState("otp_verify");
+        setOtpTimerSec(300); // 5 mins
+        setResendCooldownSec(60);
+        setOtpDigits(["", "", "", "", "", ""]);
+        toast.success(`Verification code sent to ${cleanEmail}`);
+        setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to send verification code.";
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 2. NEW USER REGISTRATION: VERIFY OTP & COMPLETE REGISTRATION
+  // ---------------------------------------------------------------------------
+  const handleVerifyRegistrationOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const fullOtp = otpDigits.join("").trim();
+    if (fullOtp.length !== 6 || !/^\d{6}$/.test(fullOtp)) {
+      toast.error("Please enter the complete 6-digit verification code.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await verifyRegistrationOtpServerFn({
+        data: {
+          email: regEmail.trim().toLowerCase(),
+          otp: fullOtp,
+        },
+      });
+
+      if (res?.success && res.user && res.sessionToken) {
+        setGoogleSession(
+          res.user as unknown as Parameters<typeof setGoogleSession>[0],
+          res.sessionToken,
+        );
+        toast.success(`Welcome to CAVENHURST, ${res.user.user_metadata?.full_name || "Customer"}!`);
+        await handlePostLoginRedirect(Boolean(res.isAdmin));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Verification failed. Please check your code.";
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Resend OTP for Registration
+  const handleResendRegistrationOtp = async () => {
+    if (resendCooldownSec > 0 || busy) return;
+
+    setBusy(true);
+    try {
+      const res = await sendRegistrationOtpServerFn({
+        data: {
+          fullName: fullName.trim(),
+          phone: regPhone.replace(/\D/g, "").slice(-10),
+          email: regEmail.trim().toLowerCase(),
+          password: regPassword,
+          confirmPassword: regConfirmPassword,
+        },
+      });
+
+      if (res.success) {
+        setOtpTimerSec(300);
+        setResendCooldownSec(60);
+        setOtpDigits(["", "", "", "", "", ""]);
+        toast.success("New verification code dispatched to your email.");
+        otpInputRefs.current[0]?.focus();
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to resend code.";
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 3. EXISTING USER LOGIN
+  // ---------------------------------------------------------------------------
+  const handleExistingUserLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const cleanEmail = loginEmail.trim().toLowerCase();
+    const cleanPhone = loginPhone.replace(/\D/g, "").slice(-10);
+
+    if (cleanPhone.length !== 10) {
+      toast.error("Please enter your registered 10-digit mobile number (+91).");
+      return;
+    }
+
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      toast.error("Please enter your registered email address.");
+      return;
+    }
+
+    if (!loginPassword) {
+      toast.error("Please enter your password.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await loginWithPhoneEmailServerFn({
+        data: {
+          mobileNumber: cleanPhone,
+          email: cleanEmail,
+          password: loginPassword,
+        },
+      });
+
+      if (res?.success && res.user && res.sessionToken) {
+        setGoogleSession(
+          res.user as unknown as Parameters<typeof setGoogleSession>[0],
+          res.sessionToken,
+        );
+        toast.success(`Welcome back, ${res.user.user_metadata?.full_name || "Customer"}!`);
+        await handlePostLoginRedirect(Boolean(res.isAdmin));
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Sign in failed. Please verify your details.";
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // 4. FORGOT PASSWORD FLOW
+  // ---------------------------------------------------------------------------
+  const handleRequestPasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = forgotEmail.trim().toLowerCase();
+    const cleanPhone = forgotPhone.replace(/\D/g, "").slice(-10);
+
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      toast.error("Please enter a valid registered email address.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await sendForgotPasswordOtpServerFn({
+        data: {
+          email: cleanEmail,
+          mobileNumber: cleanPhone || undefined,
+        },
+      });
+
+      if (res.success) {
+        setForgotStep("reset");
+        setOtpTimerSec(300);
+        setResendCooldownSec(60);
+        setForgotOtp(["", "", "", "", "", ""]);
+        toast.success(`Password reset code sent to ${cleanEmail}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not send reset code.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCompletePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const fullOtp = forgotOtp.join("").trim();
+
+    if (fullOtp.length !== 6) {
+      toast.error("Please enter the 6-digit code.");
+      return;
+    }
+
+    if (forgotNewPassword.length < 6) {
+      toast.error("Password must be at least 6 characters.");
+      return;
+    }
+
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await resetPasswordWithOtpServerFn({
+        data: {
+          email: forgotEmail.trim().toLowerCase(),
+          otp: fullOtp,
+          newPassword: forgotNewPassword,
+          confirmPassword: forgotConfirmPassword,
+        },
+      });
+
+      if (res.success) {
+        toast.success(res.message);
+        setViewState("form");
+        setTab("login");
+        setLoginEmail(forgotEmail);
+        setLoginPhone(forgotPhone);
+        setLoginPassword("");
+        setForgotStep("request");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset password.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Handle digit box input changes
+  const handleOtpChange = (
+    index: number,
+    value: string,
+    isForgot: boolean = false,
+  ) => {
+    const cleanDigit = value.replace(/\D/g, "").slice(-1);
+    const stateSetter = isForgot ? setForgotOtp : setOtpDigits;
+
+    stateSetter((prev) => {
+      const copy = [...prev];
+      copy[index] = cleanDigit;
+      return copy;
+    });
+
+    if (cleanDigit && index < 5) {
+      otpInputRefs.current[index + 1]?.focus();
+    }
+  };
+
+  const handleOtpKeyDown = (
+    index: number,
+    e: React.KeyboardEvent<HTMLInputElement>,
+    isForgot: boolean = false,
+  ) => {
+    if (e.key === "Backspace") {
+      const currentArr = isForgot ? forgotOtp : otpDigits;
+      if (!currentArr[index] && index > 0) {
+        otpInputRefs.current[index - 1]?.focus();
+      }
+    }
+  };
+
+  const handleOtpPaste = (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    isForgot: boolean = false,
+  ) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (!pasted) return;
+
+    const digits = pasted.split("");
+    const newArr = ["", "", "", "", "", ""];
+    digits.forEach((d, i) => {
+      if (i < 6) newArr[i] = d;
+    });
+
+    if (isForgot) {
+      setForgotOtp(newArr);
+    } else {
+      setOtpDigits(newArr);
+    }
+
+    const focusIdx = Math.min(digits.length, 5);
+    otpInputRefs.current[focusIdx]?.focus();
+  };
+
   return (
     <div className="relative -mb-px overflow-hidden">
       <img src={fabric} alt="" className="absolute inset-0 h-full w-full object-cover" />
       <div className="relative mx-auto flex min-h-[90vh] max-w-md flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center font-sans">
+        {/* Brand Header */}
+        <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center font-sans">
           <WingMark className="h-16 w-auto text-foreground drop-shadow-2xl" />
-          <p className="mt-6 font-logo text-2xl font-bold tracking-brand">CAVENHURST</p>
-          <p className="mt-4 font-heading text-xs font-bold uppercase tracking-[0.25em] text-electric">
-            PREMIUM ESSENTIALS
+          <h1 className="mt-5 font-logo text-2xl font-bold tracking-brand">CAVENHURST</h1>
+          <p className="mt-2 font-heading text-xs font-bold uppercase tracking-[0.25em] text-electric">
+            WEAR THE LEGACY
           </p>
-          <p className="mt-3 font-sans text-sm sm:text-base font-medium text-muted-foreground">
-            Refined apparel for everyday movement.
+          <p className="mt-3 font-sans text-sm font-medium text-muted-foreground">
+            Bespoke elegance and refined luxury apparel.
           </p>
         </div>
 
-        <div className="glass-panel rounded-t-3xl border border-b-0 border-border px-6 pb-10 pt-4 font-sans">
+        {/* Auth Glass Panel */}
+        <div className="glass-panel rounded-t-3xl border border-b-0 border-border px-6 pb-12 pt-5 font-sans">
           <div className="mx-auto mb-6 h-1 w-12 rounded-full bg-silver/40" />
 
-          {/* Tab Switcher: Login vs Sign Up */}
-          <div className="mx-auto grid max-w-xs grid-cols-2 rounded-full border border-border p-1">
-            {(["login", "signup"] as const).map((t) => (
+          {/* Mode Switcher: Login vs Create Account (Hidden during active verification) */}
+          {viewState === "form" && (
+            <div className="mx-auto grid max-w-sm grid-cols-2 rounded-full border border-border p-1 bg-background/50">
               <button
-                key={t}
-                onClick={() => {
-                  setTab(t);
-                  setAuthMode("password");
-                  setOtpSent(false);
-                  setSignupSuccessNote(null);
-                }}
+                type="button"
+                onClick={() => setTab("login")}
                 className={cn(
                   "rounded-full py-2.5 text-xs font-bold uppercase tracking-wider transition",
-                  tab === t && "bg-primary text-primary-foreground shadow-sm",
+                  tab === "login"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {t === "login" ? "Login" : "Sign Up"}
+                Existing User – Login
               </button>
-            ))}
-          </div>
-
-          <p className="mt-4 text-center text-xs text-muted-foreground">
-            {tab === "login"
-              ? "Access your saved bag, wishlist and order history."
-              : "Create an authoritative CAVENHURST account."}
-          </p>
-
-          {/* Success Notification Banner */}
-          {signupSuccessNote && (
-            <div className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-300">
-              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
-              <span>{signupSuccessNote}</span>
+              <button
+                type="button"
+                onClick={() => setTab("signup")}
+                className={cn(
+                  "rounded-full py-2.5 text-xs font-bold uppercase tracking-wider transition",
+                  tab === "signup"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                New User – Create Account
+              </button>
             </div>
           )}
 
-          {/* Mode Switcher: Password vs OTP */}
-          <div className="mt-4 flex justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("password");
-                setOtpSent(false);
-              }}
-              className={cn(
-                "px-3.5 py-1 text-xs rounded-full border transition",
-                authMode === "password"
-                  ? "bg-primary/10 border-primary font-bold text-foreground"
-                  : "border-border text-muted-foreground hover:bg-accent",
-              )}
-            >
-              Email &amp; Password
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("otp");
-                setOtpSent(false);
-              }}
-              className={cn(
-                "px-3.5 py-1 text-xs rounded-full border transition",
-                authMode === "otp"
-                  ? "bg-primary/10 border-primary font-bold text-foreground"
-                  : "border-border text-muted-foreground hover:bg-accent",
-              )}
-            >
-              One-Time Code (OTP)
-            </button>
-          </div>
-
           {/* ------------------------------------------------------------- */}
-          {/* PASSWORD FLOW (PRIMARY)                                       */}
+          {/* VIEW: FORGOT PASSWORD                                         */}
           {/* ------------------------------------------------------------- */}
-          {authMode === "password" ? (
-            tab === "signup" ? (
-              <form onSubmit={handleSignUp} className="mt-5 space-y-3.5">
-                {/* Full Name */}
-                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                  <User className="mr-3 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Full Name (e.g. Akhil Sai)"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  />
+          {viewState === "forgot_password" ? (
+            <div className="mt-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-heading text-sm font-bold uppercase tracking-wider text-foreground">
+                    Reset Password
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    {forgotStep === "request"
+                      ? "Enter your registered credentials to receive a reset code."
+                      : "Enter the 6-digit code and choose a new password."}
+                  </p>
                 </div>
-
-                {/* Email Address */}
-                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                  <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Email Address"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  />
-                </div>
-
-                {/* Mobile Phone (Optional) */}
-                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                  <Phone className="mr-3 h-4 w-4 text-muted-foreground" />
-                  <span className="mr-2 border-r border-input pr-2 text-xs text-muted-foreground">
-                    🇮🇳 +91
-                  </span>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                    placeholder="Mobile Number (optional)"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  />
-                </div>
-
-                {/* Password */}
-                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                  <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password (min 6 characters)"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-
                 <button
-                  type="submit"
-                  disabled={busy}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+                  type="button"
+                  onClick={() => {
+                    setViewState("form");
+                    setForgotStep("request");
+                  }}
+                  className="text-xs text-muted-foreground underline hover:text-foreground"
                 >
-                  {busy ? (
-                    <>
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      <span>Creating Account…</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Create Account</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
+                  Back to Login
                 </button>
-              </form>
-            ) : (
-              <form onSubmit={handleSignIn} className="mt-5 space-y-3.5">
-                {/* Email Address */}
-                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                  <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Email Address"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  />
-                </div>
+              </div>
 
-                {/* Password */}
-                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                  <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                  />
+              {forgotStep === "request" ? (
+                <form onSubmit={handleRequestPasswordReset} className="space-y-3.5">
+                  {/* Email */}
+                  <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                    <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
+                    <input
+                      type="email"
+                      required
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="Registered Email Address"
+                      className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    />
+                  </div>
+
+                  {/* Registered Mobile (+91) */}
+                  <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                    <Phone className="mr-3 h-4 w-4 text-muted-foreground" />
+                    <span className="mr-2 border-r border-input pr-2 text-xs font-medium text-muted-foreground">
+                      🇮🇳 +91
+                    </span>
+                    <input
+                      type="tel"
+                      value={forgotPhone}
+                      onChange={(e) => setForgotPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      placeholder="Registered 10-Digit Mobile"
+                      className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    />
+                  </div>
+
                   <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-muted-foreground hover:text-foreground"
+                    type="submit"
+                    disabled={busy}
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
                   >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {busy ? (
+                      <>
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                        <span>Sending Reset Code…</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Send Verification Code</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </button>
-                </div>
+                </form>
+              ) : (
+                <form onSubmit={handleCompletePasswordReset} className="space-y-3.5">
+                  <div className="rounded-xl border border-border bg-background/40 p-3 text-center text-xs text-muted-foreground">
+                    Code sent to <span className="font-semibold text-foreground">{forgotEmail}</span>
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={busy}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
-                >
-                  {busy ? (
-                    <>
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      <span>Signing In…</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Sign In</span>
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
-                </button>
-              </form>
-            )
-          ) : (
-            /* ------------------------------------------------------------- */
-            /* OTP FLOW (SECONDARY ALTERNATIVE)                              */
-            /* ------------------------------------------------------------- */
-            <div className="mt-5 space-y-3.5">
-              {!otpSent ? (
-                <>
-                  <div className="flex justify-center gap-2">
+                  {/* 6 Digit Input Boxes */}
+                  <div className="my-4 flex justify-between gap-2">
+                    {forgotOtp.map((digit, idx) => (
+                      <input
+                        key={idx}
+                        ref={(el) => {
+                          otpInputRefs.current[idx] = el;
+                        }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={1}
+                        value={digit}
+                        onChange={(e) => handleOtpChange(idx, e.target.value, true)}
+                        onKeyDown={(e) => handleOtpKeyDown(idx, e, true)}
+                        onPaste={(e) => handleOtpPaste(e, true)}
+                        className="h-12 w-12 rounded-xl border border-input bg-background/60 text-center font-mono text-xl font-bold text-foreground outline-none transition focus:border-electric focus:ring-1 focus:ring-electric"
+                      />
+                    ))}
+                  </div>
+
+                  {/* New Password */}
+                  <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                    <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
+                    <input
+                      type={showForgotNewPassword ? "text" : "password"}
+                      required
+                      minLength={6}
+                      value={forgotNewPassword}
+                      onChange={(e) => setForgotNewPassword(e.target.value)}
+                      placeholder="New Password (min 6 chars)"
+                      className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    />
                     <button
                       type="button"
-                      onClick={() => setOtpType("phone")}
-                      className={cn(
-                        "px-3 py-1 text-xs rounded-full border transition",
-                        otpType === "phone"
-                          ? "bg-accent border-foreground/30 font-bold"
-                          : "border-border text-muted-foreground",
-                      )}
+                      onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
+                      className="text-muted-foreground hover:text-foreground"
                     >
-                      Phone SMS
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOtpType("email")}
-                      className={cn(
-                        "px-3 py-1 text-xs rounded-full border transition",
-                        otpType === "email"
-                          ? "bg-accent border-foreground/30 font-bold"
-                          : "border-border text-muted-foreground",
-                      )}
-                    >
-                      Email Code
+                      {showForgotNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
 
-                  {otpType === "phone" ? (
-                    <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                      <span className="mr-2 border-r border-input pr-2 text-xs text-muted-foreground">
-                        🇮🇳 +91
-                      </span>
-                      <input
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        inputMode="numeric"
-                        placeholder="Enter 10-digit mobile number"
-                        className="flex-1 bg-transparent text-sm outline-none"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
-                      <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
-                      <input
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        type="email"
-                        placeholder="Enter email address"
-                        className="flex-1 bg-transparent text-sm outline-none"
-                      />
-                    </div>
-                  )}
+                  {/* Confirm New Password */}
+                  <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                    <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
+                    <input
+                      type="password"
+                      required
+                      minLength={6}
+                      value={forgotConfirmPassword}
+                      onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                      placeholder="Confirm New Password"
+                      className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    />
+                  </div>
 
                   <button
+                    type="submit"
                     disabled={busy}
-                    onClick={sendOtpCode}
-                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
+                    className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
                   >
-                    {busy ? "Sending Code…" : "Send Verification Code"}
+                    {busy ? (
+                      <>
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                        <span>Resetting Password…</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Reset Password &amp; Log In</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </button>
-                </>
-              ) : (
-                <>
-                  <input
-                    value={otpCode}
-                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    placeholder="6-digit code"
-                    className="w-full rounded-xl border border-input bg-transparent px-4 py-3.5 text-center text-lg tracking-[0.5em] outline-none"
-                  />
-                  <button
-                    disabled={busy}
-                    onClick={verifyOtpCode}
-                    className="w-full rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
-                  >
-                    {busy ? "Verifying…" : "Verify & Continue"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setOtpSent(false);
-                      setOtpCode("");
-                    }}
-                    className="w-full text-center text-xs text-muted-foreground underline"
-                  >
-                    Change {otpType === "email" ? "email" : "number"} / resend
-                  </button>
-                </>
+                </form>
               )}
             </div>
+          ) : viewState === "otp_verify" ? (
+            /* ------------------------------------------------------------- */
+            /* VIEW: NEW USER OTP EMAIL VERIFICATION SCREEN                  */
+            /* ------------------------------------------------------------- */
+            <div className="mt-4 space-y-4">
+              <div className="text-center">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-electric/10 text-electric border border-electric/20">
+                  <ShieldCheck className="h-6 w-6" />
+                </div>
+                <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">
+                  Verify Your Email
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  We have sent a 6-digit verification code to:
+                </p>
+                <p className="mt-0.5 text-xs font-semibold text-foreground">{regEmail}</p>
+              </div>
+
+              <form onSubmit={handleVerifyRegistrationOtp} className="mt-6 space-y-4">
+                {/* 6 Digit Input Boxes */}
+                <div className="flex justify-between gap-2">
+                  {otpDigits.map((digit, idx) => (
+                    <input
+                      key={idx}
+                      ref={(el) => {
+                        otpInputRefs.current[idx] = el;
+                      }}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(idx, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(idx, e)}
+                      onPaste={(e) => handleOtpPaste(e)}
+                      className="h-12 w-12 rounded-xl border border-input bg-background/60 text-center font-mono text-xl font-bold text-foreground outline-none transition focus:border-electric focus:ring-1 focus:ring-electric"
+                    />
+                  ))}
+                </div>
+
+                {/* Expiry & Resend Controls */}
+                <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
+                  <span>
+                    Expires in:{" "}
+                    <span className={cn("font-mono font-bold", otpTimerSec < 60 ? "text-red-400" : "text-foreground")}>
+                      {formatTimer(otpTimerSec)}
+                    </span>
+                  </span>
+
+                  {resendCooldownSec > 0 ? (
+                    <span>Resend in {resendCooldownSec}s</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleResendRegistrationOtp}
+                      className="flex items-center gap-1 font-bold text-electric hover:underline disabled:opacity-50"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>Resend OTP</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Verify Button */}
+                <button
+                  type="submit"
+                  disabled={busy || otpDigits.join("").length !== 6}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-50"
+                >
+                  {busy ? (
+                    <>
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      <span>Verifying &amp; Creating Account…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Complete Registration</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
+
+                {/* Change Email Button */}
+                <button
+                  type="button"
+                  onClick={() => setViewState("form")}
+                  className="w-full text-center text-xs text-muted-foreground underline hover:text-foreground pt-1"
+                >
+                  Change Email or Details
+                </button>
+              </form>
+            </div>
+          ) : tab === "signup" ? (
+            /* ------------------------------------------------------------- */
+            /* VIEW: NEW USER REGISTRATION FORM (EMAIL OTP MANDATORY)        */
+            /* ------------------------------------------------------------- */
+            <form onSubmit={handleSendRegistrationOtp} className="mt-5 space-y-3.5">
+              <p className="text-center text-xs text-muted-foreground mb-4">
+                Enter your details to receive your 6-digit email verification code.
+              </p>
+
+              {/* 1. Full Name */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <User className="mr-3 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Full Legal Name"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* 2. Mobile Number (+91, 10-digit validation) */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Phone className="mr-3 h-4 w-4 text-muted-foreground" />
+                <span className="mr-2 border-r border-input pr-2 text-xs font-semibold text-muted-foreground">
+                  🇮🇳 +91
+                </span>
+                <input
+                  type="tel"
+                  required
+                  value={regPhone}
+                  onChange={(e) => setRegPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="10-Digit Mobile Number"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* 3. Email Address */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="email"
+                  required
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  placeholder="Email Address"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* 4. Password */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
+                <input
+                  type={showRegPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                  placeholder="Password (min 6 characters)"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRegPassword(!showRegPassword)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {showRegPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+
+              {/* 5. Confirm Password */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
+                <input
+                  type={showRegConfirmPassword ? "text" : "password"}
+                  required
+                  minLength={6}
+                  value={regConfirmPassword}
+                  onChange={(e) => setRegConfirmPassword(e.target.value)}
+                  placeholder="Confirm Password"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowRegConfirmPassword(!showRegConfirmPassword)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {showRegConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={busy}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+              >
+                {busy ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <span>Sending Verification Code…</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Create Account &amp; Verify Email</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </form>
+          ) : (
+            /* ------------------------------------------------------------- */
+            /* VIEW: EXISTING USER LOGIN                                     */
+            /* ------------------------------------------------------------- */
+            <form onSubmit={handleExistingUserLogin} className="mt-5 space-y-3.5">
+              <p className="text-center text-xs text-muted-foreground mb-4">
+                Access your orders, saved bag, wishlist, and bespoke profile.
+              </p>
+
+              {/* 1. Registered Mobile Number (+91) */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Phone className="mr-3 h-4 w-4 text-muted-foreground" />
+                <span className="mr-2 border-r border-input pr-2 text-xs font-semibold text-muted-foreground">
+                  🇮🇳 +91
+                </span>
+                <input
+                  type="tel"
+                  required
+                  value={loginPhone}
+                  onChange={(e) => setLoginPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="Registered 10-Digit Mobile"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* 2. Registered Email Address */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="email"
+                  required
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  placeholder="Registered Email Address"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* 3. Password */}
+              <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
+                <input
+                  type={showLoginPassword ? "text" : "password"}
+                  required
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Password"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword(!showLoginPassword)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+
+              {/* Forgot Password */}
+              <div className="flex justify-end pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotEmail(loginEmail);
+                    setForgotPhone(loginPhone);
+                    setViewState("forgot_password");
+                    setForgotStep("request");
+                  }}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground underline"
+                >
+                  Forgot Password?
+                </button>
+              </div>
+
+              {/* Sign In Button */}
+              <button
+                type="submit"
+                disabled={busy}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+              >
+                {busy ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <span>Signing In…</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Sign In</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+
+              {/* Social Login for Existing Google Users */}
+              <div className="my-5 flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                OR SIGN IN WITH GOOGLE
+                <span className="h-px flex-1 bg-border" />
+              </div>
+
+              <button
+                type="button"
+                disabled={googleLoading}
+                onClick={signInWithGoogleDirect}
+                className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-background/60 py-3 text-sm font-bold transition hover:bg-background/90 disabled:opacity-50"
+              >
+                {googleLoading ? (
+                  <>
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                    <span>Connecting with Google…</span>
+                  </>
+                ) : (
+                  <>
+                    <GoogleIcon className="h-4 w-4" />
+                    <span>Continue with Google</span>
+                  </>
+                )}
+              </button>
+
+              <div
+                ref={googleBtnContainerRef}
+                className="mt-2 flex min-h-[44px] w-full justify-center overflow-hidden"
+              />
+            </form>
           )}
 
-          {/* Social Divider */}
-          <div className="my-5 flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" />
-            OR CONTINUE WITH
-            <span className="h-px flex-1 bg-border" />
-          </div>
-
-          {/* Direct Google Authentication Button */}
-          <button
-            type="button"
-            disabled={googleLoading}
-            onClick={signInWithGoogleDirect}
-            className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-background/60 py-3 text-sm font-bold transition hover:bg-background/90 disabled:opacity-50"
-          >
-            {googleLoading ? (
-              <>
-                <LoaderCircle className="h-4 w-4 animate-spin" />
-                <span>Connecting with Google…</span>
-              </>
-            ) : (
-              <>
-                <GoogleIcon className="h-4 w-4" />
-                <span>Continue with Google</span>
-              </>
-            )}
-          </button>
-
-          {/* Official Google GIS Button Render Container */}
-          <div
-            ref={googleBtnContainerRef}
-            className="mt-3 flex min-h-[44px] w-full justify-center overflow-hidden"
-          />
-
           <p className="mt-6 text-center text-[11px] text-muted-foreground">
-            By continuing, you agree to our{" "}
+            By continuing, you agree to CAVENHURST's{" "}
             <Link to="/terms" className="underline hover:text-foreground">
-              Terms &amp; Conditions
+              Terms of Service
             </Link>{" "}
             and{" "}
             <Link to="/privacy" className="underline hover:text-foreground">

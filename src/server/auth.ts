@@ -1,6 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getDb } from "@/server/db";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  generateSixDigitOtp,
+  sendEmailJsOtp,
+  createOrUpdateOtpRecord,
+  verifyOtpRecord,
+} from "./otp";
 
 import {
   type GoogleSessionPayload,
@@ -346,5 +352,455 @@ export const checkGoogleSessionServerFn = createServerFn({ method: "POST" })
       valid: true,
       user,
       isAdmin: session.isAdmin,
+    };
+  });
+
+// -----------------------------------------------------------------------------
+// CAVENHURST OTP REGISTRATION & PHONE/EMAIL LOGIN
+// -----------------------------------------------------------------------------
+
+export interface SendRegistrationOtpInput {
+  fullName: string;
+  phone: string;
+  email: string;
+  password: string;
+  confirmPassword?: string | undefined;
+}
+
+export const sendRegistrationOtpServerFn = createServerFn({ method: "POST" })
+  .validator((input: SendRegistrationOtpInput) => input)
+  .handler(async ({ data }) => {
+    const cleanName = (data.fullName || "").trim();
+    const cleanEmail = (data.email || "").toLowerCase().trim();
+    const cleanPhone = (data.phone || "").replace(/\D/g, "").slice(-10);
+    const password = data.password || "";
+    const confirmPassword = data.confirmPassword || "";
+
+    if (!cleanName || cleanName.length < 2) {
+      throw new Error("Please enter your full legal name (at least 2 characters).");
+    }
+
+    if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      throw new Error("Please enter a valid 10-digit Indian mobile number (starting with 6, 7, 8, or 9).");
+    }
+
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      throw new Error("Please enter a valid email address.");
+    }
+
+    if (password.length < 6) {
+      throw new Error("Password must be at least 6 characters long.");
+    }
+
+    if (confirmPassword && password !== confirmPassword) {
+      throw new Error("Passwords do not match. Please verify your password.");
+    }
+
+    // Duplicate account verification
+    const sql = getDb();
+    if (sql) {
+      const [existingEmail] = await sql<any[]>`
+        SELECT id FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
+      `;
+      if (existingEmail) {
+        throw new Error("An account with this email address already exists. Please log in.");
+      }
+
+      const [existingPhone] = await sql<any[]>`
+        SELECT id FROM public.profiles 
+        WHERE right(regexp_replace(COALESCE(phone, mobile_number, ''), '\D', 'g'), 10) = ${cleanPhone}
+        LIMIT 1
+      `;
+      if (existingPhone) {
+        throw new Error("An account with this mobile number already exists. Please log in.");
+      }
+    }
+
+    // Generate secure 6-digit OTP
+    const otp = generateSixDigitOtp();
+
+    // Store hashed OTP in database
+    const storeRes = await createOrUpdateOtpRecord({
+      email: cleanEmail,
+      otp,
+      purpose: "registration",
+      metadata: {
+        fullName: cleanName,
+        phone: cleanPhone,
+        password,
+      },
+    });
+
+    if (!storeRes.success) {
+      throw new Error(storeRes.error || "Failed to process verification code.");
+    }
+
+    // Send OTP via EmailJS
+    const emailRes = await sendEmailJsOtp({
+      toEmail: cleanEmail,
+      otp,
+      expiryMinutes: 5,
+    });
+
+    if (!emailRes.success) {
+      throw new Error(emailRes.error || "Failed to deliver OTP email.");
+    }
+
+    return {
+      success: true,
+      email: cleanEmail,
+      cooldownSeconds: 60,
+      expiryMinutes: 5,
+    };
+  });
+
+export interface VerifyRegistrationOtpInput {
+  email: string;
+  otp: string;
+}
+
+export const verifyRegistrationOtpServerFn = createServerFn({ method: "POST" })
+  .validator((input: VerifyRegistrationOtpInput) => input)
+  .handler(async ({ data }) => {
+    const cleanEmail = (data.email || "").toLowerCase().trim();
+    const cleanOtp = (data.otp || "").trim();
+
+    if (!cleanEmail || !cleanOtp) {
+      throw new Error("Email address and 6-digit code are required.");
+    }
+
+    const verifyRes = await verifyOtpRecord({
+      email: cleanEmail,
+      otp: cleanOtp,
+      purpose: "registration",
+    });
+
+    if (!verifyRes.success) {
+      throw new Error(verifyRes.error || "Invalid or expired verification code.");
+    }
+
+    const metadata = (verifyRes.metadata || {}) as {
+      fullName?: string;
+      phone?: string;
+      password?: string;
+    };
+
+    if (!metadata.password) {
+      throw new Error("Registration session expired. Please start registration again.");
+    }
+
+    const fullName = metadata.fullName || "Customer";
+    const phone = metadata.phone || "";
+    const password = metadata.password;
+
+    // Create user securely via Supabase Admin API with confirmed email
+    const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+      email: cleanEmail,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        name: fullName,
+        phone,
+        mobile_number: phone,
+        profile_completed: true,
+        email_verified: true,
+      },
+    });
+
+    if (createErr || !newUser?.user) {
+      console.error("[Create User Error]:", createErr);
+      throw new Error(`Registration failed: ${createErr?.message || "Could not create user account"}`);
+    }
+
+    const userId = newUser.user.id;
+
+    // Ensure public.profiles and public.customers are explicitly synchronized
+    const sql = getDb();
+    if (sql) {
+      try {
+        await sql`
+          UPDATE public.profiles SET
+            phone = ${phone},
+            mobile_number = ${phone},
+            full_name = ${fullName},
+            profile_completed = true,
+            account_status = 'active',
+            updated_at = now()
+          WHERE id = ${userId}
+        `;
+        await sql`
+          UPDATE public.customers SET
+            phone = ${phone},
+            full_name = ${fullName},
+            account_status = 'active',
+            updated_at = now()
+          WHERE id = ${userId}::uuid OR email = ${cleanEmail}
+        `;
+      } catch (syncErr) {
+        console.warn("[Profile Sync Warning]:", syncErr);
+      }
+    }
+
+    const isAdmin = isWhitelistedAdminEmail(cleanEmail);
+    const sessionToken = await signSessionToken({
+      sub: userId,
+      email: cleanEmail,
+      name: fullName,
+      picture: null,
+      isAdmin,
+    });
+
+    const user = formatAuthUser({
+      sub: userId,
+      email: cleanEmail,
+      name: fullName,
+      picture: null,
+      isAdmin,
+    });
+
+    return {
+      success: true,
+      sessionToken,
+      user,
+      isAdmin,
+      redirectTo: "/",
+    };
+  });
+
+export interface LoginWithPhoneEmailInput {
+  mobileNumber: string;
+  email: string;
+  password: string;
+}
+
+export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
+  .validator((input: LoginWithPhoneEmailInput) => input)
+  .handler(async ({ data }) => {
+    const cleanEmail = (data.email || "").toLowerCase().trim();
+    const cleanMobile = (data.mobileNumber || "").replace(/\D/g, "").slice(-10);
+    const password = data.password || "";
+
+    if (!cleanEmail || !password) {
+      throw new Error("Please enter both email address and password.");
+    }
+
+    if (cleanMobile.length !== 10) {
+      throw new Error("Please enter your registered 10-digit mobile number.");
+    }
+
+    const sql = getDb();
+    let authUser: any = null;
+    let registeredMobile = "";
+    let userName = "Customer";
+
+    if (sql) {
+      const [u] = await sql<any[]>`
+        SELECT id, email, raw_user_meta_data FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
+      `;
+      authUser = u;
+
+      if (authUser) {
+        const [prof] = await sql<any[]>`
+          SELECT full_name, phone, mobile_number FROM public.profiles WHERE id = ${authUser.id} LIMIT 1
+        `;
+        const [cust] = await sql<any[]>`
+          SELECT full_name, phone FROM public.customers WHERE id = ${authUser.id}::uuid OR email = ${cleanEmail} LIMIT 1
+        `;
+
+        userName = prof?.full_name || cust?.full_name || authUser.raw_user_meta_data?.full_name || "Customer";
+        const rawPhone = prof?.mobile_number || prof?.phone || cust?.phone || authUser.raw_user_meta_data?.phone || authUser.raw_user_meta_data?.mobile_number || "";
+        registeredMobile = rawPhone.replace(/\D/g, "").slice(-10);
+
+        // If user already had a registered mobile number, enforce exact match
+        if (registeredMobile && registeredMobile !== cleanMobile) {
+          throw new Error("The mobile number and email address do not match our registered records.");
+        }
+
+        // If user had no registered phone yet (e.g. legacy account), link it now
+        if (!registeredMobile) {
+          try {
+            await sql`
+              UPDATE public.profiles SET phone = ${cleanMobile}, mobile_number = ${cleanMobile} WHERE id = ${authUser.id}
+            `;
+            await sql`
+              UPDATE public.customers SET phone = ${cleanMobile} WHERE id = ${authUser.id}::uuid OR email = ${cleanEmail}
+            `;
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+
+    // Authenticate password with Supabase
+    const { data: signInRes, error: signInErr } = await supabaseAdmin.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (signInErr || !signInRes?.user) {
+      throw new Error("Invalid email or password. Please verify your credentials.");
+    }
+
+    const userId = signInRes.user.id;
+    const isAdmin = isWhitelistedAdminEmail(cleanEmail);
+
+    const sessionToken = await signSessionToken({
+      sub: userId,
+      email: cleanEmail,
+      name: userName,
+      picture: null,
+      isAdmin,
+    });
+
+    const user = formatAuthUser({
+      sub: userId,
+      email: cleanEmail,
+      name: userName,
+      picture: null,
+      isAdmin,
+    });
+
+    return {
+      success: true,
+      sessionToken,
+      user,
+      isAdmin,
+      supabaseSession: signInRes.session,
+    };
+  });
+
+export interface SendForgotPasswordOtpInput {
+  email: string;
+  mobileNumber?: string | undefined;
+}
+
+export const sendForgotPasswordOtpServerFn = createServerFn({ method: "POST" })
+  .validator((input: SendForgotPasswordOtpInput) => input)
+  .handler(async ({ data }) => {
+    const cleanEmail = (data.email || "").toLowerCase().trim();
+    const cleanMobile = (data.mobileNumber || "").replace(/\D/g, "").slice(-10);
+
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      throw new Error("Please enter a valid email address.");
+    }
+
+    const sql = getDb();
+    if (sql) {
+      const [u] = await sql<any[]>`
+        SELECT id, email FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
+      `;
+      if (!u) {
+        throw new Error("No registered account found with this email address.");
+      }
+
+      if (cleanMobile) {
+        const [prof] = await sql<any[]>`
+          SELECT phone, mobile_number FROM public.profiles WHERE id = ${u.id} LIMIT 1
+        `;
+        const raw = (prof?.mobile_number || prof?.phone || "").replace(/\D/g, "").slice(-10);
+        if (raw && raw !== cleanMobile) {
+          throw new Error("The mobile number and email address do not match our registered records.");
+        }
+      }
+    }
+
+    const otp = generateSixDigitOtp();
+    const storeRes = await createOrUpdateOtpRecord({
+      email: cleanEmail,
+      otp,
+      purpose: "forgot_password",
+    });
+
+    if (!storeRes.success) {
+      throw new Error(storeRes.error || "Failed to process password reset code.");
+    }
+
+    const emailRes = await sendEmailJsOtp({
+      toEmail: cleanEmail,
+      otp,
+      expiryMinutes: 5,
+    });
+
+    if (!emailRes.success) {
+      throw new Error(emailRes.error || "Failed to deliver reset email.");
+    }
+
+    return {
+      success: true,
+      email: cleanEmail,
+      cooldownSeconds: 60,
+    };
+  });
+
+export interface ResetPasswordWithOtpInput {
+  email: string;
+  otp: string;
+  newPassword: string;
+  confirmPassword?: string | undefined;
+}
+
+export const resetPasswordWithOtpServerFn = createServerFn({ method: "POST" })
+  .validator((input: ResetPasswordWithOtpInput) => input)
+  .handler(async ({ data }) => {
+    const cleanEmail = (data.email || "").toLowerCase().trim();
+    const cleanOtp = (data.otp || "").trim();
+    const newPassword = data.newPassword || "";
+    const confirmPassword = data.confirmPassword || "";
+
+    if (!cleanEmail || !cleanOtp) {
+      throw new Error("Email and 6-digit code are required.");
+    }
+
+    if (newPassword.length < 6) {
+      throw new Error("Password must be at least 6 characters long.");
+    }
+
+    if (confirmPassword && newPassword !== confirmPassword) {
+      throw new Error("Passwords do not match.");
+    }
+
+    const verifyRes = await verifyOtpRecord({
+      email: cleanEmail,
+      otp: cleanOtp,
+      purpose: "forgot_password",
+    });
+
+    if (!verifyRes.success) {
+      throw new Error(verifyRes.error || "Invalid or expired verification code.");
+    }
+
+    const sql = getDb();
+    let userId = "";
+
+    if (sql) {
+      const [u] = await sql<any[]>`
+        SELECT id FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
+      `;
+      if (u) userId = u.id;
+    }
+
+    if (!userId) {
+      const { data: users } = await supabaseAdmin.auth.admin.listUsers();
+      const matched = users?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      if (matched) userId = matched.id;
+    }
+
+    if (!userId) {
+      throw new Error("Account not found for password reset.");
+    }
+
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+
+    if (updateErr) {
+      throw new Error(`Failed to update password: ${updateErr.message}`);
+    }
+
+    return {
+      success: true,
+      message: "Password reset successfully. You can now log in with your new password.",
     };
   });

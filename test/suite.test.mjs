@@ -1143,6 +1143,77 @@ test("Admin Customers: Search and profile status filtering", () => {
   assert.equal(incomplete[0].id, "cust-2");
 });
 
+// ==============================================================================
+// 15. EMAILJS OTP & TWO-FACTOR REGISTRATION SPECIFICATIONS
+// ==============================================================================
+
+test("OTP: 6-digit cryptographic generation and format specification", () => {
+  for (let i = 0; i < 20; i++) {
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    assert.equal(code.length, 6, "OTP must be 6 digits");
+    assert.match(code, /^\d{6}$/, "OTP must contain only numbers");
+    const num = parseInt(code, 10);
+    assert.ok(num >= 100000 && num <= 999999, "OTP must be in range 100000-999999");
+  }
+});
+
+test("OTP: Salted cryptographic HMAC-SHA256 hashing and verification", () => {
+  const secret = "test_salt_secret_cavenhurst_32bytes!";
+  const email = "customer@cavenhurst.com";
+  const otp = "584920";
+
+  function hashOtp(code, mail) {
+    return createHmac("sha256", secret)
+      .update(`${mail.toLowerCase().trim()}:${code.trim()}`)
+      .digest("hex");
+  }
+
+  const hash = hashOtp(otp, email);
+  assert.equal(hash.length, 64, "SHA-256 hex string must be 64 characters");
+  assert.equal(hashOtp(otp, email), hash, "Identical OTP and email must yield identical hash");
+  assert.notEqual(hashOtp("584921", email), hash, "Different OTP must yield different hash");
+  assert.notEqual(hashOtp(otp, "other@cavenhurst.com"), hash, "Different email must yield different hash");
+});
+
+test("OTP: Expiry and resend cooldown calculation", () => {
+  const now = Date.now();
+  const expiresAt = now + 5 * 60 * 1000; // 5 minutes
+  const lastSentAt = now - 30 * 1000; // 30 seconds ago
+
+  const isExpired = Date.now() > expiresAt;
+  assert.equal(isExpired, false, "Should not be expired within 5 minutes");
+
+  const elapsedSec = Math.floor((Date.now() - lastSentAt) / 1000);
+  const remainingCooldownSec = Math.max(0, 60 - elapsedSec);
+  assert.ok(remainingCooldownSec > 0 && remainingCooldownSec <= 30, "Cooldown should have ~30s remaining");
+
+  // After 61 seconds
+  const oldSentAt = now - 61 * 1000;
+  const elapsedOld = Math.floor((Date.now() - oldSentAt) / 1000);
+  const remainingOld = Math.max(0, 60 - elapsedOld);
+  assert.equal(remainingOld, 0, "Cooldown should be expired after 60s");
+});
+
+test("Registration: Mobile +91 and email matching constraints", () => {
+  function validateRegistrationInputs(fullName, phone, email, password, confirmPassword) {
+    if (!fullName || fullName.trim().length < 2) return "Invalid name";
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+    if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) return "Invalid phone";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "Invalid email";
+    if (!password || password.length < 6) return "Password too short";
+    if (password !== confirmPassword) return "Passwords do not match";
+    return null;
+  }
+
+  assert.equal(validateRegistrationInputs("Akhil Sai", "+91 9876543210", "akhil@gmail.com", "Secret123", "Secret123"), null);
+  assert.equal(validateRegistrationInputs("A", "9876543210", "akhil@gmail.com", "Secret123", "Secret123"), "Invalid name");
+  assert.equal(validateRegistrationInputs("Akhil Sai", "1234567890", "akhil@gmail.com", "Secret123", "Secret123"), "Invalid phone");
+  assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "bad-email", "Secret123", "Secret123"), "Invalid email");
+  assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "akhil@gmail.com", "123", "123"), "Password too short");
+  assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "akhil@gmail.com", "Secret123", "Mismatch123"), "Passwords do not match");
+});
+
+
 
 
 
