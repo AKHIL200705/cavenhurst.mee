@@ -12,10 +12,14 @@ export function getDb(): ReturnType<typeof postgres> | null {
     process.env["DATABASE_URL"] ||
     process.env["POSTGRES_URL"] ||
     process.env["SUPABASE_DB_URL"] ||
-    "postgresql://postgres.ewlsrypetobkwrwtmmgh:cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+    ""
   )
     .replace(/^["']|["']$/g, "")
     .trim();
+
+  if (!dbUrl) {
+    return null;
+  }
 
   // Normalize IPv6-only direct host to IPv4/IPv6 dual-stack pooler
   if (dbUrl.includes("db.ewlsrypetobkwrwtmmgh.supabase.co")) {
@@ -27,11 +31,6 @@ export function getDb(): ReturnType<typeof postgres> | null {
   // Ensure pooler has tenant identifier
   if (dbUrl.includes("aws-0-ap-southeast-1.pooler.supabase.com") && dbUrl.includes("://postgres:")) {
     dbUrl = dbUrl.replace("://postgres:", "://postgres.ewlsrypetobkwrwtmmgh:");
-  }
-
-  // Update stale password if found in env
-  if (dbUrl.includes("AKHILSAI%4090")) {
-    dbUrl = dbUrl.replace("AKHILSAI%4090", "cavenhurst%40123");
   }
 
   if (!dbUrl) return null;

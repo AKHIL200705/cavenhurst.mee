@@ -1,5 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import {
+  commitOrderInventory,
+  releaseOrderInventoryReservations,
+} from "./inventory";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface CreateRazorpayOrderInput {
@@ -337,6 +341,33 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     })
     .eq("id", input.orderId);
 
+  // 8. Commit reserved inventory atomically
+  try {
+    const { data: orderItems } = await supabaseAdmin
+      .from("order_items")
+      .select("product_id, variant_id, product_slug, name, size, color, qty")
+      .eq("order_id", input.orderId);
+
+    if (orderItems && orderItems.length > 0) {
+      await commitOrderInventory(
+        input.orderId,
+        existingOrder.order_number || input.orderId,
+        orderItems.map((oi) => ({
+          productId: oi.product_id || "",
+          variantId: oi.variant_id || undefined,
+          slug: oi.product_slug,
+          name: oi.name,
+          size: oi.size,
+          color: oi.color,
+          qty: oi.qty,
+        })),
+        input.userId || existingOrder.user_id,
+      );
+    }
+  } catch (invErr) {
+    console.error("[Razorpay Confirmation] Inventory commit error:", invErr);
+  }
+
   return {
     success: true,
     alreadyProcessed: false,
@@ -423,12 +454,38 @@ export async function processRazorpayWebhook(
       await supabaseAdmin
         .from("orders")
         .update({
-          status: "paid",
+          status: "confirmed",
           payment_status: "paid",
           razorpay_payment_id: razorpayPaymentId || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", order.id);
+
+      // Commit inventory atomically
+      try {
+        const { data: orderItems } = await supabaseAdmin
+          .from("order_items")
+          .select("product_id, variant_id, product_slug, name, size, color, qty")
+          .eq("order_id", order.id);
+
+        if (orderItems && orderItems.length > 0) {
+          await commitOrderInventory(
+            order.id,
+            `CVH-${order.id.slice(0, 8)}`,
+            orderItems.map((oi) => ({
+              productId: oi.product_id || "",
+              variantId: oi.variant_id || undefined,
+              slug: oi.product_slug,
+              name: oi.name,
+              size: oi.size,
+              color: oi.color,
+              qty: oi.qty,
+            })),
+          );
+        }
+      } catch (invErr) {
+        console.error("[Webhook Payment Captured] Inventory commit error:", invErr);
+      }
     }
   } else if (eventType === "payment.failed") {
     const { data: order } = await supabaseAdmin
@@ -445,6 +502,9 @@ export async function processRazorpayWebhook(
           updated_at: new Date().toISOString(),
         })
         .eq("id", order.id);
+
+      // Release reserved stock so other shoppers can purchase
+      await releaseOrderInventoryReservations(order.id);
     }
   }
 

@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowRight, LoaderCircle, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { WingMark } from "@/components/site/Logo";
@@ -32,7 +32,7 @@ function GoogleIcon({ className }: { className?: string }) {
       />
       <path
         fill="#EA4335"
-        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
       />
     </svg>
   );
@@ -40,13 +40,24 @@ function GoogleIcon({ className }: { className?: string }) {
 
 function Login() {
   const [tab, setTab] = useState<"login" | "signup">("login");
-  const [method, setMethod] = useState<"phone" | "email">("phone");
-  const [phone, setPhone] = useState("");
+  const [authMode, setAuthMode] = useState<"password" | "otp">("password");
+
+  // Form Fields
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [sent, setSent] = useState(false);
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  // OTP State
+  const [otpCode, setOtpCode] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpType, setOtpType] = useState<"phone" | "email">("phone");
+
+  // Loading States
   const [busy, setBusy] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [signupSuccessNote, setSignupSuccessNote] = useState<string | null>(null);
 
   const { setGoogleSession } = useAuth();
   const navigate = useNavigate();
@@ -139,12 +150,10 @@ function Login() {
       }
     };
 
-    // If GIS script is already loaded
     const googleObj = (window as unknown as { google?: { accounts?: unknown } }).google;
     if (googleObj?.accounts) {
       setupGoogleGsi();
     } else {
-      // Dynamic fallback script loader
       const existingScript = document.querySelector(
         'script[src*="accounts.google.com/gsi/client"]',
       );
@@ -165,79 +174,229 @@ function Login() {
     };
   }, [googleClientId, tab, handleGoogleSuccess]);
 
-  const sendCode = async () => {
-    if (!/^[6-9]\d{9}$/.test(phone)) {
-      toast.error("Enter a valid 10-digit mobile number");
+  // ---------------------------------------------------------------------------
+  // SIGN UP (Email + Password + Profile Details)
+  // ---------------------------------------------------------------------------
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignupSuccessNote(null);
+
+    const cleanName = fullName.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+
+    if (!cleanName) {
+      toast.error("Please enter your full name");
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      toast.error("Please enter a valid email address");
+      return;
+    }
+    if (password.length < 6) {
+      toast.error("Password must be at least 6 characters");
+      return;
+    }
+
     setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({ phone: `+91${phone}` });
-    setBusy(false);
-    if (error) {
-      toast.error(
-        error.message.includes("provider")
-          ? "Mobile login isn't switched on yet. Please use Google for now."
-          : error.message,
-      );
-      return;
+    try {
+      // Clear any legacy Google local storage session
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("cavenhurst_google_session");
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password: password,
+        options: {
+          data: {
+            full_name: cleanName,
+            phone: cleanPhone || undefined,
+          },
+        },
+      });
+
+      if (error) {
+        if (error.message.toLowerCase().includes("already registered")) {
+          toast.error("An account with this email already exists. Please log in.");
+          setTab("login");
+        } else {
+          toast.error(error.message);
+        }
+        return;
+      }
+
+      if (data.user) {
+        // Direct profile upsert via client RLS if authenticated session is returned
+        if (data.session) {
+          try {
+            await supabase.from("profiles").upsert({
+              id: data.user.id,
+              full_name: cleanName,
+              email: cleanEmail,
+              phone: cleanPhone || null,
+              auth_provider: "email",
+              account_status: "active",
+              updated_at: new Date().toISOString(),
+            });
+          } catch {
+            // DB trigger handle_auth_user_sync ensures profile creation regardless
+          }
+
+          toast.success(`Welcome to CAVENHURST, ${cleanName}!`);
+          await navigate({ to: "/account" });
+        } else {
+          // Email confirmation is required by Supabase Auth project configuration
+          setSignupSuccessNote(
+            `Account created for ${cleanEmail}! Please check your email inbox to confirm your address, then sign in.`,
+          );
+          toast.success("Account created! Check your email to confirm your account.");
+          setTab("login");
+          setPassword("");
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Registration failed. Please try again.";
+      toast.error(msg);
+    } finally {
+      setBusy(false);
     }
-    setSent(true);
-    toast.success("Code sent to +91 " + phone);
   };
 
-  const verify = async () => {
-    if (!/^\d{6}$/.test(code.trim())) {
-      toast.error("Enter the 6-digit code");
+  // ---------------------------------------------------------------------------
+  // SIGN IN (Email + Password)
+  // ---------------------------------------------------------------------------
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSignupSuccessNote(null);
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      toast.error("Please enter a valid email address");
       return;
     }
+    if (!password) {
+      toast.error("Please enter your password");
+      return;
+    }
+
     setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({
-      phone: `+91${phone}`,
-      token: code.trim(),
-      type: "sms",
-    });
-    setBusy(false);
-    if (error) {
-      toast.error("That code didn't work. Check it and try again.");
+    try {
+      // Clear any legacy Google local storage session
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("cavenhurst_google_session");
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: password,
+      });
+
+      if (error) {
+        if (
+          error.message.toLowerCase().includes("invalid login credentials") ||
+          error.message.toLowerCase().includes("invalid_credentials")
+        ) {
+          toast.error("Invalid email or password. Please verify your details.");
+        } else if (error.message.toLowerCase().includes("email not confirmed")) {
+          toast.error("Please check your email and click the confirmation link before signing in.");
+        } else {
+          toast.error(error.message);
+        }
+        return;
+      }
+
+      if (data.session && data.user) {
+        toast.success("Welcome back!");
+
+        const userEmail = data.user.email?.toLowerCase();
+        const isAdminEmail =
+          userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail);
+
+        if (isAdminEmail) {
+          await navigate({ to: "/admin" });
+        } else {
+          await navigate({ to: "/account" });
+        }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Sign in failed. Please try again.";
+      toast.error(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // OTP AUTHENTICATION (Mobile / Email fallback)
+  // ---------------------------------------------------------------------------
+  const sendOtpCode = async () => {
+    if (otpType === "phone") {
+      const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+      if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+        toast.error("Enter a valid 10-digit mobile number");
+        return;
+      }
+      setBusy(true);
+      const { error } = await supabase.auth.signInWithOtp({ phone: `+91${cleanPhone}` });
+      setBusy(false);
+      if (error) {
+        toast.error(
+          error.message.includes("provider")
+            ? "SMS service is currently unavailable. Please use email or Google login."
+            : error.message,
+        );
+        return;
+      }
+      setOtpSent(true);
+      toast.success("Code sent to +91 " + cleanPhone);
     } else {
-      toast.success("Welcome back!");
-      void navigate({ to: "/account" });
+      const cleanEmail = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        toast.error("Enter a valid email address");
+        return;
+      }
+      setBusy(true);
+      const { error } = await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: { shouldCreateUser: true },
+      });
+      setBusy(false);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      setOtpSent(true);
+      toast.success("Code sent to " + cleanEmail);
     }
   };
 
-  const sendEmailCode = async () => {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      toast.error("Enter a valid email address");
-      return;
-    }
-    setBusy(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-      options: {
-        shouldCreateUser: true,
-      },
-    });
-    setBusy(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    setSent(true);
-    toast.success("Verification code sent to " + email);
-  };
-
-  const verifyEmailCode = async () => {
-    if (!/^\d{6}$/.test(code.trim())) {
+  const verifyOtpCode = async () => {
+    if (!/^\d{6}$/.test(otpCode.trim())) {
       toast.error("Enter the 6-digit code");
       return;
     }
     setBusy(true);
-    const { error } = await supabase.auth.verifyOtp({
-      email: email.trim().toLowerCase(),
-      token: code.trim(),
-      type: "email",
-    });
+
+    let verifyPromise;
+    if (otpType === "phone") {
+      const cleanPhone = phone.replace(/\D/g, "").slice(-10);
+      verifyPromise = supabase.auth.verifyOtp({
+        phone: `+91${cleanPhone}`,
+        token: otpCode.trim(),
+        type: "sms",
+      });
+    } else {
+      verifyPromise = supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: otpCode.trim(),
+        type: "email",
+      });
+    }
+
+    const { error } = await verifyPromise;
     setBusy(false);
+
     if (error) {
       toast.error(error.message || "Invalid or expired code.");
     } else {
@@ -263,7 +422,7 @@ function Login() {
               prompt: () => void;
             };
           };
-        };
+        }
       }
     ).google;
 
@@ -297,7 +456,6 @@ function Login() {
       }
     }
 
-    // Google Identity Services One-Tap fallback
     if (googleObj.accounts.id) {
       googleObj.accounts.id.prompt();
     }
@@ -307,152 +465,332 @@ function Login() {
     <div className="relative -mb-px overflow-hidden">
       <img src={fabric} alt="" className="absolute inset-0 h-full w-full object-cover" />
       <div className="relative mx-auto flex min-h-[90vh] max-w-md flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center px-6 py-14 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
           <WingMark className="h-16 w-auto text-foreground drop-shadow-2xl" />
           <p className="mt-6 font-logo text-2xl font-bold tracking-brand">CAVENHURST</p>
-          <p className="mt-10 text-sm font-semibold tracking-[0.5em] text-silver">
+          <p className="mt-4 text-xs font-semibold tracking-[0.5em] text-silver">
             PREMIUM ESSENTIALS
           </p>
-          <p className="mt-4 font-serif text-2xl italic">
-            Premium apparel for
-            <br />
-            everyday movement.
+          <p className="mt-3 font-serif text-xl italic text-muted-foreground">
+            Refined apparel for everyday movement.
           </p>
         </div>
+
         <div className="glass-panel rounded-t-3xl border border-b-0 border-border px-6 pb-10 pt-4">
           <div className="mx-auto mb-6 h-1 w-12 rounded-full bg-silver/40" />
+
+          {/* Tab Switcher: Login vs Sign Up */}
           <div className="mx-auto grid max-w-xs grid-cols-2 rounded-full border border-border p-1">
             {(["login", "signup"] as const).map((t) => (
               <button
                 key={t}
-                onClick={() => setTab(t)}
+                onClick={() => {
+                  setTab(t);
+                  setAuthMode("password");
+                  setOtpSent(false);
+                  setSignupSuccessNote(null);
+                }}
                 className={cn(
                   "rounded-full py-2.5 text-sm font-medium transition",
-                  tab === t && "bg-primary font-bold text-primary-foreground",
+                  tab === t && "bg-primary font-bold text-primary-foreground shadow-sm",
                 )}
               >
                 {t === "login" ? "Login" : "Sign Up"}
               </button>
             ))}
           </div>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
+
+          <p className="mt-4 text-center text-xs text-muted-foreground">
             {tab === "login"
-              ? "Continue to shop, track orders and more."
-              : "Create your account in seconds."}
+              ? "Access your saved bag, wishlist and order history."
+              : "Create an authoritative CAVENHURST account."}
           </p>
 
-          {!sent && (
-            <div className="mt-4 flex justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setMethod("phone");
-                  setSent(false);
-                  setCode("");
-                }}
-                className={cn(
-                  "px-4 py-1.5 text-xs rounded-full border transition",
-                  method === "phone"
-                    ? "bg-primary/10 border-primary font-bold text-foreground"
-                    : "border-border text-muted-foreground hover:bg-accent",
-                )}
-              >
-                Mobile Number
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMethod("email");
-                  setSent(false);
-                  setCode("");
-                }}
-                className={cn(
-                  "px-4 py-1.5 text-xs rounded-full border transition",
-                  method === "email"
-                    ? "bg-primary/10 border-primary font-bold text-foreground"
-                    : "border-border text-muted-foreground hover:bg-accent",
-                )}
-              >
-                Email Address
-              </button>
+          {/* Success Notification Banner */}
+          {signupSuccessNote && (
+            <div className="mt-4 flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-300">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+              <span>{signupSuccessNote}</span>
             </div>
           )}
 
-          {!sent ? (
-            method === "phone" ? (
-              <>
-                <div className="mt-4 flex items-center rounded-xl border border-input">
-                  <span className="flex items-center gap-2 border-r border-input px-4 py-4 text-sm">
+          {/* Mode Switcher: Password vs OTP */}
+          <div className="mt-4 flex justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("password");
+                setOtpSent(false);
+              }}
+              className={cn(
+                "px-3.5 py-1 text-xs rounded-full border transition",
+                authMode === "password"
+                  ? "bg-primary/10 border-primary font-bold text-foreground"
+                  : "border-border text-muted-foreground hover:bg-accent",
+              )}
+            >
+              Email &amp; Password
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("otp");
+                setOtpSent(false);
+              }}
+              className={cn(
+                "px-3.5 py-1 text-xs rounded-full border transition",
+                authMode === "otp"
+                  ? "bg-primary/10 border-primary font-bold text-foreground"
+                  : "border-border text-muted-foreground hover:bg-accent",
+              )}
+            >
+              One-Time Code (OTP)
+            </button>
+          </div>
+
+          {/* ------------------------------------------------------------- */}
+          {/* PASSWORD FLOW (PRIMARY)                                       */}
+          {/* ------------------------------------------------------------- */}
+          {authMode === "password" ? (
+            tab === "signup" ? (
+              <form onSubmit={handleSignUp} className="mt-5 space-y-3.5">
+                {/* Full Name */}
+                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                  <User className="mr-3 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="text"
+                    required
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Full Name (e.g. Akhil Sai)"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                </div>
+
+                {/* Email Address */}
+                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                  <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Email Address"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                </div>
+
+                {/* Mobile Phone (Optional) */}
+                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                  <Phone className="mr-3 h-4 w-4 text-muted-foreground" />
+                  <span className="mr-2 border-r border-input pr-2 text-xs text-muted-foreground">
                     🇮🇳 +91
                   </span>
                   <input
+                    type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                    inputMode="numeric"
-                    placeholder="Enter mobile number"
-                    className="flex-1 bg-transparent px-4 outline-none text-sm"
+                    placeholder="Mobile Number (optional)"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                   />
                 </div>
-                <button
-                  disabled={busy}
-                  onClick={sendCode}
-                  className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
-                >
-                  {busy ? "Sending…" : "Continue with Mobile"} <ArrowRight className="h-4 w-4" />
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="mt-4 flex items-center rounded-xl border border-input">
+
+                {/* Password */}
+                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                  <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
                   <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    minLength={6}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password (min 6 characters)"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
+                >
+                  {busy ? (
+                    <>
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      <span>Creating Account…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Create Account</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleSignIn} className="mt-5 space-y-3.5">
+                {/* Email Address */}
+                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                  <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    type="email"
-                    placeholder="Enter email address (e.g. name@gmail.com)"
-                    className="flex-1 bg-transparent px-4 py-4 outline-none text-sm"
+                    placeholder="Email Address"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                   />
                 </div>
+
+                {/* Password */}
+                <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                  <Lock className="mr-3 h-4 w-4 text-muted-foreground" />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                    className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+
                 <button
+                  type="submit"
                   disabled={busy}
-                  onClick={sendEmailCode}
-                  className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
                 >
-                  {busy ? "Sending…" : "Continue with Email"} <ArrowRight className="h-4 w-4" />
+                  {busy ? (
+                    <>
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      <span>Signing In…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Sign In</span>
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
                 </button>
-              </>
+              </form>
             )
           ) : (
-            <>
-              <input
-                value={code}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                placeholder="6-digit code"
-                className="mt-6 w-full rounded-xl border border-input bg-transparent px-4 py-4 text-center text-lg tracking-[0.5em] outline-none"
-              />
-              <button
-                disabled={busy}
-                onClick={method === "email" ? verifyEmailCode : verify}
-                className="mt-4 w-full rounded-xl bg-primary py-4 font-bold text-primary-foreground disabled:opacity-60"
-              >
-                {busy ? "Checking…" : "Verify & Continue"}
-              </button>
-              <button
-                onClick={() => {
-                  setSent(false);
-                  setCode("");
-                }}
-                className="mt-3 w-full text-sm text-muted-foreground underline"
-              >
-                Change {method === "email" ? "email" : "number"} / resend
-              </button>
-            </>
+            /* ------------------------------------------------------------- */
+            /* OTP FLOW (SECONDARY ALTERNATIVE)                              */
+            /* ------------------------------------------------------------- */
+            <div className="mt-5 space-y-3.5">
+              {!otpSent ? (
+                <>
+                  <div className="flex justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOtpType("phone")}
+                      className={cn(
+                        "px-3 py-1 text-xs rounded-full border transition",
+                        otpType === "phone"
+                          ? "bg-accent border-foreground/30 font-bold"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      Phone SMS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOtpType("email")}
+                      className={cn(
+                        "px-3 py-1 text-xs rounded-full border transition",
+                        otpType === "email"
+                          ? "bg-accent border-foreground/30 font-bold"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      Email Code
+                    </button>
+                  </div>
+
+                  {otpType === "phone" ? (
+                    <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                      <span className="mr-2 border-r border-input pr-2 text-xs text-muted-foreground">
+                        🇮🇳 +91
+                      </span>
+                      <input
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                        inputMode="numeric"
+                        placeholder="Enter 10-digit mobile number"
+                        className="flex-1 bg-transparent text-sm outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center rounded-xl border border-input bg-background/50 px-3.5 py-3">
+                      <Mail className="mr-3 h-4 w-4 text-muted-foreground" />
+                      <input
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        type="email"
+                        placeholder="Enter email address"
+                        className="flex-1 bg-transparent text-sm outline-none"
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    disabled={busy}
+                    onClick={sendOtpCode}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
+                  >
+                    {busy ? "Sending Code…" : "Send Verification Code"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <input
+                    value={otpCode}
+                    onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="6-digit code"
+                    className="w-full rounded-xl border border-input bg-transparent px-4 py-3.5 text-center text-lg tracking-[0.5em] outline-none"
+                  />
+                  <button
+                    disabled={busy}
+                    onClick={verifyOtpCode}
+                    className="w-full rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground disabled:opacity-60"
+                  >
+                    {busy ? "Verifying…" : "Verify & Continue"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setOtpSent(false);
+                      setOtpCode("");
+                    }}
+                    className="w-full text-center text-xs text-muted-foreground underline"
+                  >
+                    Change {otpType === "email" ? "email" : "number"} / resend
+                  </button>
+                </>
+              )}
+            </div>
           )}
 
-          <div className="my-5 flex items-center gap-4 text-sm text-muted-foreground">
+          {/* Social Divider */}
+          <div className="my-5 flex items-center gap-4 text-xs text-muted-foreground">
             <span className="h-px flex-1 bg-border" />
-            OR
+            OR CONTINUE WITH
             <span className="h-px flex-1 bg-border" />
           </div>
 
@@ -461,34 +799,34 @@ function Login() {
             type="button"
             disabled={googleLoading}
             onClick={signInWithGoogleDirect}
-            className="flex w-full items-center justify-center gap-3 rounded-xl border border-foreground/30 bg-background/50 py-3.5 font-bold transition hover:bg-background/80 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-background/60 py-3 text-sm font-bold transition hover:bg-background/90 disabled:opacity-50"
           >
             {googleLoading ? (
               <>
-                <LoaderCircle className="h-5 w-5 animate-spin" />
-                <span>Verifying with Google…</span>
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+                <span>Connecting with Google…</span>
               </>
             ) : (
               <>
-                <GoogleIcon className="h-5 w-5" />
+                <GoogleIcon className="h-4 w-4" />
                 <span>Continue with Google</span>
               </>
             )}
           </button>
 
-          {/* Official Google GIS Button render container */}
+          {/* Official Google GIS Button Render Container */}
           <div
             ref={googleBtnContainerRef}
             className="mt-3 flex min-h-[44px] w-full justify-center overflow-hidden"
           />
 
-          <p className="mt-6 text-center text-xs text-muted-foreground">
+          <p className="mt-6 text-center text-[11px] text-muted-foreground">
             By continuing, you agree to our{" "}
-            <Link to="/terms" className="underline">
+            <Link to="/terms" className="underline hover:text-foreground">
               Terms &amp; Conditions
             </Link>{" "}
             and{" "}
-            <Link to="/privacy" className="underline">
+            <Link to="/privacy" className="underline hover:text-foreground">
               Privacy Policy
             </Link>
             .

@@ -220,15 +220,34 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
     const auth = await getAuthenticatedCustomerId(data?.authToken);
     if (!auth) return null;
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.id);
+    const authUuid = isUuid ? auth.id : null;
+    const cleanEmail = auth.email?.toLowerCase().trim() || null;
+
     const sql = getDb();
     if (sql) {
       try {
-        const [profile] = await sql`
-          SELECT p.id, p.full_name, p.email, p.phone, p.avatar_url
-          FROM public.profiles p
-          WHERE p.id = ${auth.id}::uuid
-          LIMIT 1
-        `;
+        let profile = null;
+        if (authUuid) {
+          const [p] = await sql`
+            SELECT p.id, p.full_name, p.email, p.phone, p.avatar_url
+            FROM public.profiles p
+            WHERE p.id = ${authUuid}::uuid
+            LIMIT 1
+          `;
+          profile = p;
+        }
+
+        if (!profile && cleanEmail) {
+          const [p] = await sql`
+            SELECT p.id, p.full_name, p.email, p.phone, p.avatar_url
+            FROM public.profiles p
+            WHERE lower(p.email) = ${cleanEmail}
+            LIMIT 1
+          `;
+          profile = p;
+        }
+
         if (profile) {
           return {
             id: profile["id"] as string,
@@ -239,10 +258,17 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
           };
         }
 
+        const customerUuid =
+          auth.customerUuid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.customerUuid)
+            ? auth.customerUuid
+            : null;
+
         const [cust] = await sql`
           SELECT c.id, c.full_name, c.email, c.phone, c.profile_image
           FROM public.customers c
-          WHERE c.id = ${auth.customerUuid || auth.id}::uuid OR c.auth_provider_uid = ${auth.id}
+          WHERE (${customerUuid ? sql`c.id = ${customerUuid}::uuid` : sql`false`}
+             OR c.auth_provider_uid = ${auth.id}
+             OR (${cleanEmail ? sql`lower(c.email) = ${cleanEmail}` : sql`false`}))
           LIMIT 1
         `;
         if (cust) {
@@ -287,55 +313,83 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (!sql) throw new Error("Database connection unavailable.");
 
-    const cleanEmail = data.email?.toLowerCase().trim() || null;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.id);
+    const authUuid = isUuid ? auth.id : null;
+    const cleanEmail = data.email?.toLowerCase().trim() || auth.email?.toLowerCase().trim() || null;
     const cleanName = data.fullName?.trim() || null;
     const cleanPhone = data.phone?.replace(/\D/g, "").slice(-10) || null;
 
+    let updatedAny = false;
+
     // 1. Update public.profiles
     try {
-      await sql`
-        UPDATE public.profiles SET
-          email = COALESCE(${cleanEmail}, email),
-          full_name = COALESCE(${cleanName}, full_name),
-          phone = COALESCE(${cleanPhone}, phone),
-          updated_at = now()
-        WHERE id = ${auth.id}::uuid
-      `;
+      if (authUuid) {
+        await sql`
+          UPDATE public.profiles SET
+            email = COALESCE(${cleanEmail}, email),
+            full_name = COALESCE(${cleanName}, full_name),
+            phone = COALESCE(${cleanPhone}, phone),
+            updated_at = now()
+          WHERE id = ${authUuid}::uuid
+        `;
+        updatedAny = true;
+      } else if (cleanEmail) {
+        await sql`
+          UPDATE public.profiles SET
+            full_name = COALESCE(${cleanName}, full_name),
+            phone = COALESCE(${cleanPhone}, phone),
+            updated_at = now()
+          WHERE lower(email) = ${cleanEmail}
+        `;
+        updatedAny = true;
+      }
     } catch (err) {
       console.warn("[updateProfile] profiles update note:", err);
     }
 
     // 2. Update public.customers
     try {
+      const customerUuid =
+        auth.customerUuid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.customerUuid)
+          ? auth.customerUuid
+          : null;
+
       await sql`
         UPDATE public.customers SET
           email = COALESCE(${cleanEmail}, email),
           full_name = COALESCE(${cleanName}, full_name),
           phone = COALESCE(${cleanPhone}, phone),
           updated_at = now()
-        WHERE id = ${auth.customerUuid || auth.id}::uuid OR auth_provider_uid = ${auth.id}
+        WHERE (${customerUuid ? sql`id = ${customerUuid}::uuid` : sql`false`}
+           OR auth_provider_uid = ${auth.id}
+           OR (${cleanEmail ? sql`lower(email) = ${cleanEmail}` : sql`false`}))
       `;
+      updatedAny = true;
     } catch (err) {
       console.warn("[updateProfile] customers update note:", err);
     }
 
-    // 3. Update auth.users if cleanEmail is provided
+    // 3. Update auth.users if cleanEmail is provided and authUuid is valid
     try {
-      if (cleanEmail) {
+      if (authUuid && (cleanEmail || cleanName)) {
         await sql`
           UPDATE auth.users SET
-            email = ${cleanEmail},
-            email_confirmed_at = COALESCE(email_confirmed_at, now()),
+            email = COALESCE(${cleanEmail}, email),
             updated_at = now(),
-            raw_user_meta_data = raw_user_meta_data || ${JSON.stringify({
-              email: cleanEmail,
-              full_name: cleanName,
-            })}::jsonb
-          WHERE id = ${auth.id}::uuid
+            raw_user_meta_data = raw_user_meta_data || ${sql.json({
+              ...(cleanEmail ? { email: cleanEmail } : {}),
+              ...(cleanName ? { full_name: cleanName, name: cleanName } : {}),
+              ...(cleanPhone ? { phone: cleanPhone } : {}),
+            })}
+          WHERE id = ${authUuid}::uuid
         `;
       }
     } catch (err) {
       console.warn("[updateProfile] auth.users update note:", err);
+    }
+
+    if (!updatedAny) {
+      throw new Error("Unable to locate profile record to update.");
     }
 
     return { success: true };

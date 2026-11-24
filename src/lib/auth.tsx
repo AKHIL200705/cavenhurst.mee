@@ -85,23 +85,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Continue to Supabase listener
     }
 
-    // 2. Secondary listener for phone OTP auth
+    // 2. Active listener for Supabase authentication state
     const { data } = supabase.auth.onAuthStateChange((_e, s) => {
-      // Only overwrite if not using Google direct session
-      if (typeof window !== "undefined" && localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY)) {
+      if (!active) return;
+
+      if (_e === "SIGNED_OUT") {
+        setUser(null);
+        setSessionToken(null);
+        setReady(true);
         return;
       }
-      setUser((s?.user as unknown as AuthUser) ?? null);
-      setSessionToken(s?.access_token ?? null);
+
+      if (s?.user) {
+        // Active Supabase auth session takes precedence
+        try {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+          }
+        } catch {
+          /* ignore */
+        }
+        setUser((s.user as unknown as AuthUser) ?? null);
+        setSessionToken(s.access_token ?? null);
+        setReady(true);
+        return;
+      }
+
+      // If no active Supabase session, fall back to Google session if present
+      try {
+        const stored =
+          typeof window !== "undefined" ? localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY) : null;
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.user && parsed?.sessionToken) {
+            setUser(parsed.user as AuthUser);
+            setSessionToken(parsed.sessionToken as string);
+            setReady(true);
+            return;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+
+      setUser(null);
+      setSessionToken(null);
       setReady(true);
     });
 
-    supabase.auth.getUser().then(({ data }) => {
-      if (active) {
-        if (typeof window !== "undefined" && localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY)) {
-          return;
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!active) return;
+      if (session?.user) {
+        try {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+          }
+        } catch {
+          /* ignore */
         }
-        setUser((data.user as unknown as AuthUser) ?? null);
+        setUser((session.user as unknown as AuthUser) ?? null);
+        setSessionToken(session.access_token ?? null);
         setReady(true);
       }
     });

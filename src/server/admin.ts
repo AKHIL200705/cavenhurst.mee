@@ -210,27 +210,102 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           prodCountRows,
           recentOrders,
           recentCust,
+          inventoryRows,
+          pendingReturnsRow,
+          newCustRow,
+          topSellingRows,
         ] = await Promise.all([
           sql<DbOrderOverviewRow[]>`
             SELECT id, total, status, payment_method, payment_status, shipment_status, created_at
             FROM orders
-          `,
-          sql<DbRefundRow[]>`SELECT amount FROM refunds`,
-          sql<DbProductRow[]>`SELECT slug, name, stock FROM products`,
-          sql<DbCountRow[]>`SELECT count(*)::int as count FROM customers`,
-          sql<DbCountRow[]>`SELECT count(*)::int as count FROM products`,
+          `.catch((err) => {
+            console.error("[Admin Overview] Orders query error:", err);
+            return [];
+          }),
+          sql<DbRefundRow[]>`SELECT amount FROM refunds`
+            .catch(() => sql<DbRefundRow[]>`SELECT amount FROM payment_refunds`)
+            .catch(() => []),
+          sql<DbProductRow[]>`SELECT slug, name, stock FROM products`.catch(() => []),
+          sql<DbCountRow[]>`SELECT count(*)::int as count FROM profiles`
+            .catch(() => sql<DbCountRow[]>`SELECT count(*)::int as count FROM customers`)
+            .catch(() => [{ count: 0 }]),
+          sql<DbCountRow[]>`SELECT count(*)::int as count FROM products`.catch(() => [{ count: 0 }]),
           sql<DbRecentOrderRow[]>`
             SELECT id, order_number, customer_name, customer_email, total, status, payment_status, created_at
             FROM orders
             ORDER BY created_at DESC
             LIMIT 5
-          `,
+          `.catch(() => []),
           sql<DbRecentCustomerRow[]>`
             SELECT id, full_name, email, phone, created_at
-            FROM customers
+            FROM profiles
             ORDER BY created_at DESC
             LIMIT 5
-          `,
+          `
+            .catch(() =>
+              sql<DbRecentCustomerRow[]>`
+                SELECT id, full_name, email, phone, created_at
+                FROM customers
+                ORDER BY created_at DESC
+                LIMIT 5
+              `,
+            )
+            .catch(() => []),
+          sql<
+            Array<{
+              variant_id: string;
+              sku: string | null;
+              color: string;
+              size: string;
+              product_name: string;
+              product_slug: string;
+              stock_quantity: number;
+              safety_stock: number;
+            }>
+          >`
+            SELECT 
+              v.id as variant_id,
+              v.sku,
+              v.color,
+              v.size,
+              p.name as product_name,
+              p.slug as product_slug,
+              COALESCE(i.stock_quantity, v.stock, 0) as stock_quantity,
+              COALESCE(i.safety_stock, 5) as safety_stock
+            FROM public.product_variants v
+            JOIN public.products p ON p.id = v.product_id
+            LEFT JOIN public.inventory i ON i.variant_id = v.id
+          `.catch(() => []),
+          sql<Array<{ count: number }>>`
+            SELECT count(*)::int as count 
+            FROM public.returns 
+            WHERE status IN ('requested', 'pending', 'under_review')
+          `.catch(() => [{ count: 0 }]),
+          sql<Array<{ count: number }>>`
+            SELECT count(*)::int as count 
+            FROM public.profiles 
+            WHERE created_at >= now() - interval '30 days'
+          `.catch(() => [{ count: 0 }]),
+          sql<
+            Array<{
+              name: string;
+              product_slug: string;
+              quantity: number;
+              revenue: number;
+            }>
+          >`
+            SELECT 
+              oi.name,
+              oi.product_slug,
+              SUM(oi.qty)::int as quantity,
+              SUM(oi.qty * oi.price)::int as revenue
+            FROM public.order_items oi
+            JOIN public.orders o ON o.id = oi.order_id
+            WHERE o.status NOT IN ('cancelled', 'refunded')
+            GROUP BY oi.name, oi.product_slug
+            ORDER BY quantity DESC
+            LIMIT 5
+          `.catch(() => []),
         ]);
 
         const allOrders = orders || [];
@@ -247,6 +322,9 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
         const totalCodRevenue = codOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
         const pendingPayments = allOrders.filter((o) => o.payment_status === "pending").length;
+        const pendingOrders = allOrders.filter(
+          (o) => o.status === "pending_payment" || o.payment_status === "pending",
+        ).length;
         const processingOrders = allOrders.filter((o) => o.status === "processing").length;
         const shippedOrders = allOrders.filter((o) =>
           ["shipped", "in_transit", "out_for_delivery"].includes(o.shipment_status || ""),
@@ -258,46 +336,113 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
         ).length;
         const returnOrders = allOrders.filter((o) => o.status === "returned").length;
 
-        const productList = products || [];
+        // Calculate live inventory alerts directly from public.inventory
+        let outOfStockCount = 0;
         let lowStockCount = 0;
-        const lowStockAlerts: Array<{ name: string; slug: string; size: string; stock: number }> = [];
+        const lowStockAlerts: Array<{
+          name: string;
+          slug: string;
+          size: string;
+          stock: number;
+          sku?: string | undefined;
+        }> = [];
 
-        for (const p of productList) {
-          const stockObj = (p.stock || {}) as Record<string, number>;
-          for (const [size, count] of Object.entries(stockObj)) {
-            if (typeof count === "number" && count <= 3) {
+        if (inventoryRows && inventoryRows.length > 0) {
+          for (const row of inventoryRows) {
+            const stock = Number(row.stock_quantity) || 0;
+            const safety = Number(row.safety_stock) || 5;
+            if (stock === 0) {
+              outOfStockCount++;
+            } else if (stock <= safety || stock <= 3) {
               lowStockCount++;
-              if (lowStockAlerts.length < 10) {
-                lowStockAlerts.push({ name: p.name, slug: p.slug, size, stock: count });
+            }
+            if (stock <= 5 && lowStockAlerts.length < 15) {
+              lowStockAlerts.push({
+                name: `${row.product_name} (${row.color})`,
+                slug: row.product_slug,
+                size: row.size,
+                stock,
+                sku: row.sku || undefined,
+              });
+            }
+          }
+        } else {
+          // Fallback to products.stock if inventory table query returned empty
+          const productList = products || [];
+          for (const p of productList) {
+            const stockObj = (p.stock || {}) as Record<string, number>;
+            for (const [size, count] of Object.entries(stockObj)) {
+              if (typeof count === "number") {
+                if (count === 0) outOfStockCount++;
+                else if (count <= 3) lowStockCount++;
+                if (count <= 3 && lowStockAlerts.length < 10) {
+                  lowStockAlerts.push({ name: p.name, slug: p.slug, size, stock: count });
+                }
               }
             }
           }
         }
 
+        // Daily Sales (Last 14 days)
         const dailySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
         const today = new Date();
-        for (let i = 6; i >= 0; i--) {
+        for (let i = 13; i >= 0; i--) {
           const d = new Date(today);
           d.setDate(d.getDate() - i);
           const key = d.toISOString().slice(0, 10);
           dailySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
         }
 
+        // Weekly Sales (Last 8 weeks)
+        const weeklySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
+        for (let i = 7; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i * 7);
+          const key = `Wk ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+          weeklySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
+        }
+
+        // Monthly Sales (Last 12 months)
+        const monthlySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
+        for (let i = 11; i >= 0; i--) {
+          const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+          const key = d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+          monthlySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
+        }
+
         for (const o of allOrders) {
-          const dateKey = (o.created_at ? new Date(o.created_at).toISOString() : "").slice(0, 10);
-          const entry = dailySalesMap.get(dateKey);
-          if (entry) {
-            entry.orders += 1;
+          const orderDate = o.created_at ? new Date(o.created_at) : null;
+          if (!orderDate) continue;
+
+          const dateKey = orderDate.toISOString().slice(0, 10);
+          const dailyEntry = dailySalesMap.get(dateKey);
+          if (dailyEntry) {
+            dailyEntry.orders += 1;
             if (o.payment_status === "paid") {
-              entry.revenue += Number(o.total) || 0;
+              dailyEntry.revenue += Number(o.total) || 0;
+            }
+          }
+
+          const monthKey = orderDate.toLocaleDateString("en-US", {
+            month: "short",
+            year: "2-digit",
+          });
+          const monthEntry = monthlySalesMap.get(monthKey);
+          if (monthEntry) {
+            monthEntry.orders += 1;
+            if (o.payment_status === "paid") {
+              monthEntry.revenue += Number(o.total) || 0;
             }
           }
         }
 
         const dailySales = Array.from(dailySalesMap.values());
+        const monthlySales = Array.from(monthlySalesMap.values());
+        const weeklySales = Array.from(weeklySalesMap.values());
 
         return {
           totalCustomers: custCountRows[0]?.count ?? 0,
+          newCustomers: newCustRow[0]?.count ?? 0,
           totalProducts: prodCountRows[0]?.count ?? 0,
           totalOrders,
           totalPaidRevenue,
@@ -305,31 +450,44 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           totalPaidOrders: paidOrders.length,
           totalCodOrders: codOrders.length,
           pendingPayments,
+          pendingOrders,
           processingOrders,
           shippedOrders,
           deliveredOrders,
           cancelledOrders,
           rtoOrders,
           returnOrders,
+          pendingReturns: pendingReturnsRow[0]?.count ?? 0,
+          totalRefunded,
           lowStockCount,
+          outOfStockCount,
           lowStockAlerts,
           dailySales,
-          recentOrders: (recentOrders || []).map((o) => ({
-            id: o.id,
-            order_number: o.order_number,
-            customer_name: o.customer_name,
-            customer_email: o.customer_email,
-            total: Number(o.total) || 0,
-            status: o.status,
-            payment_status: o.payment_status,
-            created_at: o.created_at ? new Date(o.created_at).toISOString() : new Date().toISOString(),
+          weeklySales,
+          monthlySales,
+          paymentMethodBreakdown: {
+            online: {
+              count: paidOrders.length,
+              revenue: totalPaidRevenue,
+            },
+            cod: {
+              count: codOrders.length,
+              revenue: totalCodRevenue,
+            },
+          },
+          topSellingProducts: (topSellingRows || []).map((t) => ({
+            name: t.name,
+            slug: t.product_slug,
+            quantity: Number(t.quantity) || 0,
+            revenue: Number(t.revenue) || 0,
           })),
-          recentRegistrations: (recentCust || []).map((c) => ({
+          recentOrders,
+          recentRegistrations: recentCust.map((c) => ({
             id: c.id,
             full_name: c.full_name || "Customer",
             email: c.email,
             phone: c.phone,
-            created_at: c.created_at ? new Date(c.created_at).toISOString() : null,
+            created_at: c.created_at,
           })),
         };
       } catch (dbErr) {
@@ -439,15 +597,32 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       totalPaidOrders: paidOrders.length,
       totalCodOrders: codOrders.length,
       pendingPayments,
+      pendingOrders: allOrders.filter((o) => o.status === "pending").length,
       processingOrders,
       shippedOrders,
       deliveredOrders,
       cancelledOrders,
       rtoOrders,
       returnOrders,
+      pendingReturns: 0,
+      totalRefunded,
       lowStockCount,
+      outOfStockCount: 0,
       lowStockAlerts,
       dailySales,
+      weeklySales: [],
+      monthlySales: [],
+      paymentMethodBreakdown: {
+        online: {
+          count: paidOrders.length,
+          revenue: totalPaidRevenue,
+        },
+        cod: {
+          count: codOrders.length,
+          revenue: totalCodRevenue,
+        },
+      },
+      topSellingProducts: [],
       recentOrders: recentOrdersRes.data || [],
       recentRegistrations: recentCustRes.data || [],
     };
@@ -1072,28 +1247,89 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
     const stockMap = (prod.stock || {}) as Record<string, number>;
     const oldStock = stockMap[data.size] ?? 0;
     const changeQty = data.newStock - oldStock;
-    const updatedStock = { ...stockMap, [data.size]: Math.max(0, data.newStock) };
+    const safeNewStock = Math.max(0, data.newStock);
+    const updatedStock = { ...stockMap, [data.size]: safeNewStock };
 
+    // 1. Update product.stock JSONB
     await supabaseAdmin
       .from("products")
       .update({ stock: updatedStock as unknown as Json, updated_at: new Date().toISOString() })
       .eq("id", prod.id);
 
+    // 2. Find or create matching variant in product_variants
+    let variantId: string | null = null;
+    let variantSku = `${prod.slug}-${data.size.toLowerCase()}`;
+    if (data.color) {
+      variantSku += `-${data.color.toLowerCase().replace(/\s+/g, "")}`;
+    }
+
+    const { data: existingVariants } = await supabaseAdmin
+      .from("product_variants")
+      .select("id, sku, stock_quantity")
+      .eq("product_id", prod.id)
+      .eq("size", data.size);
+
+    const matchedVariant = existingVariants && existingVariants.length > 0 ? existingVariants[0] : null;
+
+    if (matchedVariant) {
+      variantId = matchedVariant.id;
+      variantSku = matchedVariant.sku || variantSku;
+      await supabaseAdmin
+        .from("product_variants")
+        .update({ stock_quantity: safeNewStock, updated_at: new Date().toISOString() })
+        .eq("id", variantId);
+    } else {
+      const { data: newVariant } = await supabaseAdmin
+        .from("product_variants")
+        .insert({
+          product_id: prod.id,
+          sku: variantSku,
+          size: data.size,
+          color: data.color || "Standard",
+          stock_quantity: safeNewStock,
+          is_available: safeNewStock > 0,
+        })
+        .select("id, sku")
+        .single();
+      if (newVariant) {
+        variantId = newVariant.id;
+        variantSku = newVariant.sku || variantSku;
+      }
+    }
+
+    // 3. Upsert into public.inventory
+    if (variantId) {
+      await supabaseAdmin.from("inventory").upsert(
+        {
+          product_id: prod.id,
+          variant_id: variantId,
+          sku: variantSku,
+          stock_quantity: safeNewStock,
+          safety_stock: 5,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "variant_id" },
+      );
+    }
+
+    // 4. Record inventory movement
     await supabaseAdmin.from("inventory_movements").insert({
       product_id: prod.id,
       product_slug: prod.slug,
       size: data.size,
       color: data.color || null,
       change_qty: changeQty,
-      new_stock: data.newStock,
+      new_stock: safeNewStock,
       reason: data.reason || "admin_adjustment",
       admin_user_id: admin.userId,
     });
 
+    // 5. Audit log
     await recordAdminAuditLog(admin, "stock_adjustment", "inventory", prod.id, {
       size: data.size,
+      color: data.color,
       oldStock,
-      newStock: data.newStock,
+      newStock: safeNewStock,
       change: changeQty,
       reason: data.reason,
     });

@@ -65,16 +65,16 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             UPDATE auth.users SET
               last_sign_in_at = now(),
               updated_at = now(),
-              raw_user_meta_data = raw_user_meta_data || ${JSON.stringify({
+              raw_user_meta_data = raw_user_meta_data || ${sql.json({
                 sub: googleUser.sub,
                 full_name: googleUser.name || "Customer",
                 avatar_url: googleUser.picture,
-              })}::jsonb
+              })}
             WHERE id = ${authUserId}
           `;
         } else {
-          const rawAppMeta = JSON.stringify({ provider: "google", providers: ["google"] });
-          const rawUserMeta = JSON.stringify({
+          const appMetaObj = { provider: "google", providers: ["google"] };
+          const userMetaObj = {
             sub: googleUser.sub,
             email: emailLower,
             full_name: googleUser.name || "Customer",
@@ -82,7 +82,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             avatar_url: googleUser.picture,
             picture: googleUser.picture,
             email_verified: true,
-          });
+          };
 
           const [inserted] = await sql`
             INSERT INTO auth.users (
@@ -107,8 +107,8 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
               ${emailLower},
               '',
               now(),
-              ${rawAppMeta}::jsonb,
-              ${rawUserMeta}::jsonb,
+              ${sql.json(appMetaObj)},
+              ${sql.json(userMetaObj)},
               false,
               now(),
               now(),
@@ -136,7 +136,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             ) VALUES (
               gen_random_uuid(),
               ${authUserId},
-              ${JSON.stringify({ sub: googleUser.sub, email: emailLower })}::jsonb,
+              ${sql.json({ sub: googleUser.sub, email: emailLower })},
               'google',
               ${googleUser.sub},
               now(),
@@ -144,6 +144,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
               now()
             )
             ON CONFLICT (provider_id, provider) DO UPDATE SET
+              identity_data = ${sql.json({ sub: googleUser.sub, email: emailLower })},
               last_sign_in_at = now(),
               updated_at = now()
           `;

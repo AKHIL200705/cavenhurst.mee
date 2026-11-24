@@ -15,6 +15,12 @@ import {
   checkShipMaxxServiceability,
   trackShipMaxxShipment,
 } from "./shipmaxx";
+import {
+  getVariantAvailableStock,
+  reserveOrderInventory,
+  commitOrderInventory,
+  releaseOrderInventoryReservations,
+} from "./inventory";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface CheckoutCustomerInput {
@@ -144,29 +150,36 @@ async function calculateOrderTotals(
       throw new Error(`Product "${item.slug}" is no longer available in the store catalog.`);
     }
 
-    // Verify stock availability server-side
-    const stockMap = (dbProd.stock || {}) as Record<string, number>;
-    const available = stockMap[item.size] ?? 0;
+    // Verify live stock availability server-side using public.inventory
+    const stockInfo = await getVariantAvailableStock(dbProd.id, item.size, item.color);
+    const available = stockInfo.variantId
+      ? stockInfo.available
+      : ((dbProd.stock || {}) as Record<string, number>)[item.size] ?? 0;
+
     if (available < item.qty) {
       throw new Error(
-        `Insufficient inventory for "${dbProd.name}" (${item.size}). Available: ${available}, requested: ${item.qty}`,
+        `Insufficient inventory for "${dbProd.name}" (${item.size}${item.color ? `, ${item.color}` : ""}). Available: ${available}, requested: ${item.qty}`,
       );
     }
 
     // Fetch matching variant if exists
-    const { data: variant } = await supabaseAdmin
-      .from("product_variants")
-      .select("id")
-      .eq("product_id", dbProd.id)
-      .eq("size", item.size)
-      .maybeSingle();
+    let variantId = stockInfo.variantId;
+    if (!variantId) {
+      const { data: variant } = await supabaseAdmin
+        .from("product_variants")
+        .select("id")
+        .eq("product_id", dbProd.id)
+        .eq("size", item.size)
+        .maybeSingle();
+      if (variant) variantId = variant.id;
+    }
 
     const price = Number(dbProd.price) || 0;
     subtotal += price * item.qty;
 
     itemsWithDetails.push({
       productId: dbProd.id,
-      variantId: variant?.id,
+      variantId: variantId || undefined,
       slug: dbProd.slug,
       name: dbProd.name,
       size: item.size,
@@ -430,41 +443,32 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
     });
 
     // 9. Atomic inventory reservation / deduction
-    for (const item of itemsWithDetails) {
-      if (item.productId) {
-        try {
-          const { data: prod } = await supabaseAdmin
-            .from("products")
-            .select("id, stock")
-            .eq("id", item.productId)
-            .single();
+    const inventoryItems = itemsWithDetails.map((item) => ({
+      productId: item.productId || "",
+      variantId: item.variantId,
+      slug: item.slug,
+      name: item.name,
+      size: item.size,
+      color: item.color,
+      qty: item.qty,
+    }));
 
-          if (prod) {
-            const currentStock = (prod.stock || {}) as Record<string, number>;
-            const curQty = currentStock[item.size] ?? 0;
-            const newQty = Math.max(0, curQty - item.qty);
-            const updatedStock = { ...currentStock, [item.size]: newQty };
-
-            await supabaseAdmin
-              .from("products")
-              .update({ stock: updatedStock as unknown as Json, updated_at: new Date().toISOString() })
-              .eq("id", prod.id);
-
-            await supabaseAdmin.from("inventory_transactions").insert({
-              product_id: prod.id,
-              variant_id: item.variantId || null,
-              transaction_type: "order_sale",
-              quantity: item.qty,
-              previous_quantity: curQty,
-              new_quantity: newQty,
-              reference_id: orderNumber,
-              reason: "order_placed",
-              created_by: verifiedUserId || "customer",
-            });
-          }
-        } catch (stockErr) {
-          console.error("[Inventory Deduction Error]", stockErr);
-        }
+    if (paymentMethod === "online") {
+      const reserveRes = await reserveOrderInventory(orderId, inventoryItems);
+      if (!reserveRes.success) {
+        await supabaseAdmin.from("orders").delete().eq("id", orderId);
+        throw new Error(reserveRes.error || "Failed to reserve inventory for this order.");
+      }
+    } else {
+      // For Cash on Delivery, inventory is committed immediately upon order confirmation
+      const commitRes = await commitOrderInventory(
+        orderId,
+        orderNumber,
+        inventoryItems,
+        verifiedUserId,
+      );
+      if (!commitRes.success) {
+        console.warn("[Inventory Commit Warning]", commitRes.error);
       }
     }
 
@@ -521,7 +525,8 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       });
 
       if (!rzpRes.success || !rzpRes.order) {
-        // Rollback pending order if Razorpay initialization fails
+        // Rollback pending order and release reserved stock if Razorpay initialization fails
+        await releaseOrderInventoryReservations(orderId);
         await supabaseAdmin.from("orders").delete().eq("id", orderId);
         throw new Error(rzpRes.error || "Failed to initialize payment gateway checkout.");
       }

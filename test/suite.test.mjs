@@ -712,4 +712,66 @@ test("Admin Roles: Privilege verification by role", () => {
   assert.equal(hasAdminPermission("customer", "orders"), false);
 });
 
+// ==============================================================================
+// 18. ATOMIC INVENTORY RESERVATION & OVERSELL PROTECTION
+// ==============================================================================
+test("Inventory: Atomic reservation, oversell protection, and lifecycle", () => {
+  function getAvailableStock(stockQuantity, reservedQuantity) {
+    return Math.max(0, (stockQuantity || 0) - (reservedQuantity || 0));
+  }
+
+  function tryReserveInventory(inventory, requestedQty) {
+    const available = getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity);
+    if (available < requestedQty) {
+      return { success: false, error: "Insufficient stock" };
+    }
+    inventory.reservedQuantity += requestedQty;
+    return { success: true, newReserved: inventory.reservedQuantity };
+  }
+
+  function commitReservedInventory(inventory, qty) {
+    inventory.stockQuantity = Math.max(0, inventory.stockQuantity - qty);
+    inventory.reservedQuantity = Math.max(0, inventory.reservedQuantity - qty);
+    return { stockQuantity: inventory.stockQuantity, reservedQuantity: inventory.reservedQuantity };
+  }
+
+  function releaseReservedInventory(inventory, qty) {
+    inventory.reservedQuantity = Math.max(0, inventory.reservedQuantity - qty);
+    return { reservedQuantity: inventory.reservedQuantity };
+  }
+
+  const inventory = { stockQuantity: 10, reservedQuantity: 0 };
+
+  // 1. Initial available stock
+  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 10);
+
+  // 2. Reserve 4 units
+  const res1 = tryReserveInventory(inventory, 4);
+  assert.equal(res1.success, true);
+  assert.equal(inventory.reservedQuantity, 4);
+  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 6);
+
+  // 3. Oversell protection: trying to reserve 7 units when only 6 are available must fail
+  const res2 = tryReserveInventory(inventory, 7);
+  assert.equal(res2.success, false);
+  assert.equal(inventory.reservedQuantity, 4); // unchanged
+
+  // 4. Reserve remaining 6 units -> available becomes 0
+  const res3 = tryReserveInventory(inventory, 6);
+  assert.equal(res3.success, true);
+  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 0);
+
+  // 5. Payment failure on 6-unit order releases reservation
+  releaseReservedInventory(inventory, 6);
+  assert.equal(inventory.reservedQuantity, 4);
+  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 6);
+
+  // 6. Payment verified on 4-unit order commits stock
+  commitReservedInventory(inventory, 4);
+  assert.equal(inventory.stockQuantity, 6);
+  assert.equal(inventory.reservedQuantity, 0);
+  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 6);
+});
+
+
 

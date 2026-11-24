@@ -9,8 +9,9 @@ import type { Json } from "@/integrations/supabase/types";
  */
 function mapDbProductToFrontend(row: any): Product {
   const stockObj: Partial<Record<Size, number>> = {};
-  if (row.stock && typeof row.stock === "object") {
-    for (const [k, v] of Object.entries(row.stock)) {
+  const stockSource = row.live_stock || row.stock;
+  if (stockSource && typeof stockSource === "object") {
+    for (const [k, v] of Object.entries(stockSource)) {
       stockObj[k as Size] = Number(v) || 0;
     }
   }
@@ -50,10 +51,20 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
     if (sql) {
       try {
         const rows = await sql`
-          SELECT *
-          FROM products
-          WHERE is_published = true
-          ORDER BY rank ASC
+          SELECT 
+            p.*,
+            COALESCE(
+              (
+                SELECT jsonb_object_agg(v.size, GREATEST(0, COALESCE(i.stock_quantity - COALESCE(i.reserved_quantity, 0), v.stock_quantity, 0)))
+                FROM public.product_variants v
+                LEFT JOIN public.inventory i ON i.variant_id = v.id
+                WHERE v.product_id = p.id
+              ),
+              p.stock
+            ) AS live_stock
+          FROM products p
+          WHERE p.is_published = true
+          ORDER BY p.rank ASC
         `;
         if (rows && rows.length > 0) {
           return (rows as any[]).map(mapDbProductToFrontend);
@@ -93,9 +104,19 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
     if (sql) {
       try {
         const [row] = await sql`
-          SELECT *
-          FROM products
-          WHERE slug = ${data.slug} AND is_published = true
+          SELECT 
+            p.*,
+            COALESCE(
+              (
+                SELECT jsonb_object_agg(v.size, GREATEST(0, COALESCE(i.stock_quantity - COALESCE(i.reserved_quantity, 0), v.stock_quantity, 0)))
+                FROM public.product_variants v
+                LEFT JOIN public.inventory i ON i.variant_id = v.id
+                WHERE v.product_id = p.id
+              ),
+              p.stock
+            ) AS live_stock
+          FROM products p
+          WHERE p.slug = ${data.slug} AND p.is_published = true
           LIMIT 1
         `;
         if (row) {

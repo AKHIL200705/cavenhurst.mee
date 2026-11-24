@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { meta } from "@/components/site/InfoPage";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
@@ -115,6 +115,8 @@ function AdminDashboard() {
   const [authToken, setAuthToken] = useState<string | undefined>(sessionToken || undefined);
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [loading, setLoading] = useState(false);
+  const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Data states
   const [overviewData, setOverviewData] = useState<OverviewData | null>(null);
@@ -409,36 +411,68 @@ function AdminDashboard() {
     }
   }, [isAdmin, activeTab, loadActiveTabData]);
 
-  // 3. Supabase Realtime subscription for live operational updates
+  // 3. Supabase Realtime multi-table subscription for live operational updates
   useEffect(() => {
     if (!isAdmin) return;
+
+    const triggerDebouncedRefresh = () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        void loadActiveTabData();
+      }, 800);
+    };
 
     const channel = supabase
       .channel("admin-live-updates")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "orders" },
-        () => {
-          void loadActiveTabData();
-        },
+        triggerDebouncedRefresh,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "payments" },
-        () => {
-          void loadActiveTabData();
-        },
+        triggerDebouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "inventory" },
+        triggerDebouncedRefresh,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "inventory_movements" },
-        () => {
-          void loadActiveTabData();
-        },
+        triggerDebouncedRefresh,
       )
-      .subscribe();
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "shipments" },
+        triggerDebouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        triggerDebouncedRefresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "returns" },
+        triggerDebouncedRefresh,
+      )
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          setRealtimeConnected(true);
+        } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+          setRealtimeConnected(false);
+        }
+      });
 
     return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
       void supabase.removeChannel(channel);
     };
   }, [isAdmin, loadActiveTabData]);
@@ -483,6 +517,25 @@ function AdminDashboard() {
             </div>
 
             <div className="flex items-center gap-3 text-xs">
+              {/* Realtime Live Sync Indicator */}
+              <div
+                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
+                  realtimeConnected
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                    : "border-border bg-card text-muted-foreground"
+                }`}
+                title={realtimeConnected ? "Live Supabase Realtime active" : "Connecting to Supabase Realtime..."}
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    realtimeConnected ? "bg-emerald-400 animate-pulse" : "bg-muted-foreground"
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {realtimeConnected ? "Live Sync Active" : "Connecting..."}
+                </span>
+              </div>
+
               <div className="hidden md:flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-muted-foreground">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
                 <span className="font-mono">{user?.email || "Admin"}</span>

@@ -37,12 +37,14 @@ function createSupabaseAdminClient() {
   const SUPABASE_SERVICE_ROLE_KEY = (
     process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
     process.env["SUPABASE_SECRET_KEY"] ||
-    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-    process.env["SUPABASE_ANON_KEY"] ||
-    process.env["VITE_SUPABASE_ANON_KEY"] ||
     ""
   ).replace(/^["']|["']$/g, "").trim();
+
+  const effectiveKey =
+    SUPABASE_SERVICE_ROLE_KEY ||
+    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+    "";
 
   if (!SUPABASE_URL) {
     throw new Error(
@@ -50,15 +52,21 @@ function createSupabaseAdminClient() {
     );
   }
 
-  if (!SUPABASE_SERVICE_ROLE_KEY) {
+  if (!effectiveKey) {
     throw new Error(
-      "[Supabase Security Error] Supabase API key is missing in server environment. Please configure SUPABASE_SERVICE_ROLE_KEY or SUPABASE_PUBLISHABLE_KEY in your environment variables.",
+      "[Supabase Security Error] Neither SUPABASE_SERVICE_ROLE_KEY nor SUPABASE_PUBLISHABLE_KEY is configured in your environment variables.",
     );
   }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    console.warn(
+      "[Supabase Configuration Warning] SUPABASE_SERVICE_ROLE_KEY is not configured in .env. Operating with publishable key. For full administrative operations that bypass RLS, add SUPABASE_SERVICE_ROLE_KEY to .env from Supabase Dashboard -> Project Settings -> API.",
+    );
+  }
+
+  return createClient<Database>(SUPABASE_URL, effectiveKey, {
     global: {
-      fetch: createSupabaseFetch(SUPABASE_SERVICE_ROLE_KEY),
+      fetch: createSupabaseFetch(effectiveKey),
     },
     auth: {
       storage: undefined,
