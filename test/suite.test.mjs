@@ -885,6 +885,264 @@ test("ShipMaxx: Delivery confirmation settles COD payment and advances order sta
   assert.equal(deliveredCancelled.shipment_status, "delivered");
 });
 
+// ==============================================================================
+// 12. INDIAN MOBILE NUMBER VALIDATION & NORMALIZATION
+// ==============================================================================
+function normalizeAndValidateIndianMobile(input) {
+  if (!input || typeof input !== "string") {
+    return { valid: false, error: "Mobile number is required" };
+  }
+  const digitsOnly = input.replace(/\D/g, "");
+  const normalized = digitsOnly.slice(-10);
+
+  if (normalized.length !== 10) {
+    return { valid: false, error: "Indian mobile number must contain exactly 10 digits" };
+  }
+  if (!/^[6-9]\d{9}$/.test(normalized)) {
+    return { valid: false, error: "Indian mobile number must start with 6, 7, 8, or 9" };
+  }
+
+  return { valid: true, mobileNumber: normalized, formatted: `+91 ${normalized}` };
+}
+
+test("Mobile Validation: 10-digit Indian mobile number constraints", () => {
+  // Valid variations with prefixes and spaces
+  assert.equal(normalizeAndValidateIndianMobile("+919876543210").valid, true);
+  assert.equal(normalizeAndValidateIndianMobile("+919876543210").mobileNumber, "9876543210");
+  assert.equal(normalizeAndValidateIndianMobile("9876543210").valid, true);
+  assert.equal(normalizeAndValidateIndianMobile("09876543210").valid, true);
+  assert.equal(normalizeAndValidateIndianMobile("+91 98765 43210").valid, true);
+  assert.equal(normalizeAndValidateIndianMobile("+91 6123456789").valid, true);
+  assert.equal(normalizeAndValidateIndianMobile("+91 7987654321").valid, true);
+  assert.equal(normalizeAndValidateIndianMobile("+91 8888888888").valid, true);
+
+  // Invalid variations
+  assert.equal(normalizeAndValidateIndianMobile("").valid, false);
+  assert.equal(normalizeAndValidateIndianMobile("1234567890").valid, false, "Must start with 6, 7, 8, 9");
+  assert.equal(normalizeAndValidateIndianMobile("5234567890").valid, false, "Starts with 5, invalid in India");
+  assert.equal(normalizeAndValidateIndianMobile("98765").valid, false, "Too short");
+  assert.equal(normalizeAndValidateIndianMobile("abcdefghij").valid, false, "Non-digits");
+});
+
+// ==============================================================================
+// 13. CENTRALIZED PROFILE COMPLETION ROUTING GATE
+// ==============================================================================
+const ACCOUNT_GATED_PREFIXES = ["/account", "/checkout"];
+function isAccountGatedRoute(path) {
+  return ACCOUNT_GATED_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+function evaluateGateRedirect({
+  user,
+  ready,
+  welcomeReady,
+  welcomeSeen,
+  path,
+  welcomeShown,
+  profileCompleted = true,
+  profileChecking = false,
+}) {
+  const signedIn = Boolean(user);
+  if (path === "/terms" || path === "/privacy") return false;
+  if (!ready || (signedIn && !welcomeReady)) return false;
+
+  if (path === "/welcome" && !welcomeSeen && !welcomeShown) return false;
+
+  if (!signedIn) {
+    return isAccountGatedRoute(path);
+  }
+
+  if (!welcomeSeen) {
+    return path !== "/welcome";
+  }
+
+  if (path === "/welcome") return true;
+  if (path === "/login") return true;
+
+  if (!profileChecking) {
+    if (!profileCompleted) {
+      if (isAccountGatedRoute(path)) return true;
+      if (path === "/complete-profile") return false;
+    } else {
+      if (path === "/complete-profile") return true;
+    }
+  }
+
+  return false;
+}
+
+test("Centralized Routing Gate: Anonymous vs Incomplete vs Complete profile rules", () => {
+  // 1. Anonymous visitor
+  assert.equal(
+    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/", welcomeShown: false }),
+    false,
+    "Anonymous can browse home freely",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/shop", welcomeShown: false }),
+    false,
+    "Anonymous can browse shop freely",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/product/oversized-tee", welcomeShown: false }),
+    false,
+    "Anonymous can browse product details freely",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/checkout", welcomeShown: false }),
+    true,
+    "Anonymous redirected away from checkout to login",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/account", welcomeShown: false }),
+    true,
+    "Anonymous redirected away from account to login",
+  );
+
+  // 2. First-time signed-in user (welcome not seen)
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: false, path: "/shop", welcomeShown: false }),
+    true,
+    "New user must be routed to /welcome first",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: false, path: "/welcome", welcomeShown: false }),
+    false,
+    "Renders /welcome for new user",
+  );
+
+  // 3. Authenticated user with incomplete profile (welcomeSeen = true, profileCompleted = false)
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/shop", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    false,
+    "Incomplete user can still browse public product catalog",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/checkout", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    true,
+    "Incomplete user blocked from checkout -> redirected to /complete-profile",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/account", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    true,
+    "Incomplete user blocked from account dashboard -> redirected to /complete-profile",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/complete-profile", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    false,
+    "Allowed to render /complete-profile page",
+  );
+
+  // 4. Authenticated user with completed profile
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/checkout", welcomeShown: false, profileCompleted: true, profileChecking: false }),
+    false,
+    "Complete user allowed into checkout",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/account", welcomeShown: false, profileCompleted: true, profileChecking: false }),
+    false,
+    "Complete user allowed into account dashboard",
+  );
+  assert.equal(
+    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/complete-profile", welcomeShown: false, profileCompleted: true, profileChecking: false }),
+    true,
+    "Complete user should not stay on /complete-profile -> redirected to store",
+  );
+});
+
+// ==============================================================================
+// 14. ADMIN CUSTOMER MANAGEMENT SEARCH & PROFILE STATUS FILTERING
+// ==============================================================================
+function filterAdminCustomers(customers, { search = "", statusFilter = "all" }) {
+  const q = search.trim().toLowerCase();
+  return customers.filter((c) => {
+    const matchesSearch =
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      c.email.toLowerCase().includes(q) ||
+      c.phone.includes(q) ||
+      (c.mobileNumber && c.mobileNumber.includes(q)) ||
+      (c.authUid && c.authUid.toLowerCase().includes(q)) ||
+      c.id.toLowerCase().includes(q);
+
+    if (!matchesSearch) return false;
+
+    if (statusFilter === "profile_completed") return c.profileCompleted === true;
+    if (statusFilter === "profile_incomplete") return c.profileCompleted !== true;
+    if (statusFilter === "with_orders") return c.orderCount > 0;
+    if (statusFilter === "active") return c.status === "active";
+    if (statusFilter === "inactive") return c.status !== "active";
+
+    return true;
+  });
+}
+
+test("Admin Customers: Search and profile status filtering", () => {
+  const sample = [
+    {
+      id: "cust-1",
+      authUid: "auth-uuid-1111",
+      name: "Akhil Sai",
+      email: "akhil@example.com",
+      phone: "9876543210",
+      mobileNumber: "9876543210",
+      profileCompleted: true,
+      orderCount: 3,
+      totalSpent: 8997,
+      status: "active",
+    },
+    {
+      id: "cust-2",
+      authUid: "auth-uuid-2222",
+      name: "Rohit Sharma",
+      email: "rohit@cricket.in",
+      phone: "",
+      mobileNumber: "",
+      profileCompleted: false,
+      orderCount: 0,
+      totalSpent: 0,
+      status: "active",
+    },
+    {
+      id: "cust-3",
+      authUid: "auth-uuid-3333",
+      name: "Jane Doe",
+      email: "jane@cavenhurst.com",
+      phone: "9123456789",
+      mobileNumber: "9123456789",
+      profileCompleted: true,
+      orderCount: 0,
+      totalSpent: 0,
+      status: "inactive",
+    },
+  ];
+
+  // Search by name
+  const byName = filterAdminCustomers(sample, { search: "Akhil" });
+  assert.equal(byName.length, 1);
+  assert.equal(byName[0].id, "cust-1");
+
+  // Search by mobile number
+  const byPhone = filterAdminCustomers(sample, { search: "9123456789" });
+  assert.equal(byPhone.length, 1);
+  assert.equal(byPhone[0].id, "cust-3");
+
+  // Search by Auth UUID
+  const byUuid = filterAdminCustomers(sample, { search: "2222" });
+  assert.equal(byUuid.length, 1);
+  assert.equal(byUuid[0].id, "cust-2");
+
+  // Filter by profile status: completed
+  const completed = filterAdminCustomers(sample, { statusFilter: "profile_completed" });
+  assert.equal(completed.length, 2);
+
+  // Filter by profile status: incomplete
+  const incomplete = filterAdminCustomers(sample, { statusFilter: "profile_incomplete" });
+  assert.equal(incomplete.length, 1);
+  assert.equal(incomplete[0].id, "cust-2");
+});
+
 
 
 

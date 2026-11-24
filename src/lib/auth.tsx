@@ -2,6 +2,7 @@ import type React from "react";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { persistWelcome } from "./welcome";
+import { checkProfileCompletionServerFn } from "@/server/customers";
 
 export interface AuthUser {
   id: string;
@@ -13,6 +14,9 @@ export interface AuthUser {
     avatar_url?: string | null;
     picture?: string | null;
     email?: string | null;
+    mobile_number?: string | null;
+    phone?: string | null;
+    profile_completed?: boolean | null;
     [key: string]: unknown;
   } | null;
   app_metadata?: {
@@ -30,6 +34,9 @@ type Auth = {
   welcomeReady: boolean;
   welcomeSeen: boolean;
   welcomeError: boolean;
+  profileCompleted: boolean;
+  profileChecking: boolean;
+  refreshProfile: () => Promise<boolean>;
   retryWelcome: () => void;
   completeWelcome: () => Promise<void>;
   setGoogleSession: (user: AuthUser, sessionToken: string) => void;
@@ -47,6 +54,9 @@ const Ctx = (g.__cavenAuthCtx ??= createContext<Auth>({
   welcomeReady: false,
   welcomeSeen: false,
   welcomeError: false,
+  profileCompleted: false,
+  profileChecking: true,
+  refreshProfile: async () => false,
   retryWelcome: () => {},
   completeWelcome: async () => {},
   setGoogleSession: () => {},
@@ -60,6 +70,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [welcome, setWelcome] = useState<{ userId: string; seen: boolean; error: boolean } | null>(
     null,
   );
+  const [profileCompleted, setProfileCompleted] = useState<boolean>(false);
+  const [profileChecking, setProfileChecking] = useState<boolean>(true);
   const [attempt, setAttempt] = useState(0);
 
   // Initialize session on mount
@@ -211,6 +223,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user, attempt]);
 
+  // Check profile completion status from database
+  useEffect(() => {
+    if (!user) {
+      setProfileCompleted(false);
+      setProfileChecking(false);
+      return;
+    }
+
+    if (user.isAdmin) {
+      setProfileCompleted(true);
+      setProfileChecking(false);
+      return;
+    }
+
+    let active = true;
+    setProfileChecking(true);
+
+    checkProfileCompletionServerFn({ data: { authToken: sessionToken ?? undefined } })
+      .then((res) => {
+        if (active) {
+          setProfileCompleted(Boolean(res.profileCompleted));
+          setProfileChecking(false);
+        }
+      })
+      .catch((err) => {
+        console.warn("[AuthProvider] Profile check notice:", err);
+        if (active) {
+          const hasMetaName = Boolean(
+            user.user_metadata?.full_name || user.user_metadata?.name,
+          );
+          const rawPhone =
+            user.user_metadata?.mobile_number ||
+            user.user_metadata?.phone ||
+            user.phone;
+          const cleanPhone = rawPhone ? String(rawPhone).replace(/\D/g, "").slice(-10) : "";
+          const hasMetaPhone = cleanPhone.length === 10;
+          setProfileCompleted(hasMetaName && hasMetaPhone);
+          setProfileChecking(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, sessionToken, attempt]);
+
+  const refreshProfile = async (): Promise<boolean> => {
+    if (!user) return false;
+    setProfileChecking(true);
+    try {
+      const res = await checkProfileCompletionServerFn({
+        data: { authToken: sessionToken ?? undefined },
+      });
+      setProfileCompleted(Boolean(res.profileCompleted));
+      return Boolean(res.profileCompleted);
+    } catch {
+      return false;
+    } finally {
+      setProfileChecking(false);
+    }
+  };
+
   const setGoogleSession = (newUser: AuthUser, newSessionToken: string) => {
     try {
       localStorage.setItem(
@@ -228,6 +302,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       seen: Boolean(newUser.isAdmin),
       error: false,
     });
+    checkProfileCompletionServerFn({ data: { authToken: newSessionToken } })
+      .then((res) => setProfileCompleted(Boolean(res.profileCompleted)))
+      .catch(() => {});
   };
 
   const completeWelcome = async () => {
@@ -291,6 +368,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setWelcome(null);
     setUser(null);
     setSessionToken(null);
+    setProfileCompleted(false);
+    setProfileChecking(false);
   };
 
   return (
@@ -302,6 +381,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         welcomeReady: !user || welcome?.userId === user.id,
         welcomeSeen: welcome?.userId === user?.id && welcome?.seen === true,
         welcomeError: welcome?.userId === user?.id && welcome?.error === true,
+        profileCompleted,
+        profileChecking,
+        refreshProfile,
         retryWelcome: () => setAttempt((n) => n + 1),
         completeWelcome,
         setGoogleSession,

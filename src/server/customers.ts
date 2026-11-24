@@ -208,8 +208,256 @@ export interface CustomerProfileData {
   fullName: string | null;
   email: string | null;
   phone: string | null;
+  mobileNumber: string | null;
   avatarUrl: string | null;
+  profileCompleted: boolean;
 }
+
+/**
+ * Server Function: Check customer profile completion status
+ */
+export const checkProfileCompletionServerFn = createServerFn({ method: "POST" })
+  .validator((params?: { authToken?: string | undefined }) => params || {})
+  .handler(async ({ data }) => {
+    const auth = await getAuthenticatedCustomerId(data?.authToken);
+    if (!auth) {
+      return {
+        authenticated: false,
+        userId: null,
+        email: null,
+        fullName: null,
+        mobileNumber: null,
+        profileCompleted: false,
+        isAdmin: false,
+      };
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.id);
+    const authUuid = isUuid ? auth.id : null;
+    const cleanEmail = auth.email?.toLowerCase().trim() || null;
+
+    const sql = getDb();
+    let profile: Record<string, unknown> | null = null;
+
+    if (sql) {
+      try {
+        if (authUuid) {
+          const [p] = await sql`
+            SELECT id, full_name, email, mobile_number, phone, profile_completed
+            FROM public.profiles
+            WHERE id = ${authUuid}::uuid
+            LIMIT 1
+          `;
+          if (p) profile = p;
+        }
+
+        if (!profile && cleanEmail) {
+          const [p] = await sql`
+            SELECT id, full_name, email, mobile_number, phone, profile_completed
+            FROM public.profiles
+            WHERE lower(email) = ${cleanEmail}
+            LIMIT 1
+          `;
+          if (p) profile = p;
+        }
+      } catch (dbErr) {
+        console.warn("[checkProfileCompletion] DB query note:", dbErr);
+      }
+    }
+
+    if (!profile) {
+      try {
+        const { data: p } = await supabaseAdmin
+          .from("profiles")
+          .select("id, full_name, email, mobile_number, phone, profile_completed")
+          .eq(authUuid ? "id" : "email", authUuid || cleanEmail || "")
+          .maybeSingle();
+        if (p) profile = p as unknown as Record<string, unknown>;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const fullName = (profile?.["full_name"] as string | null)?.trim() || null;
+    const rawMobile =
+      (profile?.["mobile_number"] as string | null) ||
+      (profile?.["phone"] as string | null) ||
+      null;
+    const cleanMobile = rawMobile ? rawMobile.replace(/\D/g, "").slice(-10) : null;
+    const hasValidName = Boolean(fullName && fullName.length >= 2 && fullName.toLowerCase() !== "customer");
+    const hasValidMobile = Boolean(cleanMobile && cleanMobile.length === 10);
+    const isCompleted = Boolean(profile?.["profile_completed"] || (hasValidName && hasValidMobile));
+
+    return {
+      authenticated: true,
+      userId: auth.id,
+      email: auth.email || null,
+      fullName,
+      mobileNumber: cleanMobile,
+      profileCompleted: isCompleted,
+      isAdmin: Boolean((auth as any).isAdmin),
+    };
+  });
+
+/**
+ * Server Function: Complete mandatory customer profile (full_name and 10-digit mobile number)
+ */
+export const completeCustomerProfileServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: {
+      authToken?: string | undefined;
+      fullName: string;
+      mobileNumber: string;
+      countryCode?: string | undefined;
+    }) => params,
+  )
+  .handler(async ({ data }) => {
+    const auth = await getAuthenticatedCustomerId(data.authToken);
+    if (!auth) {
+      throw new Error("Authentication required. Please sign in to complete your profile.");
+    }
+
+    const trimmedName = data.fullName.trim();
+    if (!trimmedName || trimmedName.length < 2) {
+      throw new Error("Please enter your full legal name (minimum 2 characters).");
+    }
+
+    // Normalize mobile number to exactly 10 digits
+    const cleanDigits = data.mobileNumber.replace(/\D/g, "");
+    const normalizedPhone = cleanDigits.length > 10 ? cleanDigits.slice(-10) : cleanDigits;
+
+    if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+      throw new Error("Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
+    }
+
+    const sql = getDb();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.id);
+    const authUuid = isUuid ? auth.id : null;
+    const cleanEmail = auth.email?.toLowerCase().trim() || null;
+
+    // 1. Enforce unique mobile number constraint across other customer accounts
+    if (sql) {
+      try {
+        const existingDuplicate = await sql`
+          SELECT id, email FROM public.profiles
+          WHERE (mobile_number = ${normalizedPhone} OR phone = ${normalizedPhone})
+            AND (${authUuid ? sql`id != ${authUuid}::uuid` : sql`true`})
+            AND (${cleanEmail ? sql`lower(email) != ${cleanEmail}` : sql`true`})
+          LIMIT 1
+        `;
+        if (existingDuplicate && existingDuplicate.length > 0) {
+          throw new Error(
+            "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
+          );
+        }
+      } catch (dupErr) {
+        if (dupErr instanceof Error && dupErr.message.includes("already registered")) {
+          throw dupErr;
+        }
+      }
+    }
+
+    // 2. Persist to public.profiles
+    let profileSaved = false;
+    if (sql && authUuid) {
+      try {
+        await sql`
+          INSERT INTO public.profiles (
+            id, email, full_name, mobile_number, phone, profile_completed, updated_at
+          ) VALUES (
+            ${authUuid}::uuid, ${cleanEmail}, ${trimmedName}, ${normalizedPhone}, ${normalizedPhone}, true, now()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            full_name = EXCLUDED.full_name,
+            mobile_number = EXCLUDED.mobile_number,
+            phone = EXCLUDED.phone,
+            profile_completed = true,
+            updated_at = now();
+        `;
+        profileSaved = true;
+      } catch (err: any) {
+        if (err?.code === "23505" || err?.message?.includes("idx_profiles_mobile_number_unique")) {
+          throw new Error(
+            "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
+          );
+        }
+        console.warn("[completeCustomerProfile] SQL profiles upsert notice:", err);
+      }
+    }
+
+    if (!profileSaved) {
+      const { error: upsertErr } = await (supabaseAdmin as any)
+        .from("profiles")
+        .upsert({
+          id: authUuid || auth.id,
+          email: cleanEmail,
+          full_name: trimmedName,
+          mobile_number: normalizedPhone,
+          phone: normalizedPhone,
+          profile_completed: true,
+          updated_at: new Date().toISOString(),
+        });
+
+      if (upsertErr) {
+        if (upsertErr.code === "23505" || upsertErr.message.includes("unique")) {
+          throw new Error(
+            "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
+          );
+        }
+        throw new Error(upsertErr.message || "Failed to save profile record.");
+      }
+    }
+
+    // 3. Mirror into public.customers for seamless order and address book synchronization
+    try {
+      await supabaseAdmin
+        .from("customers")
+        .upsert(
+          {
+            auth_provider_uid: auth.id,
+            full_name: trimmedName,
+            email: cleanEmail,
+            phone: normalizedPhone,
+            account_status: "active",
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "auth_provider_uid" },
+        );
+    } catch (custErr) {
+      console.warn("[completeCustomerProfile] customers sync notice:", custErr);
+    }
+
+    // 4. Update auth.users metadata if authenticated via Supabase GoTrue
+    if (sql && authUuid) {
+      try {
+        await sql`
+          UPDATE auth.users SET
+            updated_at = now(),
+            raw_user_meta_data = raw_user_meta_data || ${sql.json({
+              full_name: trimmedName,
+              name: trimmedName,
+              phone: normalizedPhone,
+              mobile_number: normalizedPhone,
+              profile_completed: true,
+            })}
+          WHERE id = ${authUuid}::uuid
+        `;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return {
+      success: true,
+      profile: {
+        id: auth.id,
+        fullName: trimmedName,
+        mobileNumber: normalizedPhone,
+        email: cleanEmail,
+        profileCompleted: true,
+      },
+    };
+  });
 
 /**
  * Server Function: Get customer profile
@@ -230,7 +478,7 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
         let profile = null;
         if (authUuid) {
           const [p] = await sql`
-            SELECT p.id, p.full_name, p.email, p.phone, p.avatar_url
+            SELECT p.id, p.full_name, p.email, p.phone, p.mobile_number, p.avatar_url, p.profile_completed
             FROM public.profiles p
             WHERE p.id = ${authUuid}::uuid
             LIMIT 1
@@ -240,7 +488,7 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
 
         if (!profile && cleanEmail) {
           const [p] = await sql`
-            SELECT p.id, p.full_name, p.email, p.phone, p.avatar_url
+            SELECT p.id, p.full_name, p.email, p.phone, p.mobile_number, p.avatar_url, p.profile_completed
             FROM public.profiles p
             WHERE lower(p.email) = ${cleanEmail}
             LIMIT 1
@@ -249,12 +497,22 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
         }
 
         if (profile) {
+          const fn = (profile["full_name"] as string | null) ?? null;
+          const mob = (profile["mobile_number"] as string | null) ?? (profile["phone"] as string | null) ?? null;
+          const cleanMob = mob ? mob.replace(/\D/g, "").slice(-10) : null;
+          const isDone = Boolean(
+            profile["profile_completed"] ||
+              (fn && fn.length >= 2 && fn !== "Customer" && cleanMob && cleanMob.length === 10),
+          );
+
           return {
             id: profile["id"] as string,
-            fullName: (profile["full_name"] as string | null) ?? null,
+            fullName: fn,
             email: (profile["email"] as string | null) ?? null,
-            phone: (profile["phone"] as string | null) ?? null,
+            phone: cleanMob,
+            mobileNumber: cleanMob,
             avatarUrl: (profile["avatar_url"] as string | null) ?? null,
+            profileCompleted: isDone,
           };
         }
 
@@ -272,12 +530,19 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
           LIMIT 1
         `;
         if (cust) {
+          const cfn = (cust["full_name"] as string | null) ?? null;
+          const cmob = (cust["phone"] as string | null) ?? null;
+          const cleanCmob = cmob ? cmob.replace(/\D/g, "").slice(-10) : null;
+          const isDone = Boolean(cfn && cfn.length >= 2 && cfn !== "Customer" && cleanCmob && cleanCmob.length === 10);
+
           return {
             id: cust["id"] as string,
-            fullName: (cust["full_name"] as string | null) ?? null,
+            fullName: cfn,
             email: (cust["email"] as string | null) ?? null,
-            phone: (cust["phone"] as string | null) ?? null,
+            phone: cleanCmob,
+            mobileNumber: cleanCmob,
             avatarUrl: (cust["profile_image"] as string | null) ?? null,
+            profileCompleted: isDone,
           };
         }
       } catch (dbErr) {
@@ -290,7 +555,9 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
       fullName: null,
       email: auth.email || null,
       phone: null,
+      mobileNumber: null,
       avatarUrl: null,
+      profileCompleted: false,
     };
   });
 
@@ -304,6 +571,7 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
       fullName?: string | undefined;
       email?: string | undefined;
       phone?: string | undefined;
+      mobileNumber?: string | undefined;
     }) => params,
   )
   .handler(async ({ data }) => {
@@ -317,7 +585,26 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
     const authUuid = isUuid ? auth.id : null;
     const cleanEmail = data.email?.toLowerCase().trim() || auth.email?.toLowerCase().trim() || null;
     const cleanName = data.fullName?.trim() || null;
-    const cleanPhone = data.phone?.replace(/\D/g, "").slice(-10) || null;
+    const rawPhone = data.mobileNumber || data.phone;
+    const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, "").slice(-10) : null;
+
+    if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
+      throw new Error("Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
+    }
+
+    // Check duplicate mobile if changing phone
+    if (cleanPhone && sql) {
+      const dup = await sql`
+        SELECT id FROM public.profiles
+        WHERE (mobile_number = ${cleanPhone} OR phone = ${cleanPhone})
+          AND (${authUuid ? sql`id != ${authUuid}::uuid` : sql`true`})
+          AND (${cleanEmail ? sql`lower(email) != ${cleanEmail}` : sql`true`})
+        LIMIT 1
+      `;
+      if (dup && dup.length > 0) {
+        throw new Error("This mobile number is already registered with another CAVENHURST account.");
+      }
+    }
 
     let updatedAny = false;
 
@@ -328,6 +615,7 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
           UPDATE public.profiles SET
             email = COALESCE(${cleanEmail}, email),
             full_name = COALESCE(${cleanName}, full_name),
+            mobile_number = COALESCE(${cleanPhone}, mobile_number),
             phone = COALESCE(${cleanPhone}, phone),
             updated_at = now()
           WHERE id = ${authUuid}::uuid
@@ -337,6 +625,7 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
         await sql`
           UPDATE public.profiles SET
             full_name = COALESCE(${cleanName}, full_name),
+            mobile_number = COALESCE(${cleanPhone}, mobile_number),
             phone = COALESCE(${cleanPhone}, phone),
             updated_at = now()
           WHERE lower(email) = ${cleanEmail}
@@ -371,7 +660,7 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
 
     // 3. Update auth.users if cleanEmail is provided and authUuid is valid
     try {
-      if (authUuid && (cleanEmail || cleanName)) {
+      if (authUuid && (cleanEmail || cleanName || cleanPhone)) {
         await sql`
           UPDATE auth.users SET
             email = COALESCE(${cleanEmail}, email),
@@ -379,7 +668,7 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
             raw_user_meta_data = raw_user_meta_data || ${sql.json({
               ...(cleanEmail ? { email: cleanEmail } : {}),
               ...(cleanName ? { full_name: cleanName, name: cleanName } : {}),
-              ...(cleanPhone ? { phone: cleanPhone } : {}),
+              ...(cleanPhone ? { phone: cleanPhone, mobile_number: cleanPhone } : {}),
             })}
           WHERE id = ${authUuid}::uuid
         `;

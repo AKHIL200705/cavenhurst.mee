@@ -80,7 +80,7 @@ type Address = {
 };
 
 function Account() {
-  const { user, sessionToken, ready, signOut } = useAuth();
+  const { user, sessionToken, ready, signOut, refreshProfile } = useAuth();
   const { cart, wishlist } = useStore();
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -328,6 +328,7 @@ function Account() {
       });
       toast.success("Profile details saved successfully!");
       setIsEditingProfile(false);
+      await refreshProfile();
       await loadData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update profile");

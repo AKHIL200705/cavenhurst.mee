@@ -186,18 +186,37 @@ function RootComponent() {
 }
 
 function AuthGate() {
-  const { user, ready, welcomeReady, welcomeSeen, welcomeError, retryWelcome, signOut } = useAuth();
+  const {
+    user,
+    ready,
+    welcomeReady,
+    welcomeSeen,
+    welcomeError,
+    retryWelcome,
+    signOut,
+    profileCompleted,
+    profileChecking,
+  } = useAuth();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const legal = path === "/terms" || path === "/privacy";
-  const checked = ready && (!user || welcomeReady);
-  const destination = accountDestination(Boolean(user), welcomeSeen);
+  const checked = ready && (!user || (welcomeReady && !profileChecking));
+  const destination = accountDestination(Boolean(user), welcomeSeen, profileCompleted, path);
   // The welcome flag only describes a welcome screen that is on screen right now.
   if (path !== "/welcome" && welcomeShown) resetWelcomeShown();
   const redirectNeeded =
     !legal &&
     !welcomeError &&
-    gateNeedsRedirect({ user, ready, welcomeReady, welcomeSeen, path, welcomeShown });
+    gateNeedsRedirect({
+      user,
+      ready,
+      welcomeReady,
+      welcomeSeen,
+      path,
+      welcomeShown,
+      profileCompleted,
+      profileChecking,
+    });
   useEffect(() => {
     if (redirectNeeded) void navigate({ to: destination, replace: true });
   }, [redirectNeeded, destination, navigate]);

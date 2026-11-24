@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Heart, Minus, Plus, Truck, Star } from "lucide-react";
+import { ChevronRight, Heart, Minus, Plus, Truck, Star, Rotate3d, ZoomIn, ZoomOut, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -86,10 +86,60 @@ function ProductPage() {
   const [reviewText, setReviewText] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
 
+  // 3D Multi-Angle Viewer & Zoom State
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [zoomActive, setZoomActive] = useState(false);
+  const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
+  const [specular, setSpecular] = useState({ x: 50, y: 50, opacity: 0 });
+
   const off = discountPercent(p.price, p.mrp);
   const stock = size ? (p.stock[size] ?? 0) : 0;
   const main = imageFor(p, color);
   const gallery = [main, ...p.images.filter((i) => i !== main), main, main].slice(0, 4);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    setIsDragging(true);
+    setDragStartX(e.clientX);
+    try {
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100));
+
+    if (isDragging) {
+      const deltaX = e.clientX - dragStartX;
+      const threshold = 35;
+      if (Math.abs(deltaX) > threshold) {
+        const step = deltaX > 0 ? -1 : 1;
+        setImg((prev) => (prev + step + gallery.length) % gallery.length);
+        setDragStartX(e.clientX);
+      }
+    } else {
+      setZoomPos({ x, y });
+      setSpecular({ x, y, opacity: 0.65 });
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    setIsDragging(false);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handlePointerLeave = () => {
+    setIsDragging(false);
+    setSpecular((prev) => ({ ...prev, opacity: 0 }));
+  };
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,32 +225,103 @@ function ProductPage() {
       </nav>
       <div className="grid gap-10 lg:grid-cols-2">
         <div className="min-w-0">
-          <div className="aspect-[4/5] overflow-hidden rounded-xl bg-paper">
+          {/* Multi-Angle 3D Product Viewer */}
+          <div
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onPointerLeave={handlePointerLeave}
+            className={cn(
+              "group relative aspect-[4/5] overflow-hidden rounded-2xl bg-paper select-none shadow-card touch-none",
+              isDragging ? "cursor-grabbing" : zoomActive ? "cursor-zoom-out" : "cursor-grab",
+            )}
+            title="Drag horizontally to rotate 360° | Click zoom to inspect texture"
+          >
+            {/* Specular lighting surface sheen */}
+            <div
+              className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-300"
+              style={{
+                background: `radial-gradient(circle at ${specular.x}% ${specular.y}%, rgba(255,255,255,0.28) 0%, rgba(199,209,223,0.08) 35%, transparent 70%)`,
+                opacity: specular.opacity,
+                mixBlendMode: "overlay",
+              }}
+            />
+
+            {/* Floating Luxury Product Badge */}
+            <div className="absolute top-4 left-4 z-20 pointer-events-none animate-float-badge">
+              <div className="flex items-center gap-2 rounded-full border border-silver/30 bg-black/60 px-3.5 py-1.5 text-[10px] font-mono tracking-widest text-silver backdrop-blur-md shadow-xl">
+                <span className="h-1.5 w-1.5 rounded-full bg-electric animate-ping" />
+                <Sparkles className="h-3 w-3 text-gold" />
+                <span>HERITAGE CRAFT • 260 GSM</span>
+              </div>
+            </div>
+
+            {/* Rotation Control Indicator */}
+            <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/55 px-3 py-1.5 text-[11px] text-white/90 backdrop-blur-md pointer-events-none shadow-md">
+              <Rotate3d className="h-3.5 w-3.5 text-silver" />
+              <span>Angle {img + 1}/4 (Drag to rotate)</span>
+            </div>
+
+            {/* Texture Zoom Toggle */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setZoomActive((v) => !v);
+              }}
+              className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/55 px-3 py-1.5 text-[11px] text-white/90 backdrop-blur-md hover:bg-black/75 transition shadow-md"
+            >
+              {zoomActive ? <ZoomOut className="h-3.5 w-3.5 text-silver" /> : <ZoomIn className="h-3.5 w-3.5 text-silver" />}
+              <span>{zoomActive ? "Reset Zoom" : "2x Zoom"}</span>
+            </button>
+
+            {/* Dynamic Interactive Product Image */}
             <img
               key={`${color}-${img}`}
               src={gallery[img]}
-              alt={p.name}
+              alt={`${p.name} perspective ${img + 1}`}
               width={800}
               height={1000}
-              className="h-full w-full object-cover animate-in fade-in"
+              draggable={false}
+              className={cn(
+                "h-full w-full object-cover transition-transform duration-300 ease-out",
+                zoomActive ? "scale-[2.2]" : "scale-100",
+              )}
+              style={
+                zoomActive
+                  ? {
+                      transformOrigin: `${zoomPos.x}% ${zoomPos.y}%`,
+                    }
+                  : undefined
+              }
             />
           </div>
-          <div className="mt-3 grid grid-cols-4 gap-3">
+
+          {/* Angle Thumbnails */}
+          <div className="mt-4 grid grid-cols-4 gap-3">
             {gallery.map((g, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => setImg(i)}
+                aria-label={`View angle ${i + 1}`}
                 className={cn(
-                  "aspect-square overflow-hidden rounded-lg border-2 border-transparent bg-paper",
-                  img === i && "border-electric",
+                  "group relative aspect-square overflow-hidden rounded-xl border-2 bg-paper transition-all",
+                  img === i
+                    ? "border-electric ring-2 ring-electric/30 scale-105 shadow-md"
+                    : "border-transparent opacity-75 hover:opacity-100",
                 )}
               >
                 <img
                   src={g}
-                  alt={`${p.name} view ${i + 1}`}
+                  alt={`${p.name} thumbnail ${i + 1}`}
                   loading="lazy"
                   className={cn("h-full w-full object-cover", i % 2 && "scale-x-[-1]")}
                 />
+                <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1 font-mono text-[9px] text-white">
+                  {i === 0 ? "Front" : i === 1 ? "Profile" : i === 2 ? "Back" : "Macro"}
+                </span>
               </button>
             ))}
           </div>

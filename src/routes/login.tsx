@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowRight, LoaderCircle, Eye, EyeOff, Lock, Mail, User, Phone, CheckCircle2 } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
@@ -59,13 +59,34 @@ function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [signupSuccessNote, setSignupSuccessNote] = useState<string | null>(null);
 
-  const { setGoogleSession } = useAuth();
+  const { setGoogleSession, refreshProfile } = useAuth();
+  const search = useSearch({ strict: false });
+  const returnTo = typeof (search as Record<string, unknown>)?.["returnTo"] === "string" ? (search as Record<string, unknown>)["returnTo"] as string : undefined;
   const navigate = useNavigate();
   const googleBtnContainerRef = useRef<HTMLDivElement>(null);
 
   const googleClientId = ((import.meta.env["VITE_GOOGLE_CLIENT_ID"] || "") as string)
     .replace(/^["']|["']$/g, "")
     .trim();
+
+  const handlePostLoginRedirect = useCallback(
+    async (isAdmin: boolean) => {
+      if (isAdmin) {
+        await navigate({ to: "/admin" });
+        return;
+      }
+      const isCompleted = await refreshProfile();
+      if (!isCompleted) {
+        await navigate({
+          to: "/complete-profile",
+          search: { returnTo },
+        });
+      } else {
+        await navigate({ to: returnTo || "/account" });
+      }
+    },
+    [navigate, refreshProfile, returnTo],
+  );
 
   // Handle verified Google response
   const handleGoogleSuccess = useCallback(
@@ -82,12 +103,7 @@ function Login() {
             res.sessionToken,
           );
           toast.success("Welcome! Signed in with Google.");
-
-          if (res.isAdmin) {
-            await navigate({ to: "/admin" });
-          } else {
-            await navigate({ to: "/account" });
-          }
+          await handlePostLoginRedirect(Boolean(res.isAdmin));
         } else {
           toast.error("Google authentication failed. Please try again.");
         }
@@ -98,7 +114,7 @@ function Login() {
         setGoogleLoading(false);
       }
     },
-    [setGoogleSession, navigate],
+    [setGoogleSession, handlePostLoginRedirect],
   );
 
   // Initialize Google Identity Services (GIS)
@@ -244,7 +260,7 @@ function Login() {
           }
 
           toast.success(`Welcome to CAVENHURST, ${cleanName}!`);
-          await navigate({ to: "/account" });
+          await handlePostLoginRedirect(false);
         } else {
           // Email confirmation is required by Supabase Auth project configuration
           setSignupSuccessNote(
@@ -313,11 +329,7 @@ function Login() {
         const isAdminEmail =
           userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail);
 
-        if (isAdminEmail) {
-          await navigate({ to: "/admin" });
-        } else {
-          await navigate({ to: "/account" });
-        }
+        await handlePostLoginRedirect(Boolean(isAdminEmail));
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Sign in failed. Please try again.";
@@ -401,7 +413,7 @@ function Login() {
       toast.error(error.message || "Invalid or expired code.");
     } else {
       toast.success("Welcome back!");
-      void navigate({ to: "/account" });
+      void handlePostLoginRedirect(false);
     }
   };
 

@@ -15,6 +15,7 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as CartRouteImport } from './routes/cart'
 import { Route as CheckoutRouteImport } from './routes/checkout'
+import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FaqsRouteImport } from './routes/faqs'
 import { Route as LoginRouteImport } from './routes/login'
@@ -58,6 +59,11 @@ const CartRoute = CartRouteImport.update({
 const CheckoutRoute = CheckoutRouteImport.update({
   id: '/checkout',
   path: '/checkout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompleteProfileRoute = CompleteProfileRouteImport.update({
+  id: '/complete-profile',
+  path: '/complete-profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ContactRoute = ContactRouteImport.update({
@@ -138,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/contact': typeof ContactRoute
   '/faqs': typeof FaqsRoute
   '/login': typeof LoginRoute
@@ -160,6 +167,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRouteWithChildren
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/contact': typeof ContactRoute
   '/faqs': typeof FaqsRoute
   '/login': typeof LoginRoute
@@ -183,6 +191,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/cart': typeof CartRoute
   '/checkout': typeof CheckoutRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/contact': typeof ContactRoute
   '/faqs': typeof FaqsRoute
   '/login': typeof LoginRoute
@@ -207,6 +216,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/cart'
     | '/checkout'
+    | '/complete-profile'
     | '/contact'
     | '/faqs'
     | '/login'
@@ -229,6 +239,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/cart'
     | '/checkout'
+    | '/complete-profile'
     | '/contact'
     | '/faqs'
     | '/login'
@@ -251,6 +262,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/cart'
     | '/checkout'
+    | '/complete-profile'
     | '/contact'
     | '/faqs'
     | '/login'
@@ -274,6 +286,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   CartRoute: typeof CartRoute
   CheckoutRoute: typeof CheckoutRoute
+  CompleteProfileRoute: typeof CompleteProfileRoute
   ContactRoute: typeof ContactRoute
   FaqsRoute: typeof FaqsRoute
   LoginRoute: typeof LoginRoute
@@ -331,6 +344,13 @@ declare module '@tanstack/react-router' {
       path: '/checkout'
       fullPath: '/checkout'
       preLoaderRoute: typeof CheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/complete-profile': {
+      id: '/complete-profile'
+      path: '/complete-profile'
+      fullPath: '/complete-profile'
+      preLoaderRoute: typeof CompleteProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/contact': {
@@ -451,6 +471,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   CartRoute: CartRoute,
   CheckoutRoute: CheckoutRoute,
+  CompleteProfileRoute: CompleteProfileRoute,
   ContactRoute: ContactRoute,
   FaqsRoute: FaqsRoute,
   LoginRoute: LoginRoute,

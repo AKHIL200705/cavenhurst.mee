@@ -1581,6 +1581,8 @@ interface DbProfileRow {
   id: string;
   email: string | null;
   phone: string | null;
+  mobile_number?: string | null;
+  profile_completed?: boolean | null;
   full_name: string | null;
   auth_provider: string | null;
   account_status: string | null;
@@ -1616,7 +1618,7 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
             LIMIT 200
           `,
           sql<DbProfileRow[]>`
-            SELECT id, email, phone, full_name, auth_provider, account_status, created_at, updated_at
+            SELECT id, email, phone, mobile_number, profile_completed, full_name, auth_provider, account_status, created_at, updated_at
             FROM profiles
           `,
           sql<DbOrderSummaryRow[]>`
@@ -1627,7 +1629,7 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
         const profileMap = new Map((profiles || []).map((p) => [p.id, p]));
         const profileEmailMap = new Map((profiles || []).map((p) => [p.email?.toLowerCase(), p]));
 
-        return (customers || []).map((c) => {
+        const list = (customers || []).map((c) => {
           const matchedProfile =
             (c.auth_provider_uid ? profileMap.get(c.auth_provider_uid) : null) ||
             (c.email ? profileEmailMap.get(c.email.toLowerCase()) : null);
@@ -1640,13 +1642,23 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
           );
 
           const totalSpent = customerOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+          const mobile = matchedProfile?.mobile_number || matchedProfile?.phone || c.phone || "";
+          const isCompleted =
+            matchedProfile?.profile_completed != null
+              ? matchedProfile.profile_completed
+              : Boolean(
+                  (c.full_name || matchedProfile?.full_name) &&
+                    mobile.replace(/\D/g, "").slice(-10).length === 10,
+                );
 
           return {
             id: c.id,
             authUid: matchedProfile?.id || c.auth_provider_uid,
             name: c.full_name || matchedProfile?.full_name || "Customer",
             email: c.email || matchedProfile?.email || "",
-            phone: c.phone || matchedProfile?.phone || "",
+            phone: mobile,
+            mobileNumber: mobile,
+            profileCompleted: isCompleted,
             loginProvider: matchedProfile?.auth_provider || "email",
             orderCount: customerOrders.length,
             totalSpent,
@@ -1655,6 +1667,39 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
             lastLogin: matchedProfile?.updated_at || c.updated_at || null,
           };
         });
+
+        // Add any registered profiles not yet mirrored into customers table
+        const seenAuth = new Set(list.map((item) => item.authUid).filter(Boolean));
+        for (const p of profiles || []) {
+          if (!seenAuth.has(p.id)) {
+            const mobile = p.mobile_number || p.phone || "";
+            const isCompleted =
+              p.profile_completed != null
+                ? p.profile_completed
+                : Boolean(p.full_name && mobile.replace(/\D/g, "").slice(-10).length === 10);
+            const customerOrders = (orders || []).filter(
+              (o) => o.user_id === p.id || (p.email && o.customer_email?.toLowerCase() === p.email.toLowerCase()),
+            );
+            list.push({
+              id: p.id,
+              authUid: p.id,
+              name: p.full_name || "Customer",
+              email: p.email || "",
+              phone: mobile,
+              mobileNumber: mobile,
+              profileCompleted: isCompleted,
+              loginProvider: p.auth_provider || "email",
+              orderCount: customerOrders.length,
+              totalSpent: customerOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0),
+              status: p.account_status || "active",
+              createdAt: p.created_at,
+              lastLogin: p.updated_at || null,
+            });
+            seenAuth.add(p.id);
+          }
+        }
+
+        return list;
       } catch (err) {
         console.error("[Admin Customers] Direct DB error, falling back to Supabase client:", err);
       }
@@ -1670,14 +1715,14 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
         .limit(200),
       supabaseAdmin
         .from("profiles")
-        .select("id, email, phone, full_name, auth_provider, account_status, created_at, updated_at"),
+        .select("id, email, phone, mobile_number, profile_completed, full_name, auth_provider, account_status, created_at, updated_at"),
       supabaseAdmin
         .from("orders")
         .select("id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status, created_at"),
     ]);
 
     const orders = ordersRes.data || [];
-    const profiles = profilesRes.data || [];
+    const profiles = (profilesRes.data || []) as unknown as DbProfileRow[];
     const profileMap = new Map(profiles.map((p) => [p.id, p]));
     const profileEmailMap = new Map(profiles.map((p) => [p.email?.toLowerCase(), p]));
 
@@ -1694,13 +1739,23 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
       );
 
       const totalSpent = customerOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+      const mobile = matchedProfile?.mobile_number || matchedProfile?.phone || c.phone || "";
+      const isCompleted =
+        matchedProfile?.profile_completed != null
+          ? matchedProfile.profile_completed
+          : Boolean(
+              (c.full_name || matchedProfile?.full_name) &&
+                mobile.replace(/\D/g, "").slice(-10).length === 10,
+            );
 
       return {
         id: c.id,
         authUid: matchedProfile?.id || c.auth_provider_uid,
         name: c.full_name || matchedProfile?.full_name || "Customer",
         email: c.email || matchedProfile?.email || "",
-        phone: c.phone || matchedProfile?.phone || "",
+        phone: mobile,
+        mobileNumber: mobile,
+        profileCompleted: isCompleted,
         loginProvider: matchedProfile?.auth_provider || "email",
         orderCount: customerOrders.length,
         totalSpent,
@@ -1709,6 +1764,37 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
         lastLogin: matchedProfile?.updated_at || c.updated_at || null,
       };
     });
+
+    // Add any registered profiles not yet mirrored into customers table
+    const seenAuth = new Set(customerList.map((item) => item.authUid).filter(Boolean));
+    for (const p of profiles) {
+      if (!seenAuth.has(p.id)) {
+        const mobile = p.mobile_number || p.phone || "";
+        const isCompleted =
+          p.profile_completed != null
+            ? p.profile_completed
+            : Boolean(p.full_name && mobile.replace(/\D/g, "").slice(-10).length === 10);
+        const customerOrders = orders.filter(
+          (o) => o.user_id === p.id || (p.email && o.customer_email?.toLowerCase() === p.email.toLowerCase()),
+        );
+        customerList.push({
+          id: p.id,
+          authUid: p.id,
+          name: p.full_name || "Customer",
+          email: p.email || "",
+          phone: mobile,
+          mobileNumber: mobile,
+          profileCompleted: isCompleted,
+          loginProvider: p.auth_provider || "email",
+          orderCount: customerOrders.length,
+          totalSpent: customerOrders.reduce((sum, o) => sum + (o.total || 0), 0),
+          status: p.account_status || "active",
+          createdAt: p.created_at,
+          lastLogin: p.updated_at || null,
+        });
+        seenAuth.add(p.id);
+      }
+    }
 
     return customerList;
   });

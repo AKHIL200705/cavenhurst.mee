@@ -1,6 +1,23 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { formatINR } from "@/lib/pricing";
-import { Search, RefreshCw, Mail, Phone, Download, Eye, MapPin, Package, CreditCard, X, Loader2 } from "lucide-react";
+import {
+  Search,
+  RefreshCw,
+  Mail,
+  Phone,
+  Download,
+  Eye,
+  MapPin,
+  Package,
+  CreditCard,
+  X,
+  Loader2,
+  Copy,
+  CheckCircle2,
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { getAdminCustomerDetailsServerFn } from "@/server/admin";
 import { toast } from "sonner";
 
@@ -9,6 +26,8 @@ export interface AdminCustomerItem {
   name: string;
   email: string;
   phone: string;
+  mobileNumber?: string | null | undefined;
+  profileCompleted?: boolean | null | undefined;
   loginProvider?: string | null | undefined;
   orderCount: number;
   totalSpent: number;
@@ -28,6 +47,8 @@ interface CustomersTabProps {
 export function CustomersTab({ customers, loading, onRefresh, authToken }: CustomersTabProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [customerDetails, setCustomerDetails] = useState<{
@@ -37,21 +58,45 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     payments: any[];
   } | null>(null);
 
-  const filtered = customers.filter((c) => {
-    const matchesSearch =
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.email.toLowerCase().includes(search.toLowerCase()) ||
-      c.phone.includes(search) ||
-      (c.authUid && c.authUid.toLowerCase().includes(search.toLowerCase()));
+  // Filter customers based on search query and status dropdown
+  const filtered = useMemo(() => {
+    return customers.filter((c) => {
+      const q = search.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
+        c.phone.includes(q) ||
+        (c.mobileNumber && c.mobileNumber.includes(q)) ||
+        (c.authUid && c.authUid.toLowerCase().includes(q)) ||
+        c.id.toLowerCase().includes(q);
 
-    if (!matchesSearch) return false;
+      if (!matchesSearch) return false;
 
-    if (statusFilter === "with_orders") return c.orderCount > 0;
-    if (statusFilter === "active") return c.status === "active";
-    if (statusFilter === "inactive") return c.status !== "active";
+      if (statusFilter === "profile_completed") return c.profileCompleted === true;
+      if (statusFilter === "profile_incomplete") return c.profileCompleted !== true;
+      if (statusFilter === "with_orders") return c.orderCount > 0;
+      if (statusFilter === "active") return c.status === "active";
+      if (statusFilter === "inactive") return c.status !== "active";
 
-    return true;
-  });
+      return true;
+    });
+  }, [customers, search, statusFilter]);
+
+  // Pagination slice
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const paginatedCustomers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
+  const handleCopy = (text: string, label: string) => {
+    if (!text) return;
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast.success(`Copied ${label} to clipboard`))
+      .catch(() => toast.error("Could not copy to clipboard"));
+  };
 
   const handleExportCSV = () => {
     if (filtered.length === 0) {
@@ -62,22 +107,26 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     const headers = [
       "Customer Name",
       "Email Address",
-      "Phone",
-      "Auth Provider / UID",
-      "Account Status",
+      "Mobile / Contact Number",
+      "Profile Status",
+      "Auth Provider",
+      "Auth UUID",
       "Total Orders",
-      "Total Spent (INR)",
+      "Lifetime Spend (INR)",
+      "Account Status",
       "Registration Date",
     ];
 
     const rows = filtered.map((c) => [
       `"${c.name.replace(/"/g, '""')}"`,
       `"${c.email.replace(/"/g, '""')}"`,
-      `"${c.phone.replace(/"/g, '""')}"`,
-      `"${(c.authUid || c.loginProvider || "").replace(/"/g, '""')}"`,
-      `"${c.status || "active"}"`,
+      `"${(c.mobileNumber || c.phone || "").replace(/"/g, '""')}"`,
+      `"${c.profileCompleted ? "Completed" : "Incomplete"}"`,
+      `"${(c.loginProvider || "email").replace(/"/g, '""')}"`,
+      `"${(c.authUid || c.id).replace(/"/g, '""')}"`,
       c.orderCount,
       c.totalSpent,
+      `"${c.status || "active"}"`,
       `"${c.createdAt ? new Date(c.createdAt).toLocaleDateString("en-IN") : ""}"`,
     ]);
 
@@ -86,7 +135,10 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `cavenhurst-customers-${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute(
+      "download",
+      `cavenhurst-customers-${new Date().toISOString().slice(0, 10)}.csv`,
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -113,29 +165,37 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">Customer Directory & Management</h2>
+          <h2 className="font-serif text-xl italic text-foreground">Customer Directory & Management</h2>
           <p className="text-xs text-muted-foreground">
-            Authoritative customer identities, contact parameters, lifetime expenditures, and order history.
+            Authoritative customer identities, mobile verification status, lifetime expenditures, and order history.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <div className="relative w-64">
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, email, phone, UID..."
-              className="w-full rounded-md border border-input bg-card px-3 py-1.5 pr-8 text-xs outline-none focus:border-gold"
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
+              placeholder="Search name, email, phone, UUID..."
+              className="w-full rounded-md border border-input bg-card px-3 py-1.5 pr-8 text-xs text-foreground outline-none focus:border-electric"
             />
             <Search className="absolute right-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
           </div>
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-md border border-input bg-card px-3 py-1.5 text-xs outline-none"
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="rounded-md border border-input bg-card px-3 py-1.5 text-xs text-foreground outline-none"
           >
-            <option value="all">All Customers</option>
+            <option value="all">All Customers ({customers.length})</option>
+            <option value="profile_completed">✓ Profile Completed</option>
+            <option value="profile_incomplete">⚠ Profile Incomplete</option>
             <option value="with_orders">Has Orders (&gt;0)</option>
             <option value="active">Active Accounts</option>
             <option value="inactive">Inactive Accounts</option>
@@ -143,14 +203,14 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
 
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-accent"
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition"
           >
             <Download className="h-3.5 w-3.5" /> Export CSV
           </button>
 
           <button
             onClick={onRefresh}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold hover:bg-accent"
+            className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition"
           >
             <RefreshCw className="h-3.5 w-3.5" /> Refresh
           </button>
@@ -164,103 +224,212 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
               <tr>
                 <th className="p-3.5">Customer Name</th>
                 <th className="p-3.5">Email Address</th>
-                <th className="p-3.5">Contact Phone</th>
+                <th className="p-3.5">Mobile Number</th>
+                <th className="p-3.5 text-center">Profile Status</th>
                 <th className="p-3.5">Auth UID / Provider</th>
                 <th className="p-3.5 text-center">Orders</th>
                 <th className="p-3.5 text-right">Lifetime Spend</th>
-                <th className="p-3.5 text-center">Status</th>
-                <th className="p-3.5 text-right">Joined</th>
+                <th className="p-3.5 text-center">Account</th>
+                <th className="p-3.5 text-right">Registered</th>
                 <th className="p-3.5 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-silver">
+                  <td colSpan={10} className="p-8 text-center text-silver">
                     <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
                     Querying customer records...
                   </td>
                 </tr>
-              ) : filtered.length === 0 ? (
+              ) : paginatedCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-muted-foreground italic">
-                    No customers found matching search query.
+                  <td colSpan={10} className="p-8 text-center text-muted-foreground italic">
+                    No customers found matching search criteria.
                   </td>
                 </tr>
               ) : (
-                filtered.map((c) => (
-                  <tr key={c.id} className="hover:bg-accent/20 transition">
-                    <td className="p-3.5 font-semibold text-foreground">{c.name}</td>
-                    <td className="p-3.5 text-muted-foreground">
-                      {c.email ? (
-                        <span className="flex items-center gap-1.5">
-                          <Mail className="h-3 w-3 text-silver" /> {c.email}
+                paginatedCustomers.map((c) => {
+                  const displayPhone = c.mobileNumber || c.phone;
+                  const cleanPhone = displayPhone ? displayPhone.replace(/\D/g, "").slice(-10) : "";
+
+                  return (
+                    <tr key={c.id} className="hover:bg-accent/20 transition">
+                      {/* Name */}
+                      <td className="p-3.5 font-semibold text-foreground">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-[11px] font-bold text-foreground">
+                            {c.name ? c.name.charAt(0).toUpperCase() : "C"}
+                          </div>
+                          <span>{c.name}</span>
+                        </div>
+                      </td>
+
+                      {/* Email */}
+                      <td className="p-3.5 text-muted-foreground">
+                        {c.email ? (
+                          <span className="flex items-center gap-1.5">
+                            <Mail className="h-3 w-3 text-silver" /> {c.email}
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+
+                      {/* Mobile Number */}
+                      <td className="p-3.5 text-muted-foreground">
+                        {cleanPhone ? (
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <Phone className="h-3 w-3 text-silver" />
+                            <span>+91 {cleanPhone}</span>
+                            <button
+                              onClick={() => handleCopy(`+91${cleanPhone}`, "mobile number")}
+                              title="Copy mobile number"
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              <Copy className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground/60 italic">Not provided</span>
+                        )}
+                      </td>
+
+                      {/* Profile Status */}
+                      <td className="p-3.5 text-center">
+                        {c.profileCompleted ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-500">
+                            <CheckCircle2 className="h-3 w-3" /> Completed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-500">
+                            <AlertCircle className="h-3 w-3" /> Incomplete
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Auth UID & Provider */}
+                      <td className="p-3.5 font-mono text-[11px] text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-bold uppercase">
+                            {c.loginProvider || "AUTH"}
+                          </span>
+                          <span className="truncate max-w-[100px]" title={c.authUid || c.id}>
+                            {(c.authUid || c.id).slice(0, 8)}...
+                          </span>
+                          <button
+                            onClick={() => handleCopy(c.authUid || c.id, "customer UUID")}
+                            title="Copy customer UUID"
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Copy className="h-2.5 w-2.5" />
+                          </button>
+                        </div>
+                      </td>
+
+                      {/* Orders */}
+                      <td className="p-3.5 text-center font-mono font-semibold">
+                        <span className="rounded-full bg-secondary/80 px-2 py-0.5 text-[11px]">
+                          {c.orderCount}
                         </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="p-3.5 text-muted-foreground">
-                      {c.phone ? (
-                        <span className="flex items-center gap-1.5">
-                          <Phone className="h-3 w-3 text-silver" /> {c.phone}
+                      </td>
+
+                      {/* Lifetime Spend */}
+                      <td className="p-3.5 text-right font-mono font-semibold text-foreground">
+                        {formatINR(c.totalSpent)}
+                      </td>
+
+                      {/* Status */}
+                      <td className="p-3.5 text-center">
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            c.status === "active"
+                              ? "bg-emerald-500/10 text-emerald-500"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {c.status || "active"}
                         </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="p-3.5 font-mono text-[11px] text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
-                        <span className="rounded bg-secondary px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                          {c.loginProvider || "AUTH"}
-                        </span>
-                        <span className="truncate max-w-[120px]" title={c.authUid || ""}>
-                          {c.authUid ? c.authUid.slice(0, 12) + "..." : "—"}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3.5 text-center font-mono font-semibold">
-                      <span className="rounded-full bg-secondary/80 px-2 py-0.5 text-[11px]">
-                        {c.orderCount}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right font-mono font-semibold text-foreground">
-                      {formatINR(c.totalSpent)}
-                    </td>
-                    <td className="p-3.5 text-center">
-                      <span
-                        className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                          c.status === "active"
-                            ? "bg-emerald-500/10 text-emerald-500"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {c.status || "active"}
-                      </span>
-                    </td>
-                    <td className="p-3.5 text-right text-muted-foreground">
-                      {c.createdAt
-                        ? new Date(c.createdAt).toLocaleDateString("en-IN", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : "—"}
-                    </td>
-                    <td className="p-3.5 text-center">
-                      <button
-                        onClick={() => handleViewDetails(c.id)}
-                        className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-semibold hover:bg-accent text-primary"
-                      >
-                        <Eye className="h-3 w-3" /> Details
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+
+                      {/* Registered Date */}
+                      <td className="p-3.5 text-right text-muted-foreground">
+                        {c.createdAt
+                          ? new Date(c.createdAt).toLocaleDateString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })
+                          : "—"}
+                      </td>
+
+                      {/* Actions */}
+                      <td className="p-3.5 text-center">
+                        <button
+                          onClick={() => handleViewDetails(c.id)}
+                          className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] font-semibold hover:bg-accent text-primary"
+                        >
+                          <Eye className="h-3 w-3" /> Details
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Toolbar */}
+        {!loading && filtered.length > 0 && (
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing {(currentPage - 1) * pageSize + 1} to{" "}
+                {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} customers
+              </span>
+              <span className="mx-1">•</span>
+              <span>Rows per page:</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="rounded border border-input bg-card px-2 py-0.5 text-xs text-foreground outline-none"
+              >
+                <option value={10}>10</option>
+                <option value={15}>15</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                disabled={currentPage <= 1}
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                className="rounded p-1.5 border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Previous Page"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+
+              <span className="px-2 font-mono">
+                {currentPage} / {totalPages}
+              </span>
+
+              <button
+                disabled={currentPage >= totalPages}
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded p-1.5 border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+                aria-label="Next Page"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Customer Details Modal */}
@@ -302,7 +471,9 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-mono">Contact Phone</span>
-                    <p className="font-semibold text-foreground">{customerDetails.customer.phone || "—"}</p>
+                    <p className="font-semibold text-foreground font-mono">
+                      {customerDetails.customer.phone ? `+91 ${customerDetails.customer.phone.replace(/\D/g, "").slice(-10)}` : "—"}
+                    </p>
                   </div>
                   <div>
                     <span className="text-[10px] text-muted-foreground uppercase font-mono">Auth UID / Sub</span>
@@ -318,55 +489,65 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                     <MapPin className="h-4 w-4 text-primary" /> Saved Address Book ({customerDetails.addresses.length})
                   </h4>
                   {customerDetails.addresses.length === 0 ? (
-                    <p className="text-muted-foreground italic">No addresses saved in address book.</p>
+                    <p className="text-muted-foreground italic bg-muted/10 p-3 rounded-lg border border-border">
+                      No addresses saved on file.
+                    </p>
                   ) : (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {customerDetails.addresses.map((a: any) => (
-                        <div key={a.id} className="rounded-lg border border-border p-3 space-y-1">
-                          <div className="flex items-center justify-between font-semibold">
-                            <span>{a.full_name}</span>
-                            {a.is_default && (
-                              <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded font-mono">
-                                DEFAULT
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {customerDetails.addresses.map((addr: any) => (
+                        <div key={addr.id} className="rounded-lg border border-border bg-card p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-foreground">{addr.full_name}</span>
+                            {addr.is_default && (
+                              <span className="rounded bg-primary/20 px-1.5 py-0.5 text-[9px] font-bold text-primary uppercase">
+                                Default
                               </span>
                             )}
                           </div>
-                          <p className="text-muted-foreground">{a.phone}</p>
-                          <p>{a.address_line1}{a.address_line2 ? `, ${a.address_line2}` : ""}</p>
-                          <p className="text-muted-foreground">{a.city}, {a.state} - {a.postal_code}</p>
+                          <p className="text-muted-foreground font-mono">{addr.phone}</p>
+                          <p className="text-muted-foreground">{addr.address_line1}</p>
+                          {addr.address_line2 && <p className="text-muted-foreground">{addr.address_line2}</p>}
+                          <p className="text-muted-foreground">
+                            {addr.city}, {addr.state} - {addr.postal_code}
+                          </p>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
 
-                {/* Orders */}
+                {/* Orders History */}
                 <div>
                   <h4 className="font-bold flex items-center gap-1.5 text-sm mb-3">
                     <Package className="h-4 w-4 text-primary" /> Order History ({customerDetails.orders.length})
                   </h4>
                   {customerDetails.orders.length === 0 ? (
-                    <p className="text-muted-foreground italic">No orders placed yet.</p>
+                    <p className="text-muted-foreground italic bg-muted/10 p-3 rounded-lg border border-border">
+                      No orders placed yet.
+                    </p>
                   ) : (
                     <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-                      {customerDetails.orders.map((o: any) => (
-                        <div key={o.id} className="p-3 flex items-center justify-between hover:bg-accent/10">
+                      {customerDetails.orders.map((ord: any) => (
+                        <div key={ord.id} className="flex items-center justify-between p-3 bg-card hover:bg-accent/10 transition">
                           <div>
-                            <span className="font-mono font-bold text-foreground">#{o.order_number || o.id.slice(0, 8)}</span>
-                            <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                              {o.status}
+                            <span className="font-mono font-bold text-foreground">
+                              #{ord.order_number || ord.id.slice(0, 8)}
                             </span>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {new Date(o.created_at).toLocaleDateString("en-IN", {
+                            <span className="ml-2 text-muted-foreground">
+                              {new Date(ord.created_at).toLocaleDateString("en-IN", {
                                 day: "numeric",
                                 month: "short",
                                 year: "numeric",
                               })}
-                            </p>
+                            </span>
                           </div>
-                          <div className="text-right">
-                            <span className="font-mono font-bold">{formatINR(o.total)}</span>
-                            <p className="text-[11px] text-silver capitalize">{o.payment_status || "Pending"}</p>
+                          <div className="flex items-center gap-4">
+                            <span className="font-mono font-bold text-foreground">
+                              {formatINR(ord.total)}
+                            </span>
+                            <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase font-mono">
+                              {ord.status}
+                            </span>
                           </div>
                         </div>
                       ))}
@@ -377,30 +558,28 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                 {/* Payments */}
                 <div>
                   <h4 className="font-bold flex items-center gap-1.5 text-sm mb-3">
-                    <CreditCard className="h-4 w-4 text-primary" /> Payment Records ({customerDetails.payments.length})
+                    <CreditCard className="h-4 w-4 text-primary" /> Payment Transactions ({customerDetails.payments.length})
                   </h4>
                   {customerDetails.payments.length === 0 ? (
-                    <p className="text-muted-foreground italic">No payment transactions recorded.</p>
+                    <p className="text-muted-foreground italic bg-muted/10 p-3 rounded-lg border border-border">
+                      No payment transaction logs available.
+                    </p>
                   ) : (
                     <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-                      {customerDetails.payments.map((p: any) => (
-                        <div key={p.id} className="p-3 flex items-center justify-between hover:bg-accent/10">
+                      {customerDetails.payments.map((pmt: any) => (
+                        <div key={pmt.id} className="flex items-center justify-between p-3 bg-card">
                           <div>
                             <span className="font-mono font-bold text-foreground">
-                              {p.razorpay_payment_id || p.id.slice(0, 8)}
+                              {pmt.payment_gateway.toUpperCase()} • {pmt.transaction_id || pmt.id.slice(0, 8)}
                             </span>
-                            <span className="ml-2 rounded bg-secondary px-1.5 py-0.5 text-[10px] font-bold uppercase">
-                              {p.status}
-                            </span>
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                              {p.payment_method?.toUpperCase()} via {p.gateway}
-                            </p>
                           </div>
-                          <div className="text-right">
-                            <span className="font-mono font-bold">{formatINR(p.amount)}</span>
-                            <p className="text-[11px] text-muted-foreground">
-                              {new Date(p.created_at).toLocaleDateString("en-IN")}
-                            </p>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-bold text-foreground">
+                              {formatINR(pmt.amount)}
+                            </span>
+                            <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-500">
+                              {pmt.status}
+                            </span>
                           </div>
                         </div>
                       ))}
@@ -409,18 +588,6 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                 </div>
               </div>
             ) : null}
-
-            <div className="flex justify-end pt-4 border-t border-border">
-              <button
-                onClick={() => {
-                  setSelectedCustomerId(null);
-                  setCustomerDetails(null);
-                }}
-                className="rounded-md border border-border px-4 py-2 text-xs font-semibold hover:bg-accent"
-              >
-                Close
-              </button>
-            </div>
           </div>
         </div>
       )}
