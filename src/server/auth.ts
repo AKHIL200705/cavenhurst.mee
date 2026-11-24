@@ -5,6 +5,7 @@ import {
   generateSixDigitOtp,
   sendEmailJsOtp,
   createOrUpdateOtpRecord,
+  deleteOtpRecord,
   verifyOtpRecord,
 } from "./otp";
 
@@ -438,12 +439,16 @@ export const sendRegistrationOtpServerFn = createServerFn({ method: "POST" })
     // Send OTP via EmailJS
     const emailRes = await sendEmailJsOtp({
       toEmail: cleanEmail,
+      toName: cleanName,
       otp,
+      purpose: "registration",
       expiryMinutes: 5,
     });
 
     if (!emailRes.success) {
-      throw new Error(emailRes.error || "Failed to deliver OTP email.");
+      // Rollback database record so customer is not locked in cooldown
+      await deleteOtpRecord(cleanEmail, "registration");
+      throw new Error(emailRes.error || "We couldn't send your verification code. Please try again.");
     }
 
     return {
@@ -451,6 +456,7 @@ export const sendRegistrationOtpServerFn = createServerFn({ method: "POST" })
       email: cleanEmail,
       cooldownSeconds: 60,
       expiryMinutes: 5,
+      message: "Verification code sent to your email address.",
     };
   });
 
@@ -720,17 +726,20 @@ export const sendForgotPasswordOtpServerFn = createServerFn({ method: "POST" })
     const emailRes = await sendEmailJsOtp({
       toEmail: cleanEmail,
       otp,
+      purpose: "forgot_password",
       expiryMinutes: 5,
     });
 
     if (!emailRes.success) {
-      throw new Error(emailRes.error || "Failed to deliver reset email.");
+      await deleteOtpRecord(cleanEmail, "forgot_password");
+      throw new Error(emailRes.error || "We couldn't send your verification code. Please try again.");
     }
 
     return {
       success: true,
       email: cleanEmail,
       cooldownSeconds: 60,
+      message: "Verification code sent to your email address.",
     };
   });
 

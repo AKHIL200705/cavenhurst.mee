@@ -2802,3 +2802,70 @@ export const adminLoginServerFn = createServerFn({ method: "POST" })
     };
   });
 
+// -----------------------------------------------------------------------------
+// 19. EMAIL DELIVERY DIAGNOSTICS (ADMIN)
+// -----------------------------------------------------------------------------
+
+export const getAdminEmailDiagnosticsServerFn = createServerFn({ method: "POST" })
+  .validator((params?: AdminAuthParams | undefined) => params || {})
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data?.authToken);
+
+    const sql = getDb();
+    if (!sql) return [];
+
+    try {
+      const logs = await sql<any[]>`
+        SELECT 
+          id,
+          recipient_masked,
+          purpose,
+          otp_generated,
+          backend_status,
+          emailjs_status,
+          emailjs_http_status,
+          error_category,
+          diagnostic_message,
+          created_at
+        FROM public.email_delivery_diagnostics
+        ORDER BY created_at DESC
+        LIMIT 50
+      `;
+      return logs || [];
+    } catch (err) {
+      console.warn("[Admin Diagnostics Fetch Notice]:", err);
+      return [];
+    }
+  });
+
+export const testAdminEmailDeliveryServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; testEmail: string }) => params)
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+
+    const testEmail = (data.testEmail || "").toLowerCase().trim();
+    if (!testEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail)) {
+      throw new Error("Please enter a valid test recipient email address.");
+    }
+
+    const { sendEmailJsOtp, generateSixDigitOtp } = await import("./otp");
+    const testOtp = generateSixDigitOtp();
+
+    const result = await sendEmailJsOtp({
+      toEmail: testEmail,
+      toName: "Admin Diagnostic Test",
+      otp: testOtp,
+      purpose: "test",
+      expiryMinutes: 5,
+    });
+
+    return {
+      success: result.success,
+      httpStatus: result.httpStatus,
+      errorCategory: result.errorCategory,
+      message: result.success
+        ? "Test email successfully accepted by EmailJS API (HTTP 200)."
+        : `Email delivery test failed: ${result.error}`,
+    };
+  });
+

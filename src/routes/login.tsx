@@ -356,11 +356,11 @@ function Login() {
         setOtpTimerSec(300); // 5 mins
         setResendCooldownSec(60);
         setOtpDigits(["", "", "", "", "", ""]);
-        toast.success(`Verification code sent to ${cleanEmail}`);
+        toast.success("Verification code sent to your email address.");
         setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to send verification code.";
+      const msg = err instanceof Error ? err.message : "We couldn't send your verification code. Please try again.";
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -424,11 +424,11 @@ function Login() {
         setOtpTimerSec(300);
         setResendCooldownSec(60);
         setOtpDigits(["", "", "", "", "", ""]);
-        toast.success("New verification code dispatched to your email.");
+        toast.success("Verification code sent to your email address.");
         otpInputRefs.current[0]?.focus();
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to resend code.";
+      const msg = err instanceof Error ? err.message : "We couldn't send your verification code. Please try again.";
       toast.error(msg);
     } finally {
       setBusy(false);

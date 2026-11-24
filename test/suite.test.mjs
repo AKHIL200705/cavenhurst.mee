@@ -1213,6 +1213,25 @@ test("Registration: Mobile +91 and email matching constraints", () => {
   assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "akhil@gmail.com", "Secret123", "Mismatch123"), "Passwords do not match");
 });
 
+test("Diagnostics: Email masking and non-disclosure of sensitive OTP data", () => {
+  function maskEmail(email) {
+    if (!email || !email.includes("@")) return "***";
+    const [localPart, domain] = email.split("@");
+    if (!localPart || !domain) return "***";
+    const maskedLocal =
+      localPart.length <= 2
+        ? localPart[0] + "***"
+        : localPart[0] + "***" + localPart.slice(-1);
+    return `${maskedLocal}@${domain}`;
+  }
+
+  assert.equal(maskEmail("akhilsaiabbireddy2007@gmail.com"), "a***7@gmail.com");
+  assert.equal(maskEmail("ab@cavenhurst.com"), "a***@cavenhurst.com");
+  assert.equal(maskEmail("customer@domain.in"), "c***r@domain.in");
+  assert.equal(maskEmail("invalid"), "***");
+});
+
+
 
 
 

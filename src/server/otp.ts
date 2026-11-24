@@ -12,6 +12,66 @@ function getEmailJsConfig() {
 }
 
 /**
+ * Mask an email address for safe diagnostics without exposing PII (e.g., a***l@gmail.com).
+ */
+export function maskEmail(email: string): string {
+  if (!email || !email.includes("@")) return "***";
+  const [localPart, domain] = email.split("@");
+  if (!localPart || !domain) return "***";
+  const maskedLocal =
+    localPart.length <= 2
+      ? localPart[0] + "***"
+      : localPart[0] + "***" + localPart.slice(-1);
+  return `${maskedLocal}@${domain}`;
+}
+
+/**
+ * Logs a safe diagnostic record to public.email_delivery_diagnostics.
+ * NEVER stores OTPs, passwords, or secrets.
+ */
+export async function logEmailDiagnostic(params: {
+  recipient: string;
+  purpose: string;
+  otpGenerated: boolean;
+  backendStatus: "SUCCESS" | "FAILED";
+  emailjsStatus: "SUCCESS" | "FAILED";
+  emailjsHttpStatus?: number;
+  errorCategory?: string;
+  diagnosticMessage: string;
+}) {
+  const sql = getDb();
+  if (!sql) return;
+
+  try {
+    await sql`
+      INSERT INTO public.email_delivery_diagnostics (
+        recipient_masked,
+        purpose,
+        otp_generated,
+        backend_status,
+        emailjs_status,
+        emailjs_http_status,
+        error_category,
+        diagnostic_message,
+        created_at
+      ) VALUES (
+        ${maskEmail(params.recipient)},
+        ${params.purpose},
+        ${params.otpGenerated},
+        ${params.backendStatus},
+        ${params.emailjsStatus},
+        ${params.emailjsHttpStatus || null},
+        ${params.errorCategory || null},
+        ${params.diagnosticMessage},
+        now()
+      )
+    `;
+  } catch (err) {
+    console.warn("[Diagnostics Logging Notice]:", err);
+  }
+}
+
+/**
  * Generates a cryptographically secure 6-digit numerical OTP.
  */
 export function generateSixDigitOtp(): string {
@@ -22,8 +82,7 @@ export function generateSixDigitOtp(): string {
  * Creates a salted SHA-256 hash of the OTP for secure database storage.
  */
 export function hashOtp(otp: string, email: string): string {
-  const salt = (process.env["SESSION_SECRET"] || "cavenhurst_default_secret_salt")
-    .slice(0, 32);
+  const salt = (process.env["SESSION_SECRET"] || "cavenhurst_default_secret_salt").slice(0, 32);
   return crypto
     .createHmac("sha256", salt)
     .update(`${email.toLowerCase().trim()}:${otp.trim()}`)
@@ -32,37 +91,71 @@ export function hashOtp(otp: string, email: string): string {
 
 /**
  * Sends an OTP email through EmailJS REST API.
+ * Maps all standard template parameters to prevent blank or unresolved variables.
  */
 export async function sendEmailJsOtp(params: {
   toEmail: string;
+  toName?: string;
   otp: string;
+  purpose?: string;
   expiryMinutes?: number;
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{
+  success: boolean;
+  error?: string;
+  httpStatus?: number;
+  errorCategory?: string;
+}> {
   const { serviceId, templateId, publicKey, privateKey } = getEmailJsConfig();
+  const purpose = params.purpose || "registration";
 
   if (!serviceId || !templateId || !publicKey) {
-    console.error("[EmailJS] Missing credentials in server environment variables.");
+    const errorMsg =
+      "Email delivery service is not configured. Missing EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, or EMAILJS_PUBLIC_KEY in environment.";
+    console.error("[EmailJS Config Error]:", errorMsg);
+
+    await logEmailDiagnostic({
+      recipient: params.toEmail,
+      purpose,
+      otpGenerated: true,
+      backendStatus: "FAILED",
+      emailjsStatus: "FAILED",
+      errorCategory: "MISSING_ENV_VARS",
+      diagnosticMessage: errorMsg,
+    });
+
     return {
       success: false,
-      error: "Email delivery service is not configured. Please check server environment settings.",
+      error: errorMsg,
+      errorCategory: "MISSING_ENV_VARS",
     };
   }
 
   const expiryText = `${params.expiryMinutes || 5} minutes`;
+  const displayName = params.toName || "Customer";
+
+  // Comprehensive template params covering every possible EmailJS variable configuration
+  const templateParams = {
+    to_email: params.toEmail,
+    email: params.toEmail,
+    recipient: params.toEmail,
+    user_email: params.toEmail,
+    to_name: displayName,
+    name: displayName,
+    user_name: displayName,
+    otp: params.otp,
+    code: params.otp,
+    passcode: params.otp,
+    verification_code: params.otp,
+    expiry: expiryText,
+    expiry_minutes: params.expiryMinutes || 5,
+  };
+
   const payload = {
     service_id: serviceId,
     template_id: templateId,
     user_id: publicKey,
     ...(privateKey ? { accessToken: privateKey } : {}),
-    template_params: {
-      to_email: params.toEmail,
-      email: params.toEmail,
-      otp: params.otp,
-      code: params.otp,
-      passcode: params.otp,
-      expiry: expiryText,
-      expiry_minutes: params.expiryMinutes || 5,
-    },
+    template_params: templateParams,
   };
 
   try {
@@ -80,30 +173,78 @@ export async function sendEmailJsOtp(params: {
       const errText = await res.text().catch(() => "");
       console.error("[EmailJS Error]:", res.status, errText);
 
+      let category = "API_ERROR";
+      let userFriendlyError = `Failed to deliver verification email (${res.status}): ${errText || res.statusText}`;
+
       if (errText.includes("Invalid grant")) {
-        return {
-          success: false,
-          error: "Email service connection needs re-authorization in EmailJS dashboard (Gmail grant expired).",
-        };
+        category = "GMAIL_AUTH_EXPIRED";
+        userFriendlyError =
+          "Email service authorization expired. Please reconnect your Gmail account in the EmailJS dashboard.";
+      } else if (errText.includes("API access from non-browser environments")) {
+        category = "NON_BROWSER_BLOCKED";
+        userFriendlyError =
+          "Server email access is disabled. Please enable 'Allow EmailJS API for non-browser applications' in EmailJS Account Security.";
+      } else if (res.status === 400 || res.status === 404) {
+        category = "INVALID_CONFIG";
+        userFriendlyError = `Invalid EmailJS configuration: ${errText || "Service ID or Template ID not found."}`;
+      } else if (res.status === 429) {
+        category = "RATE_LIMIT";
+        userFriendlyError = "Email sending quota reached for today. Please try again later.";
       }
-      if (errText.includes("API access from non-browser environments")) {
-        return {
-          success: false,
-          error: "Server email access is disabled. Please enable 'Allow EmailJS API for non-browser applications' in EmailJS Account Security.",
-        };
-      }
+
+      await logEmailDiagnostic({
+        recipient: params.toEmail,
+        purpose,
+        otpGenerated: true,
+        backendStatus: "FAILED",
+        emailjsStatus: "FAILED",
+        emailjsHttpStatus: res.status,
+        errorCategory: category,
+        diagnosticMessage: errText || res.statusText,
+      });
+
       return {
         success: false,
-        error: `Failed to deliver verification email (${res.status}): ${errText || res.statusText}`,
+        error: userFriendlyError,
+        httpStatus: res.status,
+        errorCategory: category,
       };
     }
 
-    return { success: true };
+    // Success response from EmailJS API
+    await logEmailDiagnostic({
+      recipient: params.toEmail,
+      purpose,
+      otpGenerated: true,
+      backendStatus: "SUCCESS",
+      emailjsStatus: "SUCCESS",
+      emailjsHttpStatus: 200,
+      errorCategory: "NONE",
+      diagnosticMessage: "Email accepted by EmailJS API for delivery.",
+    });
+
+    return {
+      success: true,
+      httpStatus: 200,
+    };
   } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Network error connecting to email service.";
     console.error("[EmailJS Fetch Error]:", err);
+
+    await logEmailDiagnostic({
+      recipient: params.toEmail,
+      purpose,
+      otpGenerated: true,
+      backendStatus: "FAILED",
+      emailjsStatus: "FAILED",
+      errorCategory: "NETWORK_EXCEPTION",
+      diagnosticMessage: errorMsg,
+    });
+
     return {
       success: false,
-      error: err instanceof Error ? err.message : "Failed to connect to email delivery service.",
+      error: errorMsg,
+      errorCategory: "NETWORK_EXCEPTION",
     };
   }
 }
@@ -128,7 +269,6 @@ export async function createOrUpdateOtpRecord(params: {
   const now = new Date();
 
   try {
-    // Check existing OTP for this email and purpose
     const [existing] = await sql<any[]>`
       SELECT id, otp_hash, attempts, resend_count, last_sent_at, expires_at, created_at
       FROM public.email_verification_otps
@@ -160,7 +300,6 @@ export async function createOrUpdateOtpRecord(params: {
         };
       }
 
-      // Reset or increment resend counter depending on 15m window
       const newResendCount = firstCreatedAt > fifteenMinutesAgo ? existing.resend_count + 1 : 1;
       const newCreatedAt = firstCreatedAt > fifteenMinutesAgo ? existing.created_at : now.toISOString();
 
@@ -189,6 +328,23 @@ export async function createOrUpdateOtpRecord(params: {
   } catch (err) {
     console.error("[OTP Store Error]:", err);
     return { success: false, error: "Database error recording verification code." };
+  }
+}
+
+/**
+ * Removes an unverified OTP record if email dispatch failed.
+ * Prevents locking the customer into a cooldown when delivery was unsuccessful.
+ */
+export async function deleteOtpRecord(email: string, purpose: string): Promise<void> {
+  const sql = getDb();
+  if (!sql) return;
+  try {
+    await sql`
+      DELETE FROM public.email_verification_otps
+      WHERE lower(email) = ${email.toLowerCase().trim()} AND purpose = ${purpose}
+    `;
+  } catch (err) {
+    console.warn("[OTP Rollback Notice]:", err);
   }
 }
 
