@@ -3,7 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProduct, type Size } from "@/lib/products";
 import { computeTotals } from "@/lib/pricing";
-import { verifyGoogleSessionOrToken } from "./auth-helpers";
+import { verifyGoogleSessionOrToken, isWhitelistedAdminEmail } from "./auth-helpers";
 import {
   createRazorpayOrder,
   confirmVerifiedPayment,
@@ -93,17 +93,37 @@ async function getServerSessionUser(): Promise<{
 }
 
 /**
- * Checks if a user has administrator privileges in user_roles.
+ * Checks if a user has administrator privileges in user_roles, admin_users, or whitelist.
  */
-async function checkIsUserAdmin(userId: string): Promise<boolean> {
+async function checkIsUserAdmin(userId: string, email?: string | null): Promise<boolean> {
+  if (email && isWhitelistedAdminEmail(email)) return true;
   try {
-    const { data } = await supabaseAdmin
+    const { data: roleData } = await supabaseAdmin
       .from("user_roles")
       .select("role")
-      .eq("user_id", userId)
+      .or(`user_id.eq.${userId}${email ? `,user_id.eq.${email}` : ""}`)
       .eq("role", "admin")
       .maybeSingle();
-    return Boolean(data);
+    if (roleData) return true;
+
+    if (email) {
+      const { data: adminUser } = await supabaseAdmin
+        .from("admin_users")
+        .select("id")
+        .or(`email.eq.${email},auth_user_id.eq.${userId}`)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (adminUser) return true;
+
+      const { data: whitelist } = await supabaseAdmin
+        .from("admin_whitelist")
+        .select("email")
+        .eq("email", email)
+        .maybeSingle();
+      if (whitelist) return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -733,7 +753,7 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
       throw new Error("Unauthorized: Admin authentication required.");
     }
 
-    const isAdmin = await checkIsUserAdmin(authUser.id);
+    const isAdmin = await checkIsUserAdmin(authUser.id, authUser.email);
     if (!isAdmin) {
       throw new Error("Forbidden: Access restricted to CAVENHURST administrators.");
     }

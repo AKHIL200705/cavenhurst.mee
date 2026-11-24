@@ -399,7 +399,26 @@ function AdminDashboard() {
       }
     } catch (err) {
       console.error("[Admin Data Fetch Error]", err);
-      toast.error(err instanceof Error ? err.message : "Failed to load dashboard data");
+      const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
+      const userEmail = user?.email?.toLowerCase();
+      if (
+        msg.includes("Forbidden") &&
+        userEmail &&
+        ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail)
+      ) {
+        try {
+          const fresh = await adminLoginServerFn({ data: { email: userEmail } });
+          if (fresh.sessionToken) {
+            localStorage.setItem("cavenhurst_admin_token", fresh.sessionToken);
+            setAuthToken(fresh.sessionToken);
+            toast.info("Refreshed administrator session. Reloading data...");
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
