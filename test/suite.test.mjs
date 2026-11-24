@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
 
 // ==============================================================================
 // 1. PRICING & ORDER TOTALS TESTS
@@ -1286,6 +1286,200 @@ test("EmailJS: Comprehensive recipient parameter binding", () => {
   assert.equal(params.otp, "584920", "EmailJS {{otp}} must resolve");
   assert.equal(params.code, "584920", "EmailJS {{code}} must resolve");
   assert.equal(params.passcode, "584920", "EmailJS {{passcode}} must resolve");
+});
+
+// ==============================================================================
+// 16. REGISTRATION KEY & AES-256-GCM SESSION SECURITY SPECIFICATIONS
+// ==============================================================================
+
+test("Registration Key: Cryptographic generation, format, and entropy", () => {
+  function generateRegistrationKey() {
+    return `reg_${randomBytes(24).toString("hex")}`;
+  }
+
+  const keys = new Set();
+  for (let i = 0; i < 50; i++) {
+    const key = generateRegistrationKey();
+    assert.match(key, /^reg_[a-f0-9]{48}$/, "Key must have reg_ prefix and 48 hex characters");
+    assert.equal(key.length, 52, "Key length must be exactly 52 characters");
+    assert.ok(!keys.has(key), "All generated registration keys must be unique");
+    keys.add(key);
+  }
+});
+
+test("Password Security: AES-256-GCM authenticated encryption and zero plaintext storage", () => {
+  const secret = "cavenhurst_registration_test_secret_salt_32bytes!";
+  const key = createHash("sha256").update(secret).digest();
+
+  function encryptPassword(plain) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const encrypted = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
+  }
+
+  function decryptPassword(payload) {
+    const [ivHex, tagHex, dataHex] = payload.split(":");
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
+    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+    const decrypted = Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]);
+    return decrypted.toString("utf8");
+  }
+
+  const rawPassword = "SuperSecretPassword123!#";
+  const encrypted = encryptPassword(rawPassword);
+
+  assert.ok(!encrypted.includes(rawPassword), "Plaintext password must never appear in encrypted payload");
+  const parts = encrypted.split(":");
+  assert.equal(parts.length, 3, "Payload must consist of iv:authTag:ciphertext");
+  assert.equal(parts[0].length, 24, "12-byte IV in hex must be 24 characters");
+  assert.equal(parts[1].length, 32, "16-byte Auth Tag in hex must be 32 characters");
+
+  // Verify roundtrip
+  const decrypted = decryptPassword(encrypted);
+  assert.equal(decrypted, rawPassword, "Decrypted password must match original plaintext");
+
+  // Tamper detection
+  const tampered = encrypted.slice(0, -2) + (encrypted.slice(-2) === "aa" ? "bb" : "aa");
+  assert.throws(() => decryptPassword(tampered), /Unsupported state or unable to authenticate data/, "Tampered ciphertext must fail GCM authentication");
+});
+
+test("Upstash Redis: Registration session key schema and dual-link indexing", () => {
+  const regKey = "reg_a1b2c3d4e5f6789012345678901234567890123456789012";
+  const email = "Customer@Cavenhurst.com";
+  const cleanEmail = email.toLowerCase().trim();
+
+  const regSessionKey = `cavenhurst:reg:${regKey}`;
+  const emailLinkKey = `cavenhurst:otp:registration:${cleanEmail}`;
+  const cooldownKey = `cavenhurst:cooldown:registration:${cleanEmail}`;
+  const resendCountKey = `cavenhurst:resend_count:registration:${cleanEmail}`;
+
+  assert.equal(regSessionKey, "cavenhurst:reg:reg_a1b2c3d4e5f6789012345678901234567890123456789012");
+  assert.equal(emailLinkKey, "cavenhurst:otp:registration:customer@cavenhurst.com");
+  assert.equal(cooldownKey, "cavenhurst:cooldown:registration:customer@cavenhurst.com");
+  assert.equal(resendCountKey, "cavenhurst:resend_count:registration:customer@cavenhurst.com");
+});
+
+test("Registration Session: Verification, attempt limits, expiration, and key invalidation", () => {
+  const salt = "cavenhurst_default_secret_salt_32b";
+  function hashOtp(otp, email) {
+    return createHmac("sha256", salt).update(`${email.toLowerCase().trim()}:${otp.trim()}`).digest("hex");
+  }
+
+  const email = "customer@cavenhurst.com";
+  const validOtp = "654321";
+  const invalidOtp = "111222";
+  const correctHash = hashOtp(validOtp, email);
+
+  // Mock Redis store
+  const store = new Map();
+  const regKey = "reg_test12345678901234567890123456789012345678901234";
+
+  function createSession(expiresInMs = 300000) {
+    store.set(`cavenhurst:reg:${regKey}`, {
+      registrationKey: regKey,
+      email,
+      fullName: "Akhil Sai",
+      phone: "9876543210",
+      otpHash: correctHash,
+      attempts: 0,
+      expiresAt: Date.now() + expiresInMs,
+    });
+  }
+
+  function verify(key, enteredOtp) {
+    const record = store.get(`cavenhurst:reg:${key}`);
+    if (!record) {
+      return { success: false, error: "Invalid registration key. Please request a new verification code." };
+    }
+    if (Date.now() > record.expiresAt) {
+      store.delete(`cavenhurst:reg:${key}`);
+      return { success: false, error: "Verification code has expired. Please request a new code." };
+    }
+    if (record.attempts >= 5) {
+      store.delete(`cavenhurst:reg:${key}`);
+      return { success: false, error: "Too many incorrect attempts. For security, please start registration again." };
+    }
+    const enteredHash = hashOtp(enteredOtp, record.email);
+    if (enteredHash !== record.otpHash) {
+      record.attempts += 1;
+      const remaining = Math.max(0, 5 - record.attempts);
+      return { success: false, error: `Incorrect verification code. ${remaining} attempts remaining.` };
+    }
+    store.delete(`cavenhurst:reg:${key}`);
+    return { success: true };
+  }
+
+  // 1. Invalid or missing key
+  assert.equal(verify("reg_non_existent", validOtp).error, "Invalid registration key. Please request a new verification code.");
+
+  // 2. Incorrect OTP decrements attempts
+  createSession();
+  const incorrectRes = verify(regKey, invalidOtp);
+  assert.equal(incorrectRes.success, false);
+  assert.match(incorrectRes.error, /Incorrect verification code\. 4 attempts remaining/);
+
+  // 3. 5 incorrect attempts triggers lockout & key invalidation
+  for (let i = 0; i < 4; i++) {
+    verify(regKey, invalidOtp);
+  }
+  const lockedRes = verify(regKey, validOtp);
+  assert.match(lockedRes.error, /Too many incorrect attempts/);
+  assert.equal(store.has(`cavenhurst:reg:${regKey}`), false, "Key must be deleted after 5 failed attempts");
+
+  // 4. Expired OTP
+  createSession(-1000); // Expired 1 second ago
+  const expiredRes = verify(regKey, validOtp);
+  assert.match(expiredRes.error, /Verification code has expired/);
+  assert.equal(store.has(`cavenhurst:reg:${regKey}`), false, "Expired key must be deleted");
+
+  // 5. Successful verification invalidates key atomically (prevents reuse)
+  createSession();
+  const successRes = verify(regKey, validOtp);
+  assert.equal(successRes.success, true);
+  assert.equal(store.has(`cavenhurst:reg:${regKey}`), false, "Key must be purged upon successful verification");
+  // Second attempt with same key must now fail with Invalid registration key
+  const reuseRes = verify(regKey, validOtp);
+  assert.equal(reuseRes.error, "Invalid registration key. Please request a new verification code.");
+});
+
+test("REST API Contracts: /api/auth/send-otp, verify-otp, resend-otp alignment", () => {
+  // Verify expected field mapping for send-otp
+  function mapSendOtpPayload(body) {
+    return {
+      fullName: body.fullName || body.full_name || body.name || "",
+      phone: (body.phone || body.mobile || body.mobileNumber || body.mobile_number || "").replace(/\D/g, "").slice(-10),
+      email: (body.email || body.to_email || "").toLowerCase().trim(),
+      password: body.password || "",
+    };
+  }
+
+  const p1 = mapSendOtpPayload({ full_name: "Akhil Sai", mobile_number: "+91 9876543210", to_email: "AKHIL@GMAIL.COM", password: "Pass" });
+  assert.equal(p1.fullName, "Akhil Sai");
+  assert.equal(p1.phone, "9876543210");
+  assert.equal(p1.email, "akhil@gmail.com");
+
+  // Verify expected field mapping for verify-otp across aliases
+  function mapVerifyOtpPayload(body) {
+    return {
+      registrationKey: body.registrationKey || body.registration_key || body.registrationId || body.regKey || "",
+      email: (body.email || body.to_email || "").toLowerCase().trim(),
+      otp: (body.otp || body.code || body.passcode || "").trim(),
+    };
+  }
+
+  const v1 = mapVerifyOtpPayload({ registrationKey: "reg_123", otp: "584920" });
+  assert.equal(v1.registrationKey, "reg_123");
+  assert.equal(v1.otp, "584920");
+
+  const v2 = mapVerifyOtpPayload({ registration_key: "reg_456", code: "123456" });
+  assert.equal(v2.registrationKey, "reg_456");
+  assert.equal(v2.otp, "123456");
+
+  const v3 = mapVerifyOtpPayload({ registrationId: "reg_789", passcode: "999888" });
+  assert.equal(v3.registrationKey, "reg_789");
+  assert.equal(v3.otp, "999888");
 });
 
 

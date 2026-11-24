@@ -371,207 +371,39 @@ export interface SendRegistrationOtpInput {
 export const sendRegistrationOtpServerFn = createServerFn({ method: "POST" })
   .validator((input: SendRegistrationOtpInput) => input)
   .handler(async ({ data }) => {
-    const cleanName = (data.fullName || "").trim();
-    const cleanEmail = (data.email || "").toLowerCase().trim();
-    const cleanPhone = (data.phone || "").replace(/\D/g, "").slice(-10);
-    const password = data.password || "";
-    const confirmPassword = data.confirmPassword || "";
-
-    if (!cleanName || cleanName.length < 2) {
-      throw new Error("Please enter your full legal name (at least 2 characters).");
-    }
-
-    if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
-      throw new Error("Please enter a valid 10-digit Indian mobile number (starting with 6, 7, 8, or 9).");
-    }
-
-    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      throw new Error("Please enter a valid email address.");
-    }
-
-    if (password.length < 6) {
-      throw new Error("Password must be at least 6 characters long.");
-    }
-
-    if (confirmPassword && password !== confirmPassword) {
-      throw new Error("Passwords do not match. Please verify your password.");
-    }
-
-    // Duplicate account verification
-    const sql = getDb();
-    if (sql) {
-      const [existingEmail] = await sql<any[]>`
-        SELECT id FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
-      `;
-      if (existingEmail) {
-        throw new Error("An account with this email address already exists. Please log in.");
-      }
-
-      const [existingPhone] = await sql<any[]>`
-        SELECT id FROM public.profiles 
-        WHERE right(regexp_replace(COALESCE(phone, mobile_number, ''), '\D', 'g'), 10) = ${cleanPhone}
-        LIMIT 1
-      `;
-      if (existingPhone) {
-        throw new Error("An account with this mobile number already exists. Please log in.");
-      }
-    }
-
-    // Generate secure 6-digit OTP
-    const otp = generateSixDigitOtp();
-
-    // Store hashed OTP in database
-    const storeRes = await createOrUpdateOtpRecord({
-      email: cleanEmail,
-      otp,
-      purpose: "registration",
-      metadata: {
-        fullName: cleanName,
-        phone: cleanPhone,
-        password,
-      },
-    });
-
-    if (!storeRes.success) {
-      throw new Error(storeRes.error || "Failed to process verification code.");
-    }
-
-    // Send OTP via EmailJS
-    const emailRes = await sendEmailJsOtp({
-      toEmail: cleanEmail,
-      toName: cleanName,
-      otp,
-      purpose: "registration",
-      expiryMinutes: 5,
-    });
-
-    if (!emailRes.success) {
-      // Rollback database record so customer is not locked in cooldown
-      await deleteOtpRecord(cleanEmail, "registration");
-      throw new Error(emailRes.error || "We couldn't send your verification code. Please try again.");
-    }
-
-    return {
-      success: true,
-      email: cleanEmail,
-      cooldownSeconds: 60,
-      expiryMinutes: 5,
-      message: "Verification code sent to your email address.",
-    };
+    const { executeSendRegistrationOtp } = await import("./auth-api.server");
+    return executeSendRegistrationOtp(data);
   });
 
 export interface VerifyRegistrationOtpInput {
-  email: string;
+  email?: string | undefined;
+  registrationKey?: string | undefined;
+  registration_key?: string | undefined;
+  registrationId?: string | undefined;
+  regKey?: string | undefined;
   otp: string;
 }
 
 export const verifyRegistrationOtpServerFn = createServerFn({ method: "POST" })
   .validator((input: VerifyRegistrationOtpInput) => input)
   .handler(async ({ data }) => {
-    const cleanEmail = (data.email || "").toLowerCase().trim();
-    const cleanOtp = (data.otp || "").trim();
+    const { executeVerifyRegistrationOtp } = await import("./auth-api.server");
+    return executeVerifyRegistrationOtp(data);
+  });
 
-    if (!cleanEmail || !cleanOtp) {
-      throw new Error("Email address and 6-digit code are required.");
-    }
+export interface ResendRegistrationOtpInput {
+  email?: string | undefined;
+  registrationKey?: string | undefined;
+  registration_key?: string | undefined;
+  registrationId?: string | undefined;
+  regKey?: string | undefined;
+}
 
-    const verifyRes = await verifyOtpRecord({
-      email: cleanEmail,
-      otp: cleanOtp,
-      purpose: "registration",
-    });
-
-    if (!verifyRes.success) {
-      throw new Error(verifyRes.error || "Invalid or expired verification code.");
-    }
-
-    const metadata = (verifyRes.metadata || {}) as {
-      fullName?: string;
-      phone?: string;
-      password?: string;
-    };
-
-    if (!metadata.password) {
-      throw new Error("Registration session expired. Please start registration again.");
-    }
-
-    const fullName = metadata.fullName || "Customer";
-    const phone = metadata.phone || "";
-    const password = metadata.password;
-
-    // Create user securely via Supabase Admin API with confirmed email
-    const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-      email: cleanEmail,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        full_name: fullName,
-        name: fullName,
-        phone,
-        mobile_number: phone,
-        profile_completed: true,
-        email_verified: true,
-      },
-    });
-
-    if (createErr || !newUser?.user) {
-      console.error("[Create User Error]:", createErr);
-      throw new Error(`Registration failed: ${createErr?.message || "Could not create user account"}`);
-    }
-
-    const userId = newUser.user.id;
-
-    // Ensure public.profiles and public.customers are explicitly synchronized
-    const sql = getDb();
-    if (sql) {
-      try {
-        await sql`
-          UPDATE public.profiles SET
-            phone = ${phone},
-            mobile_number = ${phone},
-            full_name = ${fullName},
-            profile_completed = true,
-            account_status = 'active',
-            updated_at = now()
-          WHERE id = ${userId}
-        `;
-        await sql`
-          UPDATE public.customers SET
-            phone = ${phone},
-            full_name = ${fullName},
-            account_status = 'active',
-            updated_at = now()
-          WHERE id = ${userId}::uuid OR email = ${cleanEmail}
-        `;
-      } catch (syncErr) {
-        console.warn("[Profile Sync Warning]:", syncErr);
-      }
-    }
-
-    const isAdmin = isWhitelistedAdminEmail(cleanEmail);
-    const sessionToken = await signSessionToken({
-      sub: userId,
-      email: cleanEmail,
-      name: fullName,
-      picture: null,
-      isAdmin,
-    });
-
-    const user = formatAuthUser({
-      sub: userId,
-      email: cleanEmail,
-      name: fullName,
-      picture: null,
-      isAdmin,
-    });
-
-    return {
-      success: true,
-      sessionToken,
-      user,
-      isAdmin,
-      redirectTo: "/",
-    };
+export const resendRegistrationOtpServerFn = createServerFn({ method: "POST" })
+  .validator((input: ResendRegistrationOtpInput) => input)
+  .handler(async ({ data }) => {
+    const { executeResendRegistrationOtp } = await import("./auth-api.server");
+    return executeResendRegistrationOtp(data);
   });
 
 export interface LoginWithPhoneEmailInput {

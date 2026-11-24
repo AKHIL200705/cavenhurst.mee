@@ -80,6 +80,66 @@ export function generateSixDigitOtp(): string {
 }
 
 /**
+ * Generates a cryptographically secure registration identifier.
+ * Format: reg_<48 hex characters>
+ */
+export function generateRegistrationKey(): string {
+  return `reg_${crypto.randomBytes(24).toString("hex")}`;
+}
+
+/**
+ * Returns a 32-byte key derived from the session secret for AES-256-GCM authenticated encryption.
+ */
+function getEncryptionKey(): Buffer {
+  const secret = process.env["SESSION_SECRET"] || "cavenhurst_registration_secret_encryption_salt_key_32b";
+  return crypto.createHash("sha256").update(secret).digest();
+}
+
+/**
+ * Encrypts a customer's password during pending OTP registration using AES-256-GCM.
+ * Never stores plaintext passwords in Redis, database, or browser storage.
+ */
+export function encryptPendingPassword(password: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(password, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${iv.toString("hex")}:${tag.toString("hex")}:${encrypted.toString("hex")}`;
+}
+
+/**
+ * Decrypts a customer's password only upon verified OTP completion.
+ */
+export function decryptPendingPassword(payload: string): string {
+  const parts = (payload || "").split(":");
+  if (parts.length !== 3) {
+    throw new Error("Invalid encrypted password payload format");
+  }
+  const [ivHex, tagHex, dataHex] = parts as [string, string, string];
+  const key = getEncryptionKey();
+  const iv = Buffer.from(ivHex, "hex");
+  const tag = Buffer.from(tagHex, "hex");
+  const data = Buffer.from(dataHex, "hex");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
+  return decrypted.toString("utf8");
+}
+
+export interface PendingRegistrationRecord {
+  registrationKey: string;
+  email: string;
+  fullName: string;
+  phone: string;
+  encryptedPassword: string;
+  otpHash: string;
+  attempts: number;
+  createdAt: number;
+  expiresAt: number;
+}
+
+/**
  * Creates a salted SHA-256 hash of the OTP for secure storage in Upstash Redis.
  */
 export function hashOtp(otp: string, email: string): string {
@@ -578,5 +638,630 @@ export async function verifyOtpRecord(params: {
   } catch (err) {
     console.error("[OTP Verify Error]:", err);
     return { success: false, error: "Database error during code verification." };
+  }
+}
+
+// -----------------------------------------------------------------------------
+// DEDICATED REGISTRATION SESSION ENGINE (UPSTASH REDIS + KEY BINDING)
+// -----------------------------------------------------------------------------
+
+/**
+ * Creates or updates a pending registration session in Upstash Redis.
+ * Generates an unguessable registrationKey and encrypts the password with AES-256-GCM.
+ */
+export async function createOrUpdateRegistrationSession(params: {
+  email: string;
+  fullName: string;
+  phone: string;
+  password: string;
+  otp: string;
+}): Promise<{
+  success: boolean;
+  registrationKey?: string;
+  error?: string;
+  cooldownSeconds?: number;
+}> {
+  const cleanEmail = params.email.toLowerCase().trim();
+  const cleanPhone = params.phone.replace(/\D/g, "").slice(-10);
+  const cleanName = params.fullName.trim();
+  const now = Date.now();
+  const redis = getRedis();
+
+  const cooldownKey = `cavenhurst:cooldown:registration:${cleanEmail}`;
+  const resendCountKey = `cavenhurst:resend_count:registration:${cleanEmail}`;
+  const emailLinkKey = `cavenhurst:otp:registration:${cleanEmail}`;
+
+  if (redis) {
+    try {
+      // 1. Check 60-second cooldown
+      const inCooldown = await redis.ttl(cooldownKey);
+      if (inCooldown > 0) {
+        return {
+          success: false,
+          error: `Please wait ${inCooldown} seconds before requesting a new code.`,
+          cooldownSeconds: inCooldown,
+        };
+      }
+
+      // 2. Check 15-minute resend quota (max 3 resends)
+      const currentResends = Number((await redis.get(resendCountKey)) || 0);
+      if (currentResends >= 3) {
+        const quotaTtl = await redis.ttl(resendCountKey);
+        const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
+        return {
+          success: false,
+          error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+        };
+      }
+
+      // Check for an existing registration session for this email and clean up old key
+      const existingLink = await redis.get(emailLinkKey);
+      if (existingLink) {
+        try {
+          const parsed = typeof existingLink === "string" ? JSON.parse(existingLink) : (existingLink as any);
+          if (parsed?.registrationKey && typeof parsed.registrationKey === "string") {
+            await redis.del(`cavenhurst:reg:${parsed.registrationKey}`);
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+
+      const registrationKey = generateRegistrationKey();
+      const encryptedPassword = encryptPendingPassword(params.password);
+      const otpHashed = hashOtp(params.otp, cleanEmail);
+
+      const record: PendingRegistrationRecord = {
+        registrationKey,
+        email: cleanEmail,
+        fullName: cleanName,
+        phone: cleanPhone,
+        encryptedPassword,
+        otpHash: otpHashed,
+        attempts: 0,
+        createdAt: now,
+        expiresAt: now + 5 * 60 * 1000,
+      };
+
+      // Store full registration record in Upstash Redis (5-minute TTL / 300s)
+      await redis.set(`cavenhurst:reg:${registrationKey}`, JSON.stringify(record), { ex: 300 });
+
+      // Link email to registrationKey & OTP hash for fast lookup and resend safety
+      await redis.set(
+        emailLinkKey,
+        JSON.stringify({
+          registrationKey,
+          otpHash: otpHashed,
+          attempts: 0,
+          expiresAt: record.expiresAt,
+        }),
+        { ex: 300 },
+      );
+
+      // Set 60-second cooldown
+      await redis.set(cooldownKey, "1", { ex: 60 });
+
+      // Increment resend counter with 15-minute expiration
+      await redis.incr(resendCountKey);
+      if (currentResends === 0) {
+        await redis.expire(resendCountKey, 900);
+      }
+
+      // Dual-sync to Postgres audit table
+      const sql = getDb();
+      if (sql) {
+        sql`
+          INSERT INTO public.email_verification_otps (
+            email, otp_hash, purpose, metadata, attempts, resend_count, last_sent_at, expires_at, created_at
+          ) VALUES (
+            ${cleanEmail}, ${otpHashed}, 'registration', ${sql.json({
+              registrationKey,
+              fullName: cleanName,
+              phone: cleanPhone,
+              encryptedPassword,
+            })}, 0, ${currentResends + 1}, now(), now() + interval '5 minutes', now()
+          )
+        `.catch(() => {});
+      }
+
+      return {
+        success: true,
+        registrationKey,
+      };
+    } catch (redisErr) {
+      console.warn("[Upstash Redis Reg Session Store Notice - Falling back to Postgres]:", redisErr);
+    }
+  }
+
+  // Postgres Fallback
+  const sql = getDb();
+  if (!sql) {
+    return { success: false, error: "Database and cache services are currently unreachable." };
+  }
+
+  try {
+    const registrationKey = generateRegistrationKey();
+    const encryptedPassword = encryptPendingPassword(params.password);
+    const otpHashed = hashOtp(params.otp, cleanEmail);
+
+    const [existing] = await sql<any[]>`
+      SELECT id, resend_count, last_sent_at, created_at
+      FROM public.email_verification_otps
+      WHERE lower(email) = ${cleanEmail} AND purpose = 'registration'
+      LIMIT 1
+    `;
+
+    if (existing) {
+      const lastSent = new Date(existing.last_sent_at).getTime();
+      const timeSinceLastSentSec = Math.floor((now - lastSent) / 1000);
+      if (timeSinceLastSentSec < 60) {
+        return {
+          success: false,
+          error: `Please wait ${60 - timeSinceLastSentSec} seconds before requesting a new code.`,
+          cooldownSeconds: 60 - timeSinceLastSentSec,
+        };
+      }
+      if (existing.resend_count >= 3) {
+        return {
+          success: false,
+          error: "Too many verification code requests. Please wait 15 minutes before requesting again.",
+        };
+      }
+
+      await sql`
+        UPDATE public.email_verification_otps SET
+          otp_hash = ${otpHashed},
+          metadata = ${sql.json({ registrationKey, fullName: cleanName, phone: cleanPhone, encryptedPassword })},
+          attempts = 0,
+          resend_count = ${existing.resend_count + 1},
+          last_sent_at = now(),
+          expires_at = now() + interval '5 minutes'
+        WHERE id = ${existing.id}
+      `;
+    } else {
+      await sql`
+        INSERT INTO public.email_verification_otps (
+          email, otp_hash, purpose, metadata, attempts, resend_count, last_sent_at, expires_at, created_at
+        ) VALUES (
+          ${cleanEmail}, ${otpHashed}, 'registration', ${sql.json({
+            registrationKey,
+            fullName: cleanName,
+            phone: cleanPhone,
+            encryptedPassword,
+          })}, 0, 1, now(), now() + interval '5 minutes', now()
+        )
+      `;
+    }
+
+    return { success: true, registrationKey };
+  } catch (err) {
+    console.error("[Postgres Reg Session Store Error]:", err);
+    return { success: false, error: "Failed to store registration record." };
+  }
+}
+
+/**
+ * Resends a registration OTP while preserving the active registrationKey.
+ */
+export async function resendRegistrationSessionOtp(params: {
+  registrationKey?: string;
+  email?: string;
+  otp: string;
+}): Promise<{
+  success: boolean;
+  registrationKey?: string;
+  email?: string;
+  fullName?: string;
+  error?: string;
+  cooldownSeconds?: number;
+}> {
+  const redis = getRedis();
+  const cleanKey = (params.registrationKey || "").trim();
+  const cleanEmail = (params.email || "").toLowerCase().trim();
+  const now = Date.now();
+
+  let record: PendingRegistrationRecord | null = null;
+
+  if (redis) {
+    try {
+      // 1. Try to find by registrationKey
+      if (cleanKey) {
+        const raw = await redis.get(`cavenhurst:reg:${cleanKey}`);
+        if (raw) {
+          record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+        }
+      }
+
+      // 2. Fallback to find by email link
+      if (!record && cleanEmail) {
+        const rawLink = await redis.get(`cavenhurst:otp:registration:${cleanEmail}`);
+        if (rawLink) {
+          const parsedLink = typeof rawLink === "string" ? JSON.parse(rawLink) : (rawLink as any);
+          if (parsedLink?.registrationKey) {
+            const raw = await redis.get(`cavenhurst:reg:${parsedLink.registrationKey}`);
+            if (raw) {
+              record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+            }
+          }
+        }
+      }
+
+      if (record) {
+        const cooldownKey = `cavenhurst:cooldown:registration:${record.email}`;
+        const resendCountKey = `cavenhurst:resend_count:registration:${record.email}`;
+
+        // Check cooldown
+        const inCooldown = await redis.ttl(cooldownKey);
+        if (inCooldown > 0) {
+          return {
+            success: false,
+            error: `Please wait ${inCooldown} seconds before requesting a new code.`,
+            cooldownSeconds: inCooldown,
+          };
+        }
+
+        // Check 15-minute resend quota
+        const currentResends = Number((await redis.get(resendCountKey)) || 0);
+        if (currentResends >= 3) {
+          const quotaTtl = await redis.ttl(resendCountKey);
+          const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
+          return {
+            success: false,
+            error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+          };
+        }
+
+        const newOtpHash = hashOtp(params.otp, record.email);
+        record.otpHash = newOtpHash;
+        record.attempts = 0;
+        record.expiresAt = now + 5 * 60 * 1000;
+
+        // Save back with refreshed 5-minute TTL
+        await redis.set(`cavenhurst:reg:${record.registrationKey}`, JSON.stringify(record), { ex: 300 });
+        await redis.set(
+          `cavenhurst:otp:registration:${record.email}`,
+          JSON.stringify({
+            registrationKey: record.registrationKey,
+            otpHash: newOtpHash,
+            attempts: 0,
+            expiresAt: record.expiresAt,
+          }),
+          { ex: 300 },
+        );
+
+        // Reset cooldown & increment resend
+        await redis.set(cooldownKey, "1", { ex: 60 });
+        await redis.incr(resendCountKey);
+
+        return {
+          success: true,
+          registrationKey: record.registrationKey,
+          email: record.email,
+          fullName: record.fullName,
+        };
+      }
+    } catch (redisErr) {
+      console.warn("[Upstash Redis Resend Notice]:", redisErr);
+    }
+  }
+
+  // Postgres Fallback
+  const sql = getDb();
+  if (sql && (cleanEmail || cleanKey)) {
+    try {
+      const [existing] = await sql<any[]>`
+        SELECT id, metadata, resend_count, last_sent_at, expires_at
+        FROM public.email_verification_otps
+        WHERE (
+          (${cleanEmail !== ""} AND lower(email) = ${cleanEmail})
+          OR (${cleanKey !== ""} AND metadata->>'registrationKey' = ${cleanKey})
+        ) AND purpose = 'registration'
+        LIMIT 1
+      `;
+
+      if (existing) {
+        const lastSent = new Date(existing.last_sent_at).getTime();
+        const timeSince = Math.floor((now - lastSent) / 1000);
+        if (timeSince < 60) {
+          return {
+            success: false,
+            error: `Please wait ${60 - timeSince} seconds before requesting a new code.`,
+            cooldownSeconds: 60 - timeSince,
+          };
+        }
+        if (existing.resend_count >= 3) {
+          return {
+            success: false,
+            error: "Too many verification code requests. Please wait 15 minutes before requesting again.",
+          };
+        }
+
+        const metadata = existing.metadata || {};
+        const emailToUse = cleanEmail || metadata.email || "";
+        const newOtpHash = hashOtp(params.otp, emailToUse);
+        const regKey = metadata.registrationKey || cleanKey || generateRegistrationKey();
+        metadata.registrationKey = regKey;
+
+        await sql`
+          UPDATE public.email_verification_otps SET
+            otp_hash = ${newOtpHash},
+            metadata = ${sql.json(metadata)},
+            attempts = 0,
+            resend_count = ${existing.resend_count + 1},
+            last_sent_at = now(),
+            expires_at = now() + interval '5 minutes'
+          WHERE id = ${existing.id}
+        `;
+
+        return {
+          success: true,
+          registrationKey: regKey,
+          email: emailToUse,
+          fullName: metadata.fullName || "Customer",
+        };
+      }
+    } catch (dbErr) {
+      console.error("[Postgres Resend Fallback Error]:", dbErr);
+    }
+  }
+
+  return {
+    success: false,
+    error: "Registration session has expired. Please start registration again.",
+  };
+}
+
+/**
+ * Validates the registrationKey and OTP against Upstash Redis.
+ * Decrypts the password and invalidates the registration session atomically upon success.
+ */
+export async function verifyRegistrationSession(params: {
+  registrationKey?: string;
+  email?: string;
+  otp: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  attemptsRemaining?: number;
+  record?: {
+    email: string;
+    fullName: string;
+    phone: string;
+    password: string;
+  };
+}> {
+  const cleanKey = (params.registrationKey || "").trim();
+  const cleanEmail = (params.email || "").toLowerCase().trim();
+  const cleanOtp = (params.otp || "").trim();
+  const redis = getRedis();
+
+  let record: PendingRegistrationRecord | null = null;
+
+  // 1. Upstash Redis Verification
+  if (redis) {
+    try {
+      // Lookup by registrationKey
+      if (cleanKey) {
+        const raw = await redis.get(`cavenhurst:reg:${cleanKey}`);
+        if (raw) {
+          record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+        }
+      }
+
+      // Fallback lookup by email link
+      if (!record && cleanEmail) {
+        const rawLink = await redis.get(`cavenhurst:otp:registration:${cleanEmail}`);
+        if (rawLink) {
+          const parsedLink = typeof rawLink === "string" ? JSON.parse(rawLink) : (rawLink as any);
+          if (parsedLink?.registrationKey) {
+            const raw = await redis.get(`cavenhurst:reg:${parsedLink.registrationKey}`);
+            if (raw) {
+              record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+            }
+          }
+        }
+      }
+
+      if (record) {
+        // Expiration check
+        if (Date.now() > record.expiresAt) {
+          await redis.del(
+            `cavenhurst:reg:${record.registrationKey}`,
+            `cavenhurst:otp:registration:${record.email}`,
+          );
+          return {
+            success: false,
+            error: "Verification code has expired. Please request a new code.",
+          };
+        }
+
+        // Max attempts check (5)
+        const attempts = Number(record.attempts || 0);
+        if (attempts >= 5) {
+          await redis.del(
+            `cavenhurst:reg:${record.registrationKey}`,
+            `cavenhurst:otp:registration:${record.email}`,
+          );
+          return {
+            success: false,
+            error: "Too many incorrect attempts. For security, please start registration again.",
+          };
+        }
+
+        // Verify cryptographic hash match
+        const expectedHash = hashOtp(cleanOtp, record.email);
+        if (record.otpHash !== expectedHash) {
+          const newAttempts = attempts + 1;
+          const remaining = Math.max(0, 5 - newAttempts);
+          record.attempts = newAttempts;
+
+          const ttl = await redis.ttl(`cavenhurst:reg:${record.registrationKey}`);
+          if (ttl > 0) {
+            await redis.set(`cavenhurst:reg:${record.registrationKey}`, JSON.stringify(record), { ex: ttl });
+          }
+
+          return {
+            success: false,
+            error: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+            attemptsRemaining: remaining,
+          };
+        }
+
+        // Match! Decrypt password
+        let plainPassword = "";
+        try {
+          plainPassword = decryptPendingPassword(record.encryptedPassword);
+        } catch (decryptErr) {
+          console.error("[Decrypt Password Error]:", decryptErr);
+          return {
+            success: false,
+            error: "Failed to decrypt credentials. Please start registration again.",
+          };
+        }
+
+        // Atomic invalidation: remove from Redis
+        await redis.del(
+          `cavenhurst:reg:${record.registrationKey}`,
+          `cavenhurst:otp:registration:${record.email}`,
+          `cavenhurst:cooldown:registration:${record.email}`,
+        );
+
+        // Purge Postgres fallback
+        deleteRegistrationSession(record.registrationKey, record.email).catch(() => {});
+
+        return {
+          success: true,
+          record: {
+            email: record.email,
+            fullName: record.fullName,
+            phone: record.phone,
+            password: plainPassword,
+          },
+        };
+      }
+    } catch (redisErr) {
+      console.warn("[Upstash Redis Verify Error - Falling back to Postgres]:", redisErr);
+    }
+  }
+
+  // 2. Postgres Fallback
+  const sql = getDb();
+  if (sql && (cleanEmail || cleanKey)) {
+    try {
+      const [pgRecord] = await sql<any[]>`
+        SELECT id, otp_hash, metadata, attempts, expires_at
+        FROM public.email_verification_otps
+        WHERE (
+          (${cleanEmail !== ""} AND lower(email) = ${cleanEmail})
+          OR (${cleanKey !== ""} AND metadata->>'registrationKey' = ${cleanKey})
+        ) AND purpose = 'registration'
+        LIMIT 1
+      `;
+
+      if (pgRecord) {
+        if (new Date(pgRecord.expires_at).getTime() < Date.now()) {
+          await sql`DELETE FROM public.email_verification_otps WHERE id = ${pgRecord.id}`;
+          return {
+            success: false,
+            error: "Verification code has expired. Please request a new code.",
+          };
+        }
+
+        if (pgRecord.attempts >= 5) {
+          await sql`DELETE FROM public.email_verification_otps WHERE id = ${pgRecord.id}`;
+          return {
+            success: false,
+            error: "Too many incorrect attempts. For security, please start registration again.",
+          };
+        }
+
+        const meta = pgRecord.metadata || {};
+        const emailToVerify = cleanEmail || meta.email || "";
+        const expectedHash = hashOtp(cleanOtp, emailToVerify);
+
+        if (pgRecord.otp_hash !== expectedHash) {
+          const newAttempts = pgRecord.attempts + 1;
+          const remaining = Math.max(0, 5 - newAttempts);
+          await sql`UPDATE public.email_verification_otps SET attempts = ${newAttempts} WHERE id = ${pgRecord.id}`;
+          return {
+            success: false,
+            error: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+            attemptsRemaining: remaining,
+          };
+        }
+
+        let plainPassword = "";
+        try {
+          if (meta.encryptedPassword) {
+            plainPassword = decryptPendingPassword(meta.encryptedPassword);
+          } else {
+            plainPassword = meta.password || "";
+          }
+        } catch {
+          plainPassword = meta.password || "";
+        }
+
+        await sql`DELETE FROM public.email_verification_otps WHERE id = ${pgRecord.id}`;
+
+        return {
+          success: true,
+          record: {
+            email: emailToVerify,
+            fullName: meta.fullName || "Customer",
+            phone: meta.phone || "",
+            password: plainPassword,
+          },
+        };
+      }
+    } catch (pgErr) {
+      console.error("[Postgres Verify Fallback Error]:", pgErr);
+    }
+  }
+
+  // Neither Redis nor Postgres found the registration record
+  return {
+    success: false,
+    error: "Invalid registration key. Please request a new verification code.",
+  };
+}
+
+/**
+ * Removes a registration session if email delivery failed or on explicit rollback.
+ */
+export async function deleteRegistrationSession(registrationKey?: string, email?: string): Promise<void> {
+  const cleanKey = (registrationKey || "").trim();
+  const cleanEmail = (email || "").toLowerCase().trim();
+  const redis = getRedis();
+
+  if (redis) {
+    try {
+      const keysToDelete: string[] = [];
+      if (cleanKey) keysToDelete.push(`cavenhurst:reg:${cleanKey}`);
+      if (cleanEmail) {
+        keysToDelete.push(`cavenhurst:otp:registration:${cleanEmail}`);
+        keysToDelete.push(`cavenhurst:cooldown:registration:${cleanEmail}`);
+      }
+      if (keysToDelete.length > 0) {
+        await redis.del(...keysToDelete);
+      }
+    } catch (err) {
+      console.warn("[Redis Delete Reg Session Notice]:", err);
+    }
+  }
+
+  const sql = getDb();
+  if (sql && (cleanKey || cleanEmail)) {
+    try {
+      await sql`
+        DELETE FROM public.email_verification_otps
+        WHERE purpose = 'registration'
+          AND (
+            (${cleanEmail !== ""} AND lower(email) = ${cleanEmail})
+            OR (${cleanKey !== ""} AND metadata->>'registrationKey' = ${cleanKey})
+          )
+      `;
+    } catch (err) {
+      console.warn("[Postgres Delete Reg Session Notice]:", err);
+    }
   }
 }

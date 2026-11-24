@@ -21,6 +21,7 @@ import {
   verifyGoogleAuthServerFn,
   sendRegistrationOtpServerFn,
   verifyRegistrationOtpServerFn,
+  resendRegistrationOtpServerFn,
   loginWithPhoneEmailServerFn,
   sendForgotPasswordOtpServerFn,
   resetPasswordWithOtpServerFn,
@@ -67,6 +68,29 @@ function Login() {
   const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [showRegPassword, setShowRegPassword] = useState(false);
   const [showRegConfirmPassword, setShowRegConfirmPassword] = useState(false);
+  const [registrationKey, setRegistrationKey] = useState("");
+
+  // Restore pending registration session on mount or refresh
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const savedKey = sessionStorage.getItem("cavenhurst_reg_key");
+      const savedEmail = sessionStorage.getItem("cavenhurst_reg_email");
+      const savedName = sessionStorage.getItem("cavenhurst_reg_name");
+      const savedPhone = sessionStorage.getItem("cavenhurst_reg_phone");
+
+      if (savedKey && savedEmail) {
+        setRegistrationKey(savedKey);
+        setRegEmail(savedEmail);
+        if (savedName) setFullName(savedName);
+        if (savedPhone) setRegPhone(savedPhone);
+        setTab("signup");
+        setViewState("otp_verify");
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   // Login Form Fields
   const [loginPhone, setLoginPhone] = useState("");
@@ -351,7 +375,18 @@ function Login() {
         },
       });
 
-      if (res.success) {
+      if (res.success && res.registrationKey) {
+        setRegistrationKey(res.registrationKey);
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.setItem("cavenhurst_reg_key", res.registrationKey);
+            sessionStorage.setItem("cavenhurst_reg_email", cleanEmail);
+            sessionStorage.setItem("cavenhurst_reg_name", cleanName);
+            sessionStorage.setItem("cavenhurst_reg_phone", cleanPhone);
+          } catch {
+            /* ignore */
+          }
+        }
         setViewState("otp_verify");
         setOtpTimerSec(300); // 5 mins
         setResendCooldownSec(60);
@@ -379,16 +414,34 @@ function Login() {
       return;
     }
 
+    const activeKey =
+      registrationKey ||
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_key") || "" : "");
+    const activeEmail =
+      regEmail.trim().toLowerCase() ||
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_email") || "" : "");
+
     setBusy(true);
     try {
       const res = await verifyRegistrationOtpServerFn({
         data: {
-          email: regEmail.trim().toLowerCase(),
+          registrationKey: activeKey,
+          email: activeEmail,
           otp: fullOtp,
         },
       });
 
       if (res?.success && res.user && res.sessionToken) {
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.removeItem("cavenhurst_reg_key");
+            sessionStorage.removeItem("cavenhurst_reg_email");
+            sessionStorage.removeItem("cavenhurst_reg_name");
+            sessionStorage.removeItem("cavenhurst_reg_phone");
+          } catch {
+            /* ignore */
+          }
+        }
         setGoogleSession(
           res.user as unknown as Parameters<typeof setGoogleSession>[0],
           res.sessionToken,
@@ -408,19 +461,33 @@ function Login() {
   const handleResendRegistrationOtp = async () => {
     if (resendCooldownSec > 0 || busy) return;
 
+    const activeKey =
+      registrationKey ||
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_key") || "" : "");
+    const activeEmail =
+      regEmail.trim().toLowerCase() ||
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_email") || "" : "");
+
     setBusy(true);
     try {
-      const res = await sendRegistrationOtpServerFn({
+      const res = await resendRegistrationOtpServerFn({
         data: {
-          fullName: fullName.trim(),
-          phone: regPhone.replace(/\D/g, "").slice(-10),
-          email: regEmail.trim().toLowerCase(),
-          password: regPassword,
-          confirmPassword: regConfirmPassword,
+          registrationKey: activeKey,
+          email: activeEmail,
         },
       });
 
       if (res.success) {
+        if (res.registrationKey) {
+          setRegistrationKey(res.registrationKey);
+          if (typeof window !== "undefined") {
+            try {
+              sessionStorage.setItem("cavenhurst_reg_key", res.registrationKey);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
         setOtpTimerSec(300);
         setResendCooldownSec(60);
         setOtpDigits(["", "", "", "", "", ""]);
@@ -916,7 +983,20 @@ function Login() {
                 {/* Change Email Button */}
                 <button
                   type="button"
-                  onClick={() => setViewState("form")}
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      try {
+                        sessionStorage.removeItem("cavenhurst_reg_key");
+                        sessionStorage.removeItem("cavenhurst_reg_email");
+                        sessionStorage.removeItem("cavenhurst_reg_name");
+                        sessionStorage.removeItem("cavenhurst_reg_phone");
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                    setRegistrationKey("");
+                    setViewState("form");
+                  }}
                   className="w-full text-center text-xs text-muted-foreground underline hover:text-foreground pt-1"
                 >
                   Change Email or Details

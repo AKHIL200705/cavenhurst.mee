@@ -5,6 +5,11 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { processRazorpayWebhook, verifyRazorpayWebhookSignature } from "./server/razorpay";
 import { processShipMaxxWebhook, verifyShipMaxxWebhookSignature } from "./server/shipmaxx";
+import {
+  processSendOtpApi,
+  processVerifyOtpApi,
+  processResendOtpApi,
+} from "./server/auth-api.server";
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
@@ -130,6 +135,65 @@ async function handleWebhookRoute(request: Request, url: URL): Promise<Response 
   return null;
 }
 
+/**
+ * Handles REST API authentication endpoints (/api/auth/send-otp, verify-otp, resend-otp, register)
+ */
+async function handleAuthApiRoute(request: Request, url: URL): Promise<Response | null> {
+  const pathname = url.pathname.replace(/\/+$/, "");
+
+  if (request.method !== "POST") return null;
+
+  if (pathname === "/api/auth/send-otp" || pathname === "/api/auth/register") {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const result = await processSendOtpApi(body);
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || "Failed to send verification code" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  if (pathname === "/api/auth/verify-otp") {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const result = await processVerifyOtpApi(body);
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || "Invalid registration key. Please request a new verification code." }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  if (pathname === "/api/auth/resend-otp") {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const result = await processResendOtpApi(body);
+      return new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || "Failed to resend verification code" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  return null;
+}
+
 export default createServerEntry({
   async fetch(request, opts) {
     try {
@@ -139,6 +203,12 @@ export default createServerEntry({
       const webhookResponse = await handleWebhookRoute(request, url);
       if (webhookResponse) {
         return webhookResponse;
+      }
+
+      // REST Auth API route interceptor (/api/auth/send-otp, verify-otp, resend-otp, register)
+      const authApiResponse = await handleAuthApiRoute(request, url);
+      if (authApiResponse) {
+        return authApiResponse;
       }
 
       const response = await defaultServerEntry.fetch(request, opts);
