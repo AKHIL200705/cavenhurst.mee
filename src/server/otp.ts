@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { getDb } from "@/server/db";
+import { getRedis } from "@/server/redis";
 
 // Environment-backed EmailJS configurations
 function getEmailJsConfig() {
@@ -79,7 +80,7 @@ export function generateSixDigitOtp(): string {
 }
 
 /**
- * Creates a salted SHA-256 hash of the OTP for secure database storage.
+ * Creates a salted SHA-256 hash of the OTP for secure storage in Upstash Redis.
  */
 export function hashOtp(otp: string, email: string): string {
   const salt = (process.env["SESSION_SECRET"] || "cavenhurst_default_secret_salt").slice(0, 32);
@@ -91,7 +92,7 @@ export function hashOtp(otp: string, email: string): string {
 
 /**
  * Sends an OTP email through EmailJS REST API.
- * Maps all standard template parameters to prevent blank or unresolved variables.
+ * Maps every conceivable recipient parameter variant to guarantee resolution.
  */
 export async function sendEmailJsOtp(params: {
   toEmail: string;
@@ -133,12 +134,17 @@ export async function sendEmailJsOtp(params: {
   const expiryText = `${params.expiryMinutes || 5} minutes`;
   const displayName = params.toName || "Customer";
 
-  // Comprehensive template params covering every possible EmailJS variable configuration
+  // Comprehensive template params covering all possible EmailJS template variables
   const templateParams = {
     to_email: params.toEmail,
     email: params.toEmail,
     recipient: params.toEmail,
+    recipient_email: params.toEmail,
     user_email: params.toEmail,
+    client_email: params.toEmail,
+    customer_email: params.toEmail,
+    to: params.toEmail,
+    reply_to: params.toEmail,
     to_name: displayName,
     name: displayName,
     user_name: displayName,
@@ -184,6 +190,10 @@ export async function sendEmailJsOtp(params: {
         category = "NON_BROWSER_BLOCKED";
         userFriendlyError =
           "Server email access is disabled. Please enable 'Allow EmailJS API for non-browser applications' in EmailJS Account Security.";
+      } else if (errText.includes("recipients address is empty")) {
+        category = "RECIPIENT_EMPTY";
+        userFriendlyError =
+          "EmailJS template recipient mapping error: Ensure your template's 'To Email' field uses {{email}} or {{to_email}}.";
       } else if (res.status === 400 || res.status === 404) {
         category = "INVALID_CONFIG";
         userFriendlyError = `Invalid EmailJS configuration: ${errText || "Service ID or Template ID not found."}`;
@@ -211,7 +221,7 @@ export async function sendEmailJsOtp(params: {
       };
     }
 
-    // Success response from EmailJS API
+    // Success response from EmailJS API (HTTP 200)
     await logEmailDiagnostic({
       recipient: params.toEmail,
       purpose,
@@ -250,8 +260,8 @@ export async function sendEmailJsOtp(params: {
 }
 
 /**
- * Stores or updates an OTP request in public.email_verification_otps table.
- * Enforces rate limiting: 60s cooldown, max 3 resends per 15 minutes, max 5 attempts.
+ * Stores or updates an OTP request in Upstash Redis (with PostgreSQL fallback).
+ * Enforces rate limiting: 60s cooldown, max 3 resends per 15 minutes, 5-minute expiration.
  */
 export async function createOrUpdateOtpRecord(params: {
   email: string;
@@ -259,14 +269,82 @@ export async function createOrUpdateOtpRecord(params: {
   purpose: "registration" | "forgot_password";
   metadata?: Record<string, unknown>;
 }): Promise<{ success: boolean; error?: string; cooldownSeconds?: number }> {
-  const sql = getDb();
-  if (!sql) {
-    return { success: false, error: "Database connection unavailable." };
-  }
-
   const cleanEmail = params.email.toLowerCase().trim();
   const otpHashed = hashOtp(params.otp, cleanEmail);
-  const now = new Date();
+  const now = Date.now();
+  const redis = getRedis();
+
+  // 1. Upstash Redis Storage Engine
+  if (redis) {
+    try {
+      const cooldownKey = `cavenhurst:cooldown:${params.purpose}:${cleanEmail}`;
+      const resendCountKey = `cavenhurst:resend_count:${params.purpose}:${cleanEmail}`;
+      const otpKey = `cavenhurst:otp:${params.purpose}:${cleanEmail}`;
+
+      // Check 60-second cooldown
+      const inCooldown = await redis.ttl(cooldownKey);
+      if (inCooldown > 0) {
+        return {
+          success: false,
+          error: `Please wait ${inCooldown} seconds before requesting a new code.`,
+          cooldownSeconds: inCooldown,
+        };
+      }
+
+      // Check 15-minute resend quota (max 3 resends)
+      const currentResends = Number((await redis.get(resendCountKey)) || 0);
+      if (currentResends >= 3) {
+        const quotaTtl = await redis.ttl(resendCountKey);
+        const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
+        return {
+          success: false,
+          error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+        };
+      }
+
+      // Store OTP record in Redis with 5-minute TTL (300 seconds)
+      const record = {
+        otpHash: otpHashed,
+        attempts: 0,
+        metadata: params.metadata || {},
+        createdAt: now,
+        expiresAt: now + 5 * 60 * 1000,
+      };
+
+      await redis.set(otpKey, JSON.stringify(record), { ex: 300 });
+
+      // Set 60-second cooldown key
+      await redis.set(cooldownKey, "1", { ex: 60 });
+
+      // Increment resend counter with 15-minute expiration (900 seconds)
+      await redis.incr(resendCountKey);
+      if (currentResends === 0) {
+        await redis.expire(resendCountKey, 900);
+      }
+
+      // Dual-sync to PostgreSQL audit table
+      const sql = getDb();
+      if (sql) {
+        sql`
+          INSERT INTO public.email_verification_otps (
+            email, otp_hash, purpose, metadata, attempts, resend_count, last_sent_at, expires_at, created_at
+          ) VALUES (
+            ${cleanEmail}, ${otpHashed}, ${params.purpose}, ${sql.json(params.metadata || {})}, 0, ${currentResends + 1}, now(), now() + interval '5 minutes', now()
+          )
+        `.catch(() => {});
+      }
+
+      return { success: true };
+    } catch (redisErr) {
+      console.warn("[Upstash Redis Store Notice - Falling back to Postgres]:", redisErr);
+    }
+  }
+
+  // 2. Direct PostgreSQL Storage Engine Fallback
+  const sql = getDb();
+  if (!sql) {
+    return { success: false, error: "Database and cache services are currently unreachable." };
+  }
 
   try {
     const [existing] = await sql<any[]>`
@@ -278,9 +356,8 @@ export async function createOrUpdateOtpRecord(params: {
 
     if (existing) {
       const lastSent = new Date(existing.last_sent_at).getTime();
-      const timeSinceLastSentSec = Math.floor((now.getTime() - lastSent) / 1000);
+      const timeSinceLastSentSec = Math.floor((now - lastSent) / 1000);
 
-      // 60-second cooldown between resends
       if (timeSinceLastSentSec < 60) {
         return {
           success: false,
@@ -289,9 +366,8 @@ export async function createOrUpdateOtpRecord(params: {
         };
       }
 
-      // Max 3 resend attempts within 15 minutes
       const firstCreatedAt = new Date(existing.created_at).getTime();
-      const fifteenMinutesAgo = now.getTime() - 15 * 60 * 1000;
+      const fifteenMinutesAgo = now - 15 * 60 * 1000;
 
       if (firstCreatedAt > fifteenMinutesAgo && existing.resend_count >= 3) {
         return {
@@ -301,7 +377,7 @@ export async function createOrUpdateOtpRecord(params: {
       }
 
       const newResendCount = firstCreatedAt > fifteenMinutesAgo ? existing.resend_count + 1 : 1;
-      const newCreatedAt = firstCreatedAt > fifteenMinutesAgo ? existing.created_at : now.toISOString();
+      const newCreatedAt = firstCreatedAt > fifteenMinutesAgo ? existing.created_at : new Date(now).toISOString();
 
       await sql`
         UPDATE public.email_verification_otps SET
@@ -336,20 +412,33 @@ export async function createOrUpdateOtpRecord(params: {
  * Prevents locking the customer into a cooldown when delivery was unsuccessful.
  */
 export async function deleteOtpRecord(email: string, purpose: string): Promise<void> {
+  const cleanEmail = email.toLowerCase().trim();
+  const redis = getRedis();
+
+  if (redis) {
+    try {
+      const otpKey = `cavenhurst:otp:${purpose}:${cleanEmail}`;
+      const cooldownKey = `cavenhurst:cooldown:${purpose}:${cleanEmail}`;
+      await redis.del(otpKey, cooldownKey);
+    } catch (err) {
+      console.warn("[Redis Rollback Notice]:", err);
+    }
+  }
+
   const sql = getDb();
   if (!sql) return;
   try {
     await sql`
       DELETE FROM public.email_verification_otps
-      WHERE lower(email) = ${email.toLowerCase().trim()} AND purpose = ${purpose}
+      WHERE lower(email) = ${cleanEmail} AND purpose = ${purpose}
     `;
   } catch (err) {
-    console.warn("[OTP Rollback Notice]:", err);
+    console.warn("[Postgres OTP Rollback Notice]:", err);
   }
 }
 
 /**
- * Verifies an OTP submitted by the customer.
+ * Verifies an OTP submitted by the customer using Upstash Redis (with Postgres fallback).
  */
 export async function verifyOtpRecord(params: {
   email: string;
@@ -361,13 +450,76 @@ export async function verifyOtpRecord(params: {
   metadata?: Record<string, unknown>;
   attemptsRemaining?: number;
 }> {
+  const cleanEmail = params.email.toLowerCase().trim();
+  const cleanOtp = params.otp.trim();
+  const expectedHash = hashOtp(cleanOtp, cleanEmail);
+  const redis = getRedis();
+
+  // 1. Upstash Redis Verification
+  if (redis) {
+    try {
+      const otpKey = `cavenhurst:otp:${params.purpose}:${cleanEmail}`;
+      const rawData = await redis.get(otpKey);
+
+      if (rawData) {
+        const record = typeof rawData === "string" ? JSON.parse(rawData) : (rawData as any);
+
+        // Check expiration
+        if (record.expiresAt && Date.now() > record.expiresAt) {
+          await redis.del(otpKey);
+          return {
+            success: false,
+            error: "Verification code has expired. Please request a new code.",
+          };
+        }
+
+        // Check max attempts (5)
+        const currentAttempts = Number(record.attempts || 0);
+        if (currentAttempts >= 5) {
+          await redis.del(otpKey);
+          return {
+            success: false,
+            error: "Too many incorrect attempts. For security, please request a new verification code.",
+          };
+        }
+
+        // Verify cryptographic hash match
+        if (record.otpHash !== expectedHash) {
+          const newAttempts = currentAttempts + 1;
+          const remaining = Math.max(0, 5 - newAttempts);
+          record.attempts = newAttempts;
+
+          const ttl = await redis.ttl(otpKey);
+          if (ttl > 0) {
+            await redis.set(otpKey, JSON.stringify(record), { ex: ttl });
+          }
+
+          return {
+            success: false,
+            error: `Incorrect verification code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+            attemptsRemaining: remaining,
+          };
+        }
+
+        // Match! Atomic one-time use invalidation
+        await redis.del(otpKey);
+        deleteOtpRecord(cleanEmail, params.purpose).catch(() => {});
+
+        return {
+          success: true,
+          metadata: record.metadata || {},
+        };
+      }
+    } catch (redisErr) {
+      console.warn("[Upstash Redis Verify Notice - Falling back to Postgres]:", redisErr);
+    }
+  }
+
+  // 2. Direct PostgreSQL Fallback Verification
   const sql = getDb();
   if (!sql) {
     return { success: false, error: "Database connection unavailable." };
   }
-
-  const cleanEmail = params.email.toLowerCase().trim();
-  const cleanOtp = params.otp.trim();
 
   try {
     const [record] = await sql<any[]>`
@@ -384,7 +536,6 @@ export async function verifyOtpRecord(params: {
       };
     }
 
-    // Check expiration (5 minutes)
     if (new Date(record.expires_at).getTime() < Date.now()) {
       await sql`DELETE FROM public.email_verification_otps WHERE id = ${record.id}`;
       return {
@@ -393,7 +544,6 @@ export async function verifyOtpRecord(params: {
       };
     }
 
-    // Check max attempts (5)
     if (record.attempts >= 5) {
       await sql`DELETE FROM public.email_verification_otps WHERE id = ${record.id}`;
       return {
@@ -402,8 +552,6 @@ export async function verifyOtpRecord(params: {
       };
     }
 
-    // Verify hash match
-    const expectedHash = hashOtp(cleanOtp, cleanEmail);
     if (record.otp_hash !== expectedHash) {
       const newAttempts = record.attempts + 1;
       const remaining = Math.max(0, 5 - newAttempts);
@@ -421,7 +569,6 @@ export async function verifyOtpRecord(params: {
       };
     }
 
-    // Successful match - delete OTP record (one-time use)
     await sql`DELETE FROM public.email_verification_otps WHERE id = ${record.id}`;
 
     return {

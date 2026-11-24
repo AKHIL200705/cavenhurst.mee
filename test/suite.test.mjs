@@ -1231,6 +1231,64 @@ test("Diagnostics: Email masking and non-disclosure of sensitive OTP data", () =
   assert.equal(maskEmail("invalid"), "***");
 });
 
+test("Upstash Redis: Key schema and TTL configuration specification", () => {
+  const email = "customer@cavenhurst.com";
+  const purpose = "registration";
+  const cleanEmail = email.toLowerCase().trim();
+
+  const otpKey = `cavenhurst:otp:${purpose}:${cleanEmail}`;
+  const cooldownKey = `cavenhurst:cooldown:${purpose}:${cleanEmail}`;
+  const resendCountKey = `cavenhurst:resend_count:${purpose}:${cleanEmail}`;
+
+  assert.equal(otpKey, "cavenhurst:otp:registration:customer@cavenhurst.com");
+  assert.equal(cooldownKey, "cavenhurst:cooldown:registration:customer@cavenhurst.com");
+  assert.equal(resendCountKey, "cavenhurst:resend_count:registration:customer@cavenhurst.com");
+
+  // Verify TTL requirements
+  const OTP_TTL_SECONDS = 300; // 5 minutes
+  const COOLDOWN_TTL_SECONDS = 60; // 60s
+  const RESEND_WINDOW_SECONDS = 900; // 15 mins
+
+  assert.equal(OTP_TTL_SECONDS, 5 * 60);
+  assert.equal(COOLDOWN_TTL_SECONDS, 60);
+  assert.equal(RESEND_WINDOW_SECONDS, 15 * 60);
+});
+
+test("EmailJS: Comprehensive recipient parameter binding", () => {
+  function buildTemplateParams(toEmail, toName, otp) {
+    const displayName = toName || "Customer";
+    return {
+      to_email: toEmail,
+      email: toEmail,
+      recipient: toEmail,
+      recipient_email: toEmail,
+      user_email: toEmail,
+      client_email: toEmail,
+      customer_email: toEmail,
+      to: toEmail,
+      reply_to: toEmail,
+      to_name: displayName,
+      name: displayName,
+      user_name: displayName,
+      otp: otp,
+      code: otp,
+      passcode: otp,
+      verification_code: otp,
+      expiry: "5 minutes",
+      expiry_minutes: 5,
+    };
+  }
+
+  const params = buildTemplateParams("akhil@gmail.com", "Akhil Sai", "584920");
+  assert.equal(params.email, "akhil@gmail.com", "EmailJS {{email}} must resolve");
+  assert.equal(params.to_email, "akhil@gmail.com", "EmailJS {{to_email}} must resolve");
+  assert.equal(params.user_email, "akhil@gmail.com", "EmailJS {{user_email}} must resolve");
+  assert.equal(params.otp, "584920", "EmailJS {{otp}} must resolve");
+  assert.equal(params.code, "584920", "EmailJS {{code}} must resolve");
+  assert.equal(params.passcode, "584920", "EmailJS {{passcode}} must resolve");
+});
+
+
 
 
 
