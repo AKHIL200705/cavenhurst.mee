@@ -219,10 +219,7 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           sql<DbOrderOverviewRow[]>`
             SELECT id, total, status, payment_method, payment_status, shipment_status, created_at
             FROM orders
-          `.catch((err) => {
-            console.error("[Admin Overview] Orders query error:", err);
-            return [];
-          }),
+          `,
           sql<DbRefundRow[]>`SELECT amount FROM refunds`
             .catch(() => sql<DbRefundRow[]>`SELECT amount FROM payment_refunds`)
             .catch(() => []),
@@ -496,29 +493,16 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       }
     }
 
-    let allOrders: DbOrderOverviewRow[] = [];
     const { data: orders, error: ordersError } = await supabaseAdmin
       .from("orders")
       .select("id, total, status, payment_method, payment_status, shipment_status, created_at");
 
     if (ordersError) {
-      console.warn("[Admin Overview] Orders query notice, attempting resilient fallback:", ordersError.message);
-      const { data: fallbackOrders, error: fallbackError } = await supabaseAdmin
-        .from("orders")
-        .select("id, total, status, payment_status, shipment_status, created_at");
-
-      if (fallbackError) {
-        console.error("[Admin Overview] Orders fallback query error:", fallbackError);
-        throw new Error(`Failed to load overview data: ${fallbackError.message || "Orders query failed"}`);
-      }
-
-      allOrders = (fallbackOrders || []).map((o: any) => ({
-        ...o,
-        payment_method: o.payment_method || "online",
-      }));
-    } else {
-      allOrders = (orders as unknown as DbOrderOverviewRow[]) || [];
+      console.error("[Admin Overview] Orders query error:", ordersError);
+      throw new Error(`Failed to load overview data: ${ordersError.message || "Orders query failed"}`);
     }
+
+    const allOrders: DbOrderOverviewRow[] = (orders as unknown as DbOrderOverviewRow[]) || [];
 
     const totalOrders = allOrders.length;
 
