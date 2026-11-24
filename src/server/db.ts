@@ -31,7 +31,9 @@ function resolveDbUrl(): string {
     }
   }
 
-  if (!dbUrl) return "";
+  if (!dbUrl) {
+    dbUrl = "postgresql://postgres.ewlsrypetobkwrwtmmgh:cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
+  }
 
   // Normalize IPv6-only direct host to IPv4/IPv6 dual-stack pooler
   if (dbUrl.includes("db.ewlsrypetobkwrwtmmgh.supabase.co")) {

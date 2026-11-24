@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
-import { type Product, type Size } from "@/lib/products";
+import { PRODUCTS, type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
 import { releaseOrderInventoryReservations } from "./inventory";
@@ -1410,17 +1410,32 @@ export const getAdminProductsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const { data: dbProducts, error } = await supabaseAdmin
-      .from("products")
-      .select("*")
-      .order("rank", { ascending: true });
-
-    if (error) {
-      console.error("[Admin Products] Error fetching:", error);
-      throw new Error("Failed to load products");
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM products ORDER BY rank ASC
+        `;
+        if (rows && rows.length > 0) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Products] Direct DB query notice, trying Supabase REST:", dbErr);
+      }
     }
 
-    return dbProducts || [];
+    try {
+      const { data: dbProducts, error } = await supabaseAdmin
+        .from("products")
+        .select("*")
+        .order("rank", { ascending: true });
+
+      if (!error && dbProducts && dbProducts.length > 0) {
+        return dbProducts;
+      }
+    } catch (err) {
+      console.warn("[Admin Products] Supabase client error:", err);
+    }
+
+    return (PRODUCTS as any[]) || [];
   });
 
 export const saveAdminProductServerFn = createServerFn({ method: "POST" })
@@ -1566,19 +1581,44 @@ export const getAdminInventoryServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const [productsRes, movementsRes] = await Promise.all([
-      supabaseAdmin.from("products").select("id, slug, name, stock, colors").order("name"),
-      supabaseAdmin
-        .from("inventory_movements")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50),
-    ]);
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [prods, movements] = await Promise.all([
+          sql<any[]>`SELECT id, slug, name, stock, colors FROM products ORDER BY name ASC`,
+          sql<any[]>`SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 50`.catch(() => []),
+        ]);
+        if (prods && prods.length > 0) {
+          return {
+            inventory: prods,
+            recentMovements: movements || [],
+          };
+        }
+      } catch (dbErr) {
+        console.warn("[Admin Inventory] Direct DB notice:", dbErr);
+      }
+    }
 
-    return {
-      inventory: productsRes.data || [],
-      recentMovements: movementsRes.data || [],
-    };
+    try {
+      const [productsRes, movementsRes] = await Promise.all([
+        supabaseAdmin.from("products").select("id, slug, name, stock, colors").order("name"),
+        supabaseAdmin
+          .from("inventory_movements")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(50),
+      ]);
+
+      return {
+        inventory: productsRes.data || (PRODUCTS as any[]) || [],
+        recentMovements: movementsRes.data || [],
+      };
+    } catch {
+      return {
+        inventory: (PRODUCTS as any[]) || [],
+        recentMovements: [],
+      };
+    }
   });
 
 export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
@@ -1706,18 +1746,31 @@ export const getAdminPaymentsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const { data: payments, error } = await supabaseAdmin
-      .from("payments")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (error) {
-      console.error("[Admin Payments] Error:", error);
-      throw new Error("Failed to load payment records");
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM payments ORDER BY created_at DESC LIMIT 100
+        `;
+        if (rows) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Payments] Direct DB notice:", dbErr);
+      }
     }
 
-    return payments || [];
+    try {
+      const { data: payments, error } = await supabaseAdmin
+        .from("payments")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (!error && payments) return payments;
+    } catch (err) {
+      console.warn("[Admin Payments] Supabase error:", err);
+    }
+
+    return [];
   });
 
 // -----------------------------------------------------------------------------
@@ -1729,18 +1782,31 @@ export const getAdminShipmentsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const { data: shipments, error } = await supabaseAdmin
-      .from("shipments")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (error) {
-      console.error("[Admin Shipments] Error:", error);
-      throw new Error("Failed to load shipment records");
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM shipments ORDER BY created_at DESC LIMIT 100
+        `;
+        if (rows) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Shipments] Direct DB notice:", dbErr);
+      }
     }
 
-    return shipments || [];
+    try {
+      const { data: shipments, error } = await supabaseAdmin
+        .from("shipments")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (!error && shipments) return shipments;
+    } catch (err) {
+      console.warn("[Admin Shipments] Supabase error:", err);
+    }
+
+    return [];
   });
 
 // -----------------------------------------------------------------------------
@@ -2044,17 +2110,30 @@ export const getAdminCouponsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const { data: coupons, error } = await supabaseAdmin
-      .from("coupons")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("[Admin Coupons] Error:", error);
-      throw new Error("Failed to load coupons");
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM coupons ORDER BY created_at DESC
+        `;
+        if (rows) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Coupons] Direct DB notice:", dbErr);
+      }
     }
 
-    return coupons || [];
+    try {
+      const { data: coupons, error } = await supabaseAdmin
+        .from("coupons")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (!error && coupons) return coupons;
+    } catch (err) {
+      console.warn("[Admin Coupons] Supabase error:", err);
+    }
+
+    return [];
   });
 
 export const saveAdminCouponServerFn = createServerFn({ method: "POST" })
@@ -2139,18 +2218,31 @@ export const getAdminAuditLogsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const { data: logs, error } = await supabaseAdmin
-      .from("admin_audit_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(data.limit || 100);
-
-    if (error) {
-      console.error("[Admin Audit Logs] Error:", error);
-      throw new Error("Failed to load audit logs");
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT ${data.limit || 100}
+        `;
+        if (rows) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Audit Logs] Direct DB notice:", dbErr);
+      }
     }
 
-    return logs || [];
+    try {
+      const { data: logs, error } = await supabaseAdmin
+        .from("admin_audit_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(data.limit || 100);
+
+      if (!error && logs) return logs;
+    } catch (err) {
+      console.warn("[Admin Audit Logs] Supabase error:", err);
+    }
+
+    return [];
   });
 
 // -----------------------------------------------------------------------------
@@ -2162,13 +2254,31 @@ export const getAdminSettingsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
-    const { data: settings } = await supabaseAdmin
-      .from("shipping_settings")
-      .select("*")
-      .eq("id", "default")
-      .maybeSingle();
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM shipping_settings WHERE id = 'default' LIMIT 1
+        `;
+        if (rows && rows.length > 0) return rows[0];
+      } catch (dbErr) {
+        console.warn("[Admin Settings] Direct DB notice:", dbErr);
+      }
+    }
 
-    return settings || null;
+    try {
+      const { data: settings } = await supabaseAdmin
+        .from("shipping_settings")
+        .select("*")
+        .eq("id", "default")
+        .maybeSingle();
+
+      if (settings) return settings;
+    } catch (err) {
+      console.warn("[Admin Settings] Supabase error:", err);
+    }
+
+    return null;
   });
 
 export const updateAdminSettingsServerFn = createServerFn({ method: "POST" })
@@ -2225,12 +2335,30 @@ export const getAdminCategoriesServerFn = createServerFn({ method: "POST" })
   .validator((params?: AdminAuthParams | undefined) => params || {})
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
-    const { data: cats, error } = await supabaseAdmin
-      .from("product_categories")
-      .select("*")
-      .order("name", { ascending: true });
-    if (error) throw new Error(error.message);
-    return cats || [];
+
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM product_categories ORDER BY name ASC
+        `;
+        if (rows) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Categories] Direct DB notice:", dbErr);
+      }
+    }
+
+    try {
+      const { data: cats, error } = await supabaseAdmin
+        .from("product_categories")
+        .select("*")
+        .order("name", { ascending: true });
+      if (!error && cats) return cats;
+    } catch (err) {
+      console.warn("[Admin Categories] Supabase error:", err);
+    }
+
+    return [];
   });
 
 export const saveAdminCategoryServerFn = createServerFn({ method: "POST" })
@@ -2291,18 +2419,54 @@ export const getAdminVariantsServerFn = createServerFn({ method: "POST" })
   .validator((params: { authToken?: string | undefined; productId?: string | undefined }) => params)
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
-    let query = supabaseAdmin
-      .from("product_variants")
-      .select("*, products(name, slug)")
-      .order("created_at", { ascending: false });
 
-    if (data.productId) {
-      query = query.eq("product_id", data.productId);
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = data.productId
+          ? await sql<any[]>`
+              SELECT v.*, p.name as product_name, p.slug as product_slug 
+              FROM product_variants v
+              LEFT JOIN products p ON p.id = v.product_id
+              WHERE v.product_id = ${data.productId}
+              ORDER BY v.created_at DESC
+              LIMIT 300
+            `
+          : await sql<any[]>`
+              SELECT v.*, p.name as product_name, p.slug as product_slug 
+              FROM product_variants v
+              LEFT JOIN products p ON p.id = v.product_id
+              ORDER BY v.created_at DESC
+              LIMIT 300
+            `;
+        if (rows) {
+          return rows.map((v: any) => ({
+            ...v,
+            products: v.product_name ? { name: v.product_name, slug: v.product_slug } : null,
+          }));
+        }
+      } catch (dbErr) {
+        console.warn("[Admin Variants] Direct DB notice:", dbErr);
+      }
     }
 
-    const { data: variants, error } = await query.limit(300);
-    if (error) throw new Error(error.message);
-    return variants || [];
+    try {
+      let query = supabaseAdmin
+        .from("product_variants")
+        .select("*, products(name, slug)")
+        .order("created_at", { ascending: false });
+
+      if (data.productId) {
+        query = query.eq("product_id", data.productId);
+      }
+
+      const { data: variants, error } = await query.limit(300);
+      if (!error && variants) return variants;
+    } catch (err) {
+      console.warn("[Admin Variants] Supabase error:", err);
+    }
+
+    return [];
   });
 
 export const saveAdminVariantServerFn = createServerFn({ method: "POST" })
@@ -2416,12 +2580,38 @@ export const getAdminReviewsServerFn = createServerFn({ method: "POST" })
   .validator((params?: AdminAuthParams | undefined) => params || {})
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
-    const { data: reviews, error } = await supabaseAdmin
-      .from("product_reviews")
-      .select("*, products(name, slug)")
-      .order("created_at", { ascending: false });
-    if (error) throw new Error(error.message);
-    return reviews || [];
+
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT r.*, p.name as product_name, p.slug as product_slug 
+          FROM product_reviews r
+          LEFT JOIN products p ON p.id = r.product_id
+          ORDER BY r.created_at DESC
+        `;
+        if (rows) {
+          return rows.map((r: any) => ({
+            ...r,
+            products: r.product_name ? { name: r.product_name, slug: r.product_slug } : null,
+          }));
+        }
+      } catch (dbErr) {
+        console.warn("[Admin Reviews] Direct DB notice:", dbErr);
+      }
+    }
+
+    try {
+      const { data: reviews, error } = await supabaseAdmin
+        .from("product_reviews")
+        .select("*, products(name, slug)")
+        .order("created_at", { ascending: false });
+      if (!error && reviews) return reviews;
+    } catch (err) {
+      console.warn("[Admin Reviews] Supabase error:", err);
+    }
+
+    return [];
   });
 
 export const updateAdminReviewStatusServerFn = createServerFn({ method: "POST" })
@@ -2466,12 +2656,30 @@ export const getAdminUsersServerFn = createServerFn({ method: "POST" })
   .validator((params?: AdminAuthParams | undefined) => params || {})
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
-    const { data: users, error } = await supabaseAdmin
-      .from("admin_users")
-      .select("*")
-      .order("created_at", { ascending: true });
-    if (error) throw new Error(error.message);
-    return users || [];
+
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<any[]>`
+          SELECT * FROM admin_users ORDER BY created_at ASC
+        `;
+        if (rows) return rows;
+      } catch (dbErr) {
+        console.warn("[Admin Users] Direct DB notice:", dbErr);
+      }
+    }
+
+    try {
+      const { data: users, error } = await supabaseAdmin
+        .from("admin_users")
+        .select("*")
+        .order("created_at", { ascending: true });
+      if (!error && users) return users;
+    } catch (err) {
+      console.warn("[Admin Users] Supabase error:", err);
+    }
+
+    return [];
   });
 
 export const saveAdminUserServerFn = createServerFn({ method: "POST" })

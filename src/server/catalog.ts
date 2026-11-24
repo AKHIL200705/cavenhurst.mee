@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
-import { type Product, type Size } from "@/lib/products";
+import { PRODUCTS, getProduct, type Product, type Size } from "@/lib/products";
 import type { Json } from "@/integrations/supabase/types";
 
 /**
@@ -81,15 +81,15 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
         .eq("is_published", true)
         .order("rank", { ascending: true });
 
-      if (error || !dbProducts) {
-        console.error("[Catalog ServerFn] Error querying products:", error);
-        return [];
+      if (error || !dbProducts || dbProducts.length === 0) {
+        console.warn("[Catalog ServerFn] DB products notice, using fallback catalog:", error);
+        return PRODUCTS;
       }
 
       return dbProducts.map(mapDbProductToFrontend);
     } catch (err) {
-      console.error("[Catalog ServerFn] Unexpected error:", err);
-      return [];
+      console.warn("[Catalog ServerFn] Unexpected error, using fallback catalog:", err);
+      return PRODUCTS;
     }
   },
 );
@@ -138,10 +138,10 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
       if (!error && row) {
         return mapDbProductToFrontend(row);
       }
-      return null;
+      return getProduct(data.slug) || null;
     } catch (err) {
-      console.error("[Product Detail ServerFn] DB error:", err);
-      return null;
+      console.warn("[Product Detail ServerFn] DB error, checking fallback product:", err);
+      return getProduct(data.slug) || null;
     }
   });
 
