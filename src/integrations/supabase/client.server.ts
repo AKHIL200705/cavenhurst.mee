@@ -24,27 +24,33 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
   };
 }
 
+function cleanKey(val?: string | null): string {
+  if (!val) return "";
+  return val.replace(/^["']|["']$/g, "").trim();
+}
+
 function createSupabaseAdminClient() {
-  const SUPABASE_URL = (
+  const SUPABASE_URL = cleanKey(
     process.env["SUPABASE_URL"] ||
     process.env["VITE_SUPABASE_URL"] ||
     ""
-  )
-    .replace(/\/+$/, "")
-    .replace(/^["']|["']$/g, "")
-    .trim();
+  ).replace(/\/+$/, "");
 
-  const SUPABASE_SERVICE_ROLE_KEY = (
+  const SUPABASE_SERVICE_ROLE_KEY = cleanKey(
     process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
     process.env["SUPABASE_SECRET_KEY"] ||
-    ""
-  ).replace(/^["']|["']$/g, "").trim();
+    process.env["SUPABASE_SERVICE_KEY"] ||
+    process.env["SUPABASE_SECRET"]
+  );
 
   const effectiveKey =
     SUPABASE_SERVICE_ROLE_KEY ||
-    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-    "";
+    cleanKey(
+      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_ANON_KEY"] ||
+      process.env["SUPABASE_ANON_KEY"]
+    );
 
   if (!SUPABASE_URL) {
     throw new Error(

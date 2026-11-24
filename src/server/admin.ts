@@ -722,6 +722,74 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
     const limit = Math.min(100, Math.max(1, data.limit || 25));
     const offset = (page - 1) * limit;
 
+    // 1. Try direct Postgres first (bypasses REST API key requirements)
+    const sql = await getDb();
+    if (sql) {
+      try {
+        let statusFilter = sql`TRUE`;
+        if (data.filter && data.filter !== "all") {
+          if (data.filter === "cod") {
+            statusFilter = sql`payment_method = 'cod'`;
+          } else if (data.filter === "paid") {
+            statusFilter = sql`payment_status = 'paid'`;
+          } else if (data.filter === "pending_payment") {
+            statusFilter = sql`payment_status = 'pending'`;
+          } else if (data.filter === "shipped") {
+            statusFilter = sql`shipment_status IN ('shipped', 'in_transit', 'out_for_delivery')`;
+          } else if (data.filter === "delivered") {
+            statusFilter = sql`shipment_status = 'delivered'`;
+          } else if (data.filter === "cancelled") {
+            statusFilter = sql`status = 'cancelled'`;
+          } else if (data.filter === "rto_initiated") {
+            statusFilter = sql`shipment_status IN ('rto_initiated', 'rto_delivered')`;
+          } else if (data.filter === "returned") {
+            statusFilter = sql`status = 'returned'`;
+          } else {
+            statusFilter = sql`status = ${data.filter}`;
+          }
+        }
+
+        let payMethodFilter = sql`TRUE`;
+        if (data.paymentMethod && data.paymentMethod !== "all") {
+          payMethodFilter = sql`payment_method = ${data.paymentMethod}`;
+        }
+
+        let searchFilter = sql`TRUE`;
+        if (data.search && data.search.trim()) {
+          const s = `%${data.search.trim()}%`;
+          searchFilter = sql`(
+            order_number ILIKE ${s} OR
+            customer_name ILIKE ${s} OR
+            customer_email ILIKE ${s} OR
+            customer_phone ILIKE ${s} OR
+            awb_number ILIKE ${s}
+          )`;
+        }
+
+        const [ordersList, countRows] = await Promise.all([
+          sql<any[]>`
+            SELECT * FROM orders
+            WHERE ${statusFilter} AND ${payMethodFilter} AND ${searchFilter}
+            ORDER BY created_at DESC
+            LIMIT ${limit} OFFSET ${offset}
+          `,
+          sql<Array<{ count: number }>>`
+            SELECT count(*)::int as count FROM orders
+            WHERE ${statusFilter} AND ${payMethodFilter} AND ${searchFilter}
+          `,
+        ]);
+
+        return {
+          orders: ordersList || [],
+          totalCount: countRows[0]?.count || 0,
+          page,
+          limit,
+        };
+      } catch (dbErr) {
+        console.warn("[Admin Orders] Direct DB query notice, falling back to Supabase REST client:", dbErr);
+      }
+    }
+
     let query = supabaseAdmin.from("orders").select("*", { count: "exact" });
 
     if (data.filter && data.filter !== "all") {
@@ -765,7 +833,7 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
 
     if (error) {
       console.error("[Admin Orders] Fetch error:", error);
-      throw new Error("Failed to load orders");
+      throw new Error(`Failed to load orders: ${error.message || "Database request failed"}`);
     }
 
     return {
@@ -780,6 +848,39 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
   .validator((params: AdminAuthParams & { orderId: string }) => params)
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
+
+    const sql = await getDb();
+    if (sql) {
+      try {
+        const orderRows = await sql<any[]>`SELECT * FROM orders WHERE id = ${data.orderId} LIMIT 1`;
+        if (orderRows && orderRows.length > 0) {
+          const order = orderRows[0];
+          const [items, addressRows, paymentRows, shipmentRows, refunds, history, trackingEvents] =
+            await Promise.all([
+              sql<any[]>`SELECT * FROM order_items WHERE order_id = ${order.id}`.catch(() => []),
+              sql<any[]>`SELECT * FROM shipping_addresses WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
+              sql<any[]>`SELECT * FROM payments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
+              sql<any[]>`SELECT * FROM shipments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
+              sql<any[]>`SELECT * FROM refunds WHERE order_id = ${order.id}`.catch(() => []),
+              sql<any[]>`SELECT * FROM order_status_history WHERE order_id = ${order.id} ORDER BY created_at ASC`.catch(() => []),
+              sql<any[]>`SELECT * FROM shipment_tracking_events WHERE order_id = ${order.id} ORDER BY event_time ASC`.catch(() => []),
+            ]);
+
+          return {
+            order,
+            items: items || [],
+            shippingAddress: addressRows[0] || null,
+            payment: paymentRows[0] || null,
+            shipment: shipmentRows[0] || null,
+            refunds: refunds || [],
+            statusHistory: history || [],
+            trackingEvents: trackingEvents || [],
+          };
+        }
+      } catch (dbErr) {
+        console.warn("[Admin Order Details] Direct DB notice, falling back to Supabase REST client:", dbErr);
+      }
+    }
 
     const { data: order, error } = await supabaseAdmin
       .from("orders")
