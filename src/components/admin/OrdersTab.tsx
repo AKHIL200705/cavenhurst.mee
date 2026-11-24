@@ -10,6 +10,8 @@ import {
   type OrderDetailsPayment,
   type OrderDetailsShipment,
   type OrderDetailsRefund,
+  type OrderStatusHistoryItem,
+  type ShipmentTrackingEventItem,
 } from "./OrderDetailsDialog";
 import { getAdminOrderDetailsServerFn } from "@/server/admin";
 import { toast } from "sonner";
@@ -36,6 +38,8 @@ export interface AdminOrderDetailsResult {
   payment: OrderDetailsPayment | null;
   shipment: OrderDetailsShipment | null;
   refunds: OrderDetailsRefund[];
+  history?: OrderStatusHistoryItem[] | undefined;
+  tracking?: ShipmentTrackingEventItem[] | undefined;
 }
 
 export interface OrdersTabProps {
@@ -297,6 +301,8 @@ export function OrdersTab({
           payment={detailsData.payment}
           shipment={detailsData.shipment}
           refunds={detailsData.refunds}
+          history={detailsData.history || []}
+          tracking={detailsData.tracking || []}
           authToken={authToken}
           onClose={() => {
             setSelectedOrder(null);

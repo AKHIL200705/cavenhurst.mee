@@ -5,6 +5,7 @@ import { getDb } from "@/server/db";
 import { type Product, type Size } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
+import { releaseOrderInventoryReservations } from "./inventory";
 import { verifyGoogleSessionOrToken, signSessionToken } from "./auth-helpers";
 import type { Json, Database } from "@/integrations/supabase/types";
 
@@ -718,13 +719,24 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
       throw new Error("Order not found");
     }
 
-    const [itemsRes, addressRes, paymentRes, shipmentRes, refundsRes] = await Promise.all([
-      supabaseAdmin.from("order_items").select("*").eq("order_id", order.id),
-      supabaseAdmin.from("shipping_addresses").select("*").eq("order_id", order.id).maybeSingle(),
-      supabaseAdmin.from("payments").select("*").eq("order_id", order.id).maybeSingle(),
-      supabaseAdmin.from("shipments").select("*").eq("order_id", order.id).maybeSingle(),
-      supabaseAdmin.from("refunds").select("*").eq("order_id", order.id),
-    ]);
+    const [itemsRes, addressRes, paymentRes, shipmentRes, refundsRes, historyRes, trackingRes] =
+      await Promise.all([
+        supabaseAdmin.from("order_items").select("*").eq("order_id", order.id),
+        supabaseAdmin.from("shipping_addresses").select("*").eq("order_id", order.id).maybeSingle(),
+        supabaseAdmin.from("payments").select("*").eq("order_id", order.id).maybeSingle(),
+        supabaseAdmin.from("shipments").select("*").eq("order_id", order.id).maybeSingle(),
+        supabaseAdmin.from("refunds").select("*").eq("order_id", order.id),
+        supabaseAdmin
+          .from("order_status_history")
+          .select("*")
+          .eq("order_id", order.id)
+          .order("created_at", { ascending: true }),
+        (supabaseAdmin as any)
+          .from("shipment_tracking_events")
+          .select("*")
+          .eq("order_id", order.id)
+          .order("event_time", { ascending: true }),
+      ]);
 
     return {
       order,
@@ -733,8 +745,120 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
       payment: paymentRes.data || null,
       shipment: shipmentRes.data || null,
       refunds: refundsRes.data || [],
+      history: historyRes.data || [],
+      tracking: trackingRes.data || [],
     };
   });
+
+/**
+ * Restocks all three inventory tiers for a cancelled order:
+ * 1. products.stock (JSONB)
+ * 2. product_variants.stock_quantity
+ * 3. inventory.stock_quantity
+ * 4. inventory_movements (audit log)
+ */
+async function restockCancelledOrderItems(
+  order: { id: string; order_number?: string | null; items?: unknown },
+  adminUserId: string,
+) {
+  const items = (order.items || []) as Array<{
+    slug: string;
+    size: string;
+    qty: number;
+    color?: string;
+    productId?: string;
+    variantId?: string;
+  }>;
+
+  for (const item of items) {
+    try {
+      // 1. Update product.stock JSONB
+      const { data: prod } = await supabaseAdmin
+        .from("products")
+        .select("id, stock")
+        .eq("slug", item.slug)
+        .maybeSingle();
+
+      if (prod) {
+        const currentStock = (prod.stock || {}) as Record<string, number>;
+        const currentQty = currentStock[item.size] ?? 0;
+        const newQty = currentQty + item.qty;
+        const updatedStock = { ...currentStock, [item.size]: newQty };
+
+        await supabaseAdmin
+          .from("products")
+          .update({ stock: updatedStock as unknown as Json, updated_at: new Date().toISOString() })
+          .eq("id", prod.id);
+
+        // 2. Identify variant and restock product_variants
+        let variantId = item.variantId;
+        if (!variantId) {
+          const { data: matchedVariants } = await supabaseAdmin
+            .from("product_variants")
+            .select("id, stock_quantity")
+            .eq("product_id", prod.id)
+            .eq("size", item.size);
+
+          if (matchedVariants && matchedVariants.length > 0) {
+            variantId = matchedVariants[0]?.id;
+          }
+        }
+
+        if (variantId) {
+          const { data: currentVar } = await supabaseAdmin
+            .from("product_variants")
+            .select("stock_quantity")
+            .eq("id", variantId)
+            .single();
+
+          const currentVarQty = currentVar?.stock_quantity ?? 0;
+          const newVarQty = currentVarQty + item.qty;
+
+          await supabaseAdmin
+            .from("product_variants")
+            .update({
+              stock_quantity: newVarQty,
+              is_available: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", variantId);
+
+          // 3. Restock public.inventory
+          const { data: currentInv } = await supabaseAdmin
+            .from("inventory")
+            .select("stock_quantity")
+            .eq("variant_id", variantId)
+            .maybeSingle();
+
+          if (currentInv) {
+            await supabaseAdmin
+              .from("inventory")
+              .update({
+                stock_quantity: (currentInv.stock_quantity ?? 0) + item.qty,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("variant_id", variantId);
+          }
+        }
+
+        // 4. Record inventory movement
+        await supabaseAdmin.from("inventory_movements").insert({
+          product_id: prod.id,
+          product_slug: item.slug,
+          size: item.size,
+          color: item.color || null,
+          change_qty: item.qty,
+          new_stock: newQty,
+          reason: "order_cancelled",
+          reference_id: order.order_number || order.id,
+          admin_user_id: adminUserId,
+        });
+      }
+    } catch (err) {
+      console.error("[Restock Error for item]", item.slug, err);
+    }
+  }
+}
 
 export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
   .validator(
@@ -750,6 +874,32 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const admin = await verifyAdminSession(data.authToken);
 
+    const { data: currentOrder, error: fetchErr } = await supabaseAdmin
+      .from("orders")
+      .select("id, status, shipment_status, payment_method, payment_status, total, items, order_number")
+      .eq("id", data.orderId)
+      .single();
+
+    if (fetchErr || !currentOrder) {
+      throw new Error("Order not found");
+    }
+
+    // Terminal state validation
+    if (["cancelled", "refunded"].includes(currentOrder.status) && currentOrder.status !== data.status) {
+      throw new Error(
+        `Order is in terminal state '${currentOrder.status}' and cannot be transitioned to '${data.status}'.`,
+      );
+    }
+
+    // If transitioning to cancelled, trigger restock / reservation release
+    if (data.status === "cancelled" && currentOrder.status !== "cancelled") {
+      if (currentOrder.status === "pending_payment") {
+        await releaseOrderInventoryReservations(currentOrder.id);
+      } else {
+        await restockCancelledOrderItems(currentOrder, admin.userId);
+      }
+    }
+
     const updatePayload: OrderUpdate = {
       status: data.status,
       updated_at: new Date().toISOString(),
@@ -759,6 +909,14 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
       updatePayload.shipment_status = data.shipmentStatus;
       if (data.shipmentStatus === "delivered") {
         updatePayload.delivered_at = new Date().toISOString();
+        // If COD order delivered, mark payment collected as paid
+        if (currentOrder.payment_method === "cod" && currentOrder.payment_status !== "paid") {
+          updatePayload.payment_status = "paid";
+          await supabaseAdmin
+            .from("payments")
+            .update({ status: "captured", updated_at: new Date().toISOString() })
+            .eq("order_id", currentOrder.id);
+        }
       }
     }
 
@@ -774,8 +932,22 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
       throw new Error("Failed to update order status");
     }
 
+    // Mandatory write to order_status_history
+    const comment =
+      data.notes?.trim() ||
+      `Status transitioned from '${currentOrder.status}' to '${data.status}' by administrator.${data.shipmentStatus ? ` Logistics: ${data.shipmentStatus}.` : ""}`;
+
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: data.orderId,
+      status: data.status,
+      comment,
+      changed_by: admin.email || admin.userId,
+    });
+
     await recordAdminAuditLog(admin, "order_status_update", "order", data.orderId, {
+      previousStatus: currentOrder.status,
       newStatus: data.status,
+      previousShipmentStatus: currentOrder.shipment_status,
       shipmentStatus: data.shipmentStatus,
       notes: data.notes,
     });
@@ -790,7 +962,7 @@ export const cancelAdminOrderServerFn = createServerFn({ method: "POST" })
 
     const { data: order, error } = await supabaseAdmin
       .from("orders")
-      .select("id, status, items, order_number")
+      .select("id, status, items, order_number, payment_status")
       .eq("id", data.orderId)
       .single();
 
@@ -798,6 +970,14 @@ export const cancelAdminOrderServerFn = createServerFn({ method: "POST" })
 
     if (order.status === "cancelled") {
       throw new Error("Order is already cancelled.");
+    }
+
+    // If order was in pending_payment, release active reservation
+    if (order.status === "pending_payment") {
+      await releaseOrderInventoryReservations(order.id);
+    } else {
+      // Confirmed or processing: restock across all three inventory tiers
+      await restockCancelledOrderItems(order, admin.userId);
     }
 
     const { error: updateError } = await supabaseAdmin
@@ -810,47 +990,13 @@ export const cancelAdminOrderServerFn = createServerFn({ method: "POST" })
 
     if (updateError) throw new Error("Failed to cancel order");
 
-    const items = (order.items || []) as Array<{
-      slug: string;
-      size: string;
-      qty: number;
-      color?: string;
-    }>;
-    for (const item of items) {
-      try {
-        const { data: prod } = await supabaseAdmin
-          .from("products")
-          .select("id, stock")
-          .eq("slug", item.slug)
-          .maybeSingle();
-
-        if (prod) {
-          const currentStock = (prod.stock || {}) as Record<string, number>;
-          const currentQty = currentStock[item.size] ?? 0;
-          const newQty = currentQty + item.qty;
-          const updatedStock = { ...currentStock, [item.size]: newQty };
-
-          await supabaseAdmin
-            .from("products")
-            .update({ stock: updatedStock as unknown as Json })
-            .eq("id", prod.id);
-
-          await supabaseAdmin.from("inventory_movements").insert({
-            product_id: prod.id,
-            product_slug: item.slug,
-            size: item.size,
-            color: item.color || null,
-            change_qty: item.qty,
-            new_stock: newQty,
-            reason: "order_cancelled",
-            reference_id: order.order_number,
-            admin_user_id: admin.userId,
-          });
-        }
-      } catch (err) {
-        console.error("[Restock Error]", err);
-      }
-    }
+    // Mandatory write to order_status_history
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: order.id,
+      status: "cancelled",
+      comment: data.reason || "Order cancelled by administrator via operations portal",
+      changed_by: admin.email || admin.userId,
+    });
 
     await recordAdminAuditLog(admin, "order_cancelled", "order", data.orderId, {
       reason: data.reason || "Cancelled by administrator",
@@ -977,6 +1123,33 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
       throw new Error(refundRes.error || "Razorpay rejected the refund request.");
     }
 
+    // Lookup payment record to link foreign key payment_id
+    const { data: paymentRecord } = await supabaseAdmin
+      .from("payments")
+      .select("id")
+      .eq("order_id", order.id)
+      .maybeSingle();
+
+    // 1. Canonical insert into payment_refunds
+    try {
+      await (supabaseAdmin as any).from("payment_refunds").insert({
+        order_id: order.id,
+        payment_id: paymentRecord?.id || null,
+        razorpay_payment_id: order.razorpay_payment_id,
+        razorpay_refund_id: refundRes.refundId || null,
+        amount: data.amountInRupees,
+        amount_paise: amountPaise,
+        currency: "INR",
+        reason: data.reason || "Administrative refund",
+        status: refundRes.status || "processed",
+        admin_user_id: admin.userId,
+        raw_response: (refundRes.raw || {}) as unknown as Json,
+      });
+    } catch (prErr) {
+      console.warn("[Admin Refund] payment_refunds write note:", prErr);
+    }
+
+    // 2. Dual-write into refunds table for backward compatibility
     await supabaseAdmin.from("refunds").insert({
       order_id: order.id,
       razorpay_payment_id: order.razorpay_payment_id,
@@ -989,14 +1162,19 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
       raw_response: (refundRes.raw || {}) as unknown as Json,
     });
 
-    // Calculate total refunds for this order to distinguish partial vs full refund
-    const { data: previousRefunds } = await supabaseAdmin
-      .from("refunds")
-      .select("amount")
-      .eq("order_id", order.id);
+    // Calculate total refunds for this order across both tables to distinguish partial vs full refund
+    const [previousRefundsRes, previousPaymentRefundsRes] = await Promise.all([
+      supabaseAdmin.from("refunds").select("amount").eq("order_id", order.id),
+      (supabaseAdmin as any).from("payment_refunds").select("amount").eq("order_id", order.id),
+    ]);
+
+    const refundList: Array<{ amount: number }> =
+      previousRefundsRes.data && previousRefundsRes.data.length > 0
+        ? (previousRefundsRes.data as Array<{ amount: number }>)
+        : ((previousPaymentRefundsRes?.data || []) as Array<{ amount: number }>);
 
     const totalRefunded =
-      (previousRefunds || []).reduce((sum, r) => sum + (r.amount || 0), 0) + data.amountInRupees;
+      refundList.reduce((sum, r) => sum + (Number(r.amount) || 0), 0) + data.amountInRupees;
     const isFullRefund = totalRefunded >= order.total;
 
     const newPaymentStatus = isFullRefund ? "refunded" : "partially_refunded";

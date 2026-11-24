@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import type { Json } from "@/integrations/supabase/types";
+import type { Json, Database } from "@/integrations/supabase/types";
+
+type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];
 
 export interface ShipMaxxConfig {
   baseUrl?: string | undefined;
@@ -370,7 +372,7 @@ export async function createShipMaxxShipment(
       })
       .eq("id", params.orderId);
 
-    // 6. Record initial tracking entry
+    // 6. Record initial tracking entry across canonical & legacy tracking tables
     if (awbNumber) {
       await supabaseAdmin.from("shipping_tracking").insert({
         shipment_id: createdShipment?.id || null,
@@ -381,7 +383,29 @@ export async function createShipMaxxShipment(
         activity: "Shipment registered with carrier. Manifest generated, awaiting courier pickup.",
         raw_data: data as unknown as Json,
       });
+
+      try {
+        await (supabaseAdmin as any).from("shipment_tracking_events").insert({
+          shipment_id: createdShipment?.id || null,
+          order_id: params.orderId,
+          awb_number: awbNumber,
+          status: "Manifest Created",
+          location: `Dispatch Hub (${pickupPincode})`,
+          details: "Shipment registered with carrier. Manifest generated, awaiting courier pickup.",
+          raw_event: data as unknown as Json,
+        });
+      } catch (steErr) {
+        console.warn("[ShipMaxx360] Note: shipment_tracking_events write:", steErr);
+      }
     }
+
+    // 7. Record shipment creation in order_status_history
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: params.orderId,
+      status: "processing",
+      comment: `Shipment booked with ShipMaxx360. AWB: ${awbNumber || "Pending"}, Courier: ${courierPartner || "Carrier"}`,
+      changed_by: "shipmaxx_system",
+    });
 
     return {
       success: true,
@@ -577,6 +601,13 @@ export async function processShipMaxxWebhook(
 
   const canonicalStatus = statusMap[payload.status.toUpperCase()] || payload.status.toLowerCase();
 
+  // Find matching order in Supabase
+  const { data: matchedOrder } = await supabaseAdmin
+    .from("orders")
+    .select("id, status, payment_method, payment_status, total")
+    .eq("awb_number", payload.awb)
+    .maybeSingle();
+
   // Update shipments table
   await supabaseAdmin
     .from("shipments")
@@ -586,20 +617,39 @@ export async function processShipMaxxWebhook(
     })
     .eq("awb_number", payload.awb);
 
-  // Update orders table - ONLY shipment_status, preserving payment_status!
+  // Update orders table with intelligent state progression
+  const orderUpdatePayload: OrderUpdate = {
+    shipment_status: canonicalStatus,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (canonicalStatus === "delivered") {
+    orderUpdatePayload.delivered_at = new Date().toISOString();
+    if (matchedOrder && !["cancelled", "refunded"].includes(matchedOrder.status)) {
+      orderUpdatePayload.status = "delivered";
+    }
+    // Settle COD payment on delivery confirmation
+    if (matchedOrder?.payment_method === "cod" && matchedOrder.payment_status !== "paid") {
+      orderUpdatePayload.payment_status = "paid";
+      await supabaseAdmin
+        .from("payments")
+        .update({ status: "captured", updated_at: new Date().toISOString() })
+        .eq("order_id", matchedOrder.id);
+    }
+  } else if (canonicalStatus === "shipped" || canonicalStatus === "in_transit") {
+    if (matchedOrder?.status === "processing") {
+      orderUpdatePayload.status = "shipped";
+    }
+  } else if (canonicalStatus === "return_requested") {
+    orderUpdatePayload.return_requested_at = new Date().toISOString();
+  }
+
   await supabaseAdmin
     .from("orders")
-    .update({
-      shipment_status: canonicalStatus,
-      updated_at: new Date().toISOString(),
-      ...(canonicalStatus === "delivered" ? { delivered_at: new Date().toISOString() } : {}),
-      ...(canonicalStatus === "return_requested"
-        ? { return_requested_at: new Date().toISOString() }
-        : {}),
-    })
+    .update(orderUpdatePayload)
     .eq("awb_number", payload.awb);
 
-  // Insert tracking checkpoint
+  // Insert tracking checkpoint into legacy shipping_tracking
   await supabaseAdmin.from("shipping_tracking").insert({
     awb_number: payload.awb,
     current_status: payload.status,
@@ -610,6 +660,35 @@ export async function processShipMaxxWebhook(
     activity: payload.activity || `Shipment status updated to ${payload.status}`,
     raw_data: payload as unknown as Json,
   });
+
+  // Canonical insert into shipment_tracking_events
+  try {
+    await (supabaseAdmin as any).from("shipment_tracking_events").insert({
+      order_id: matchedOrder?.id || null,
+      awb_number: payload.awb,
+      status: payload.status,
+      location: payload.location || null,
+      details: payload.activity || `Shipment status updated to ${payload.status}`,
+      event_time: payload.timestamp
+        ? new Date(payload.timestamp).toISOString()
+        : new Date().toISOString(),
+      raw_event: payload as unknown as Json,
+    });
+  } catch (steErr) {
+    console.warn("[ShipMaxx360 Webhook] shipment_tracking_events write:", steErr);
+  }
+
+  // Record transition in order_status_history
+  if (matchedOrder) {
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: matchedOrder.id,
+      status: (orderUpdatePayload["status"] as string) || canonicalStatus,
+      comment:
+        payload.activity ||
+        `Shipment status: ${canonicalStatus} (${payload.location || "Carrier Hub"})`,
+      changed_by: "shipmaxx_webhook",
+    });
+  }
 
   // Mark event as processed
   await supabaseAdmin

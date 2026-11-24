@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
-import { X, Truck, CreditCard, User, MapPin, RotateCcw, Ban } from "lucide-react";
+import { X, Truck, CreditCard, User, MapPin, RotateCcw, Ban, History, Clock } from "lucide-react";
 import { toast } from "sonner";
 import {
   updateAdminOrderStatusServerFn,
@@ -8,6 +8,22 @@ import {
   createAdminShipmentServerFn,
   initiateAdminRefundServerFn,
 } from "@/server/admin";
+
+export interface OrderStatusHistoryItem {
+  id: string;
+  status: string;
+  comment?: string | null | undefined;
+  changed_by?: string | null | undefined;
+  created_at: string;
+}
+
+export interface ShipmentTrackingEventItem {
+  id?: string | undefined;
+  status: string;
+  location?: string | null | undefined;
+  details?: string | null | undefined;
+  event_time?: string | null | undefined;
+}
 
 export interface OrderDetailsOrder {
   id: string;
@@ -89,6 +105,8 @@ export interface OrderDetailsProps {
   payment?: OrderDetailsPayment | null | undefined;
   shipment?: OrderDetailsShipment | null | undefined;
   refunds: OrderDetailsRefund[];
+  history?: OrderStatusHistoryItem[] | undefined;
+  tracking?: ShipmentTrackingEventItem[] | undefined;
   authToken?: string | undefined;
   onClose: () => void;
   onUpdated: () => void;
@@ -101,6 +119,8 @@ export function OrderDetailsDialog({
   payment,
   shipment,
   refunds,
+  history = [],
+  tracking = [],
   authToken,
   onClose,
   onUpdated,
@@ -413,6 +433,73 @@ export function OrderDetailsDialog({
             ))}
           </div>
         )}
+
+        {/* Order Lifecycle & Audit History */}
+        <div className="space-y-3 rounded-xl border border-border bg-background/40 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-brand text-silver">
+              <History className="h-4 w-4 text-electric" /> Order Lifecycle & Audit Trail ({history.length})
+            </div>
+            {order.awb_number && tracking.length > 0 && (
+              <span className="text-[11px] font-mono text-muted-foreground">
+                AWB: {order.awb_number} ({tracking.length} tracking checkpoints)
+              </span>
+            )}
+          </div>
+
+          {history.length === 0 ? (
+            <p className="text-xs italic text-muted-foreground">
+              No historical status transitions recorded yet.
+            </p>
+          ) : (
+            <div className="relative pl-4 space-y-3 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-border">
+              {history.map((h, idx) => (
+                <div key={h.id || idx} className="relative flex items-start gap-3 text-xs">
+                  <div className="absolute -left-[14px] top-1.5 h-2 w-2 rounded-full bg-electric ring-4 ring-card" />
+                  <div className="flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary border border-primary/20">
+                        {h.status}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground font-mono">
+                        {new Date(h.created_at).toLocaleString()}
+                      </span>
+                      {h.changed_by && (
+                        <span className="text-[10px] rounded bg-muted px-1.5 py-0.2 text-muted-foreground">
+                          by: {h.changed_by}
+                        </span>
+                      )}
+                    </div>
+                    {h.comment && <p className="text-muted-foreground leading-relaxed">{h.comment}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Carrier Tracking Scans */}
+          {tracking && tracking.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-border/60 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-silver">
+                <Truck className="h-3.5 w-3.5 text-electric" /> Carrier Live Scans
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {tracking.map((t, idx) => (
+                  <div key={t.id || idx} className="rounded-lg border border-border/70 bg-card/60 p-2 text-[11px] space-y-0.5">
+                    <div className="flex items-center justify-between font-mono font-bold text-foreground">
+                      <span>{t.status}</span>
+                      <span className="text-muted-foreground text-[10px]">
+                        {t.event_time ? new Date(t.event_time).toLocaleDateString() : ""}
+                      </span>
+                    </div>
+                    {t.location && <p className="text-muted-foreground">{t.location}</p>}
+                    {t.details && <p className="text-muted-foreground italic text-[10px]">{t.details}</p>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Action Controls */}
         <div className="border-t border-border pt-4 space-y-4">

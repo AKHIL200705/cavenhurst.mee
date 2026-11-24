@@ -341,6 +341,14 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     })
     .eq("id", input.orderId);
 
+  // Mandatory write to order_status_history
+  await supabaseAdmin.from("order_status_history").insert({
+    order_id: input.orderId,
+    status: "confirmed",
+    comment: `Payment of ₹${existingOrder.total} verified and captured via Razorpay (${input.razorpayPaymentId})`,
+    changed_by: input.userId || "razorpay_gateway",
+  });
+
   // 8. Commit reserved inventory atomically
   try {
     const { data: orderItems } = await supabaseAdmin
@@ -461,6 +469,14 @@ export async function processRazorpayWebhook(
         })
         .eq("id", order.id);
 
+      // Mandatory write to order_status_history
+      await supabaseAdmin.from("order_status_history").insert({
+        order_id: order.id,
+        status: "confirmed",
+        comment: `Payment confirmed and captured via Razorpay Webhook (${razorpayPaymentId || "verified"}). Inventory committed.`,
+        changed_by: "razorpay_webhook",
+      });
+
       // Commit inventory atomically
       try {
         const { data: orderItems } = await supabaseAdmin
@@ -502,6 +518,14 @@ export async function processRazorpayWebhook(
           updated_at: new Date().toISOString(),
         })
         .eq("id", order.id);
+
+      // Mandatory write to order_status_history
+      await supabaseAdmin.from("order_status_history").insert({
+        order_id: order.id,
+        status: "cancelled",
+        comment: "Online payment failed via Razorpay Webhook. Stock reservations released.",
+        changed_by: "razorpay_webhook",
+      });
 
       // Release reserved stock so other shoppers can purchase
       await releaseOrderInventoryReservations(order.id);

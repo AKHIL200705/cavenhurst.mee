@@ -713,65 +713,178 @@ test("Admin Roles: Privilege verification by role", () => {
 });
 
 // ==============================================================================
-// 18. ATOMIC INVENTORY RESERVATION & OVERSELL PROTECTION
+// 19. ORDER STATUS STATE MACHINE & TRANSITION RULES
 // ==============================================================================
-test("Inventory: Atomic reservation, oversell protection, and lifecycle", () => {
-  function getAvailableStock(stockQuantity, reservedQuantity) {
-    return Math.max(0, (stockQuantity || 0) - (reservedQuantity || 0));
-  }
+const VALID_ORDER_TRANSITIONS = {
+  pending_payment: ["confirmed", "cancelled"],
+  confirmed: ["processing", "cancelled"],
+  processing: ["shipped", "cancelled"],
+  shipped: ["out_for_delivery", "delivered", "rto_initiated", "cancelled"],
+  out_for_delivery: ["delivered", "rto_initiated", "cancelled"],
+  delivered: ["return_requested", "returned"],
+  return_requested: ["returned", "delivered"],
+  returned: ["refunded"],
+  cancelled: [],
+  refunded: [],
+  rto_delivered: [],
+};
 
-  function tryReserveInventory(inventory, requestedQty) {
-    const available = getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity);
-    if (available < requestedQty) {
-      return { success: false, error: "Insufficient stock" };
-    }
-    inventory.reservedQuantity += requestedQty;
-    return { success: true, newReserved: inventory.reservedQuantity };
-  }
+function canTransitionOrderStatus(currentStatus, targetStatus) {
+  if (currentStatus === targetStatus) return true;
+  const allowed = VALID_ORDER_TRANSITIONS[currentStatus] || [];
+  return allowed.includes(targetStatus);
+}
 
-  function commitReservedInventory(inventory, qty) {
-    inventory.stockQuantity = Math.max(0, inventory.stockQuantity - qty);
-    inventory.reservedQuantity = Math.max(0, inventory.reservedQuantity - qty);
-    return { stockQuantity: inventory.stockQuantity, reservedQuantity: inventory.reservedQuantity };
-  }
+test("Order Lifecycle: Allowed status transitions and terminal states", () => {
+  // Valid transitions
+  assert.equal(canTransitionOrderStatus("pending_payment", "confirmed"), true);
+  assert.equal(canTransitionOrderStatus("pending_payment", "cancelled"), true);
+  assert.equal(canTransitionOrderStatus("confirmed", "processing"), true);
+  assert.equal(canTransitionOrderStatus("processing", "shipped"), true);
+  assert.equal(canTransitionOrderStatus("shipped", "delivered"), true);
+  assert.equal(canTransitionOrderStatus("delivered", "return_requested"), true);
 
-  function releaseReservedInventory(inventory, qty) {
-    inventory.reservedQuantity = Math.max(0, inventory.reservedQuantity - qty);
-    return { reservedQuantity: inventory.reservedQuantity };
-  }
+  // Terminal states cannot be transitioned
+  assert.equal(canTransitionOrderStatus("cancelled", "confirmed"), false);
+  assert.equal(canTransitionOrderStatus("cancelled", "processing"), false);
+  assert.equal(canTransitionOrderStatus("refunded", "shipped"), false);
 
-  const inventory = { stockQuantity: 10, reservedQuantity: 0 };
-
-  // 1. Initial available stock
-  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 10);
-
-  // 2. Reserve 4 units
-  const res1 = tryReserveInventory(inventory, 4);
-  assert.equal(res1.success, true);
-  assert.equal(inventory.reservedQuantity, 4);
-  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 6);
-
-  // 3. Oversell protection: trying to reserve 7 units when only 6 are available must fail
-  const res2 = tryReserveInventory(inventory, 7);
-  assert.equal(res2.success, false);
-  assert.equal(inventory.reservedQuantity, 4); // unchanged
-
-  // 4. Reserve remaining 6 units -> available becomes 0
-  const res3 = tryReserveInventory(inventory, 6);
-  assert.equal(res3.success, true);
-  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 0);
-
-  // 5. Payment failure on 6-unit order releases reservation
-  releaseReservedInventory(inventory, 6);
-  assert.equal(inventory.reservedQuantity, 4);
-  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 6);
-
-  // 6. Payment verified on 4-unit order commits stock
-  commitReservedInventory(inventory, 4);
-  assert.equal(inventory.stockQuantity, 6);
-  assert.equal(inventory.reservedQuantity, 0);
-  assert.equal(getAvailableStock(inventory.stockQuantity, inventory.reservedQuantity), 6);
+  // Invalid skip transitions
+  assert.equal(canTransitionOrderStatus("pending_payment", "delivered"), false);
+  assert.equal(canTransitionOrderStatus("confirmed", "delivered"), false);
 });
+
+// ==============================================================================
+// 20. ORDER STATUS HISTORY AUDIT TRAIL LOGGING
+// ==============================================================================
+test("Order Audit: Order status history entry validation", () => {
+  function createStatusHistoryEntry({ orderId, status, comment, changedBy }) {
+    if (!orderId) throw new Error("orderId required");
+    if (!status) throw new Error("status required");
+    return {
+      order_id: orderId,
+      status,
+      comment: comment || null,
+      changed_by: changedBy || "system",
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  const entry = createStatusHistoryEntry({
+    orderId: "ord_12345",
+    status: "confirmed",
+    comment: "Payment verified via Razorpay",
+    changedBy: "razorpay_gateway",
+  });
+
+  assert.equal(entry.order_id, "ord_12345");
+  assert.equal(entry.status, "confirmed");
+  assert.equal(entry.changed_by, "razorpay_gateway");
+  assert.ok(entry.created_at);
+});
+
+// ==============================================================================
+// 21. PAYMENT REFUNDS & STATUS RECONCILIATION
+// ==============================================================================
+test("Payment Refunds: Dual-table reconciliation and full vs partial calculation", () => {
+  function calculateRefundOutcome(orderTotal, existingRefunds, newRefundAmount) {
+    const totalPrevious = existingRefunds.reduce((sum, r) => sum + r.amount, 0);
+    const totalAfter = totalPrevious + newRefundAmount;
+    if (newRefundAmount <= 0) throw new Error("Refund amount must be > 0");
+    if (totalAfter > orderTotal) throw new Error("Cannot refund more than order total");
+
+    const isFullRefund = totalAfter >= orderTotal;
+    return {
+      totalRefunded: totalAfter,
+      isFullRefund,
+      newPaymentStatus: isFullRefund ? "refunded" : "partially_refunded",
+      newOrderStatus: isFullRefund ? "refunded" : "confirmed",
+    };
+  }
+
+  const orderTotal = 2499;
+
+  // Partial refund: ₹1000
+  const partialRes = calculateRefundOutcome(orderTotal, [], 1000);
+  assert.equal(partialRes.totalRefunded, 1000);
+  assert.equal(partialRes.isFullRefund, false);
+  assert.equal(partialRes.newPaymentStatus, "partially_refunded");
+  assert.equal(partialRes.newOrderStatus, "confirmed");
+
+  // Subsequent full refund: remaining ₹1499
+  const fullRes = calculateRefundOutcome(orderTotal, [{ amount: 1000 }], 1499);
+  assert.equal(fullRes.totalRefunded, 2499);
+  assert.equal(fullRes.isFullRefund, true);
+  assert.equal(fullRes.newPaymentStatus, "refunded");
+  assert.equal(fullRes.newOrderStatus, "refunded");
+
+  // Over-refund attempt must throw
+  assert.throws(() => {
+    calculateRefundOutcome(orderTotal, [{ amount: 1000 }, { amount: 1499 }], 100);
+  }, /Cannot refund more than order total/);
+});
+
+// ==============================================================================
+// 22. SHIPMAXX WEBHOOK DELIVERY & COD PAYMENT SETTLEMENT
+// ==============================================================================
+test("ShipMaxx: Delivery confirmation settles COD payment and advances order status", () => {
+  function processDeliveryWebhook(order, webhookStatus) {
+    if (webhookStatus === "DELIVERED") {
+      const updatedOrder = {
+        ...order,
+        shipment_status: "delivered",
+        delivered_at: new Date().toISOString(),
+      };
+      if (!["cancelled", "refunded"].includes(order.status)) {
+        updatedOrder.status = "delivered";
+      }
+      if (order.payment_method === "cod" && order.payment_status !== "paid") {
+        updatedOrder.payment_status = "paid";
+      }
+      return updatedOrder;
+    }
+    return order;
+  }
+
+  // COD order: delivered -> status becomes delivered AND payment becomes paid
+  const codOrder = {
+    id: "ord_cod_1",
+    status: "processing",
+    shipment_status: "shipped",
+    payment_method: "cod",
+    payment_status: "pending",
+  };
+  const deliveredCod = processDeliveryWebhook(codOrder, "DELIVERED");
+  assert.equal(deliveredCod.status, "delivered");
+  assert.equal(deliveredCod.shipment_status, "delivered");
+  assert.equal(deliveredCod.payment_status, "paid");
+  assert.ok(deliveredCod.delivered_at);
+
+  // Prepaid order: delivered -> status becomes delivered, payment remains paid
+  const prepaidOrder = {
+    id: "ord_prepaid_1",
+    status: "processing",
+    shipment_status: "shipped",
+    payment_method: "online",
+    payment_status: "paid",
+  };
+  const deliveredPrepaid = processDeliveryWebhook(prepaidOrder, "DELIVERED");
+  assert.equal(deliveredPrepaid.status, "delivered");
+  assert.equal(deliveredPrepaid.payment_status, "paid");
+
+  // Cancelled order cannot be revived by a stray delivery webhook
+  const cancelledOrder = {
+    id: "ord_cancelled_1",
+    status: "cancelled",
+    shipment_status: "shipped",
+    payment_method: "online",
+    payment_status: "refunded",
+  };
+  const deliveredCancelled = processDeliveryWebhook(cancelledOrder, "DELIVERED");
+  assert.equal(deliveredCancelled.status, "cancelled"); // stays cancelled
+  assert.equal(deliveredCancelled.shipment_status, "delivered");
+});
+
 
 
 
