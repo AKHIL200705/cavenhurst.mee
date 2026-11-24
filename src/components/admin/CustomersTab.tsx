@@ -165,8 +165,8 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-serif text-xl italic text-foreground">Customer Directory & Management</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Customer Directory & Management</h2>
+          <p className="text-xs text-muted-foreground font-sans">
             Authoritative customer identities, mobile verification status, lifetime expenditures, and order history.
           </p>
         </div>
@@ -438,7 +438,7 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
           <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-card p-6 shadow-2xl space-y-6">
             <div className="flex items-center justify-between border-b border-border pb-4">
               <div>
-                <h3 className="font-serif text-xl italic text-foreground">
+                <h3 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
                   {customerDetails?.customer?.full_name || "Customer Details"}
                 </h3>
                 <p className="text-xs text-muted-foreground">

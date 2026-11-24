@@ -477,18 +477,18 @@ function Login() {
     <div className="relative -mb-px overflow-hidden">
       <img src={fabric} alt="" className="absolute inset-0 h-full w-full object-cover" />
       <div className="relative mx-auto flex min-h-[90vh] max-w-md flex-col">
-        <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center px-6 py-12 text-center font-sans">
           <WingMark className="h-16 w-auto text-foreground drop-shadow-2xl" />
           <p className="mt-6 font-logo text-2xl font-bold tracking-brand">CAVENHURST</p>
-          <p className="mt-4 text-xs font-semibold tracking-[0.5em] text-silver">
+          <p className="mt-4 font-heading text-xs font-bold uppercase tracking-[0.25em] text-electric">
             PREMIUM ESSENTIALS
           </p>
-          <p className="mt-3 font-serif text-xl italic text-muted-foreground">
+          <p className="mt-3 font-sans text-sm sm:text-base font-medium text-muted-foreground">
             Refined apparel for everyday movement.
           </p>
         </div>
 
-        <div className="glass-panel rounded-t-3xl border border-b-0 border-border px-6 pb-10 pt-4">
+        <div className="glass-panel rounded-t-3xl border border-b-0 border-border px-6 pb-10 pt-4 font-sans">
           <div className="mx-auto mb-6 h-1 w-12 rounded-full bg-silver/40" />
 
           {/* Tab Switcher: Login vs Sign Up */}
@@ -503,8 +503,8 @@ function Login() {
                   setSignupSuccessNote(null);
                 }}
                 className={cn(
-                  "rounded-full py-2.5 text-sm font-medium transition",
-                  tab === t && "bg-primary font-bold text-primary-foreground shadow-sm",
+                  "rounded-full py-2.5 text-xs font-bold uppercase tracking-wider transition",
+                  tab === t && "bg-primary text-primary-foreground shadow-sm",
                 )}
               >
                 {t === "login" ? "Login" : "Sign Up"}

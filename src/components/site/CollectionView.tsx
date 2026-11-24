@@ -88,35 +88,37 @@ export function CollectionView({
         />
         <div className="absolute inset-0 bg-hero-gradient" />
         <div className="relative mx-auto max-w-7xl px-4 py-16 sm:py-24">
-          <p className="text-xs tracking-brand text-silver">CAVENHURST</p>
-          <h1 className="mt-3 font-display text-5xl font-semibold uppercase italic sm:text-7xl">
+          <p className="font-heading text-xs uppercase tracking-brand text-silver">CAVENHURST</p>
+          <h1 className="mt-3 font-heading text-5xl sm:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-none text-foreground">
             {title}
           </h1>
-          <p className="mt-3 text-lg text-silver">{tagline}</p>
+          <p className="mt-3 font-sans text-base sm:text-lg font-medium text-silver">{tagline}</p>
         </div>
       </section>
 
-      <div className="mx-auto max-w-7xl px-4 py-6">
-        <div className="flex items-center justify-between text-sm">
-          <nav className="flex items-center gap-2 text-muted-foreground">
+      <div className="mx-auto max-w-7xl px-4 py-6 font-sans">
+        <div className="flex items-center justify-between text-xs sm:text-sm">
+          <nav className="flex items-center gap-2 text-muted-foreground uppercase tracking-wider text-[11px] font-semibold">
             <Link to="/" className="flex items-center gap-1 hover:text-foreground">
-              <Home className="h-4 w-4" />
+              <Home className="h-3.5 w-3.5" />
               Home
             </Link>
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-3.5 w-3.5" />
             <span className="font-bold text-foreground">{title}</span>
           </nav>
-          <span className="font-bold">{list.length} Products</span>
+          <span className="font-heading text-xs font-bold uppercase tracking-wider text-silver">
+            {list.length} Products
+          </span>
         </div>
 
         <div className="mt-5 flex items-center gap-3 rounded-xl border border-border px-3 py-2">
           <Sheet>
-            <SheetTrigger className="flex items-center gap-2 px-2 py-1.5 text-sm font-bold">
+            <SheetTrigger className="flex items-center gap-2 px-2 py-1.5 text-xs font-bold uppercase tracking-wider">
               <SlidersHorizontal className="h-4 w-4" />
               Filter
             </SheetTrigger>
             <SheetContent side="left" className="w-80 overflow-y-auto bg-background">
-              <SheetTitle className="font-serif text-2xl">Filters</SheetTitle>
+              <SheetTitle className="font-heading text-2xl font-bold uppercase tracking-tight">Filters</SheetTitle>
               <div className="mt-6 space-y-7 text-sm">
                 <FilterGroup title="Category">
                   {["t-shirts", "hoodies"].map((c) => (
@@ -248,7 +250,7 @@ export function CollectionView({
 
         {products.length === 0 ? (
           <div className="py-24 text-center space-y-3">
-            <p className="font-serif text-2xl italic text-foreground">No Products Available</p>
+            <p className="font-heading text-2xl font-bold uppercase tracking-tight text-foreground">No Products Available</p>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
               Our artisans are currently preparing new silhouettes in the workshop. Please check back shortly or visit our collections.
             </p>

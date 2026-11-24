@@ -202,9 +202,9 @@ function Checkout() {
 
   if (cart.length === 0 && !orderSuccess) {
     return (
-      <div className="py-28 text-center">
-        <h1 className="font-serif text-4xl italic">Your bag is empty</h1>
-        <Link to="/shop" className="mt-6 inline-block underline">
+      <div className="py-28 text-center font-sans">
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">Your bag is empty</h1>
+        <Link to="/shop" className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90">
           Shop now
         </Link>
       </div>
@@ -214,15 +214,15 @@ function Checkout() {
   // Order Confirmation State
   if (orderSuccess) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-20 text-center">
+      <div className="mx-auto max-w-2xl px-4 py-20 text-center font-sans">
         <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
           <CheckCircle2 className="h-12 w-12" />
         </div>
-        <h1 className="font-serif text-5xl italic">Order Confirmed</h1>
-        <p className="mt-3 text-lg font-bold tracking-brand text-foreground">
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">Order Confirmed</h1>
+        <p className="mt-3 font-heading text-lg sm:text-xl font-bold tracking-wider text-emerald-400">
           #{orderSuccess.orderNumber}
         </p>
-        <p className="mt-4 text-muted-foreground">
+        <p className="mt-4 text-sm sm:text-base text-muted-foreground leading-relaxed">
           Thank you for choosing CAVENHURST. Your order has been placed and is being prepared for
           dispatch from our logistics hub.
         </p>
@@ -237,13 +237,13 @@ function Checkout() {
         <div className="mt-10 flex flex-wrap justify-center gap-4">
           <Link
             to="/account"
-            className="rounded-md bg-primary px-6 py-3.5 font-bold text-primary-foreground transition hover:opacity-90"
+            className="rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg transition hover:opacity-90"
           >
             View in My Account
           </Link>
           <Link
             to="/track-order"
-            className="rounded-md border border-border px-6 py-3.5 font-bold transition hover:bg-accent"
+            className="rounded-md border border-border px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] transition hover:bg-accent"
           >
             Track Shipment
           </Link>
@@ -402,15 +402,15 @@ function Checkout() {
     >
       <div className="space-y-8">
         <div>
-          <h1 className="font-serif text-5xl italic">Checkout</h1>
-          <p className="mt-2 text-sm text-silver">
+          <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">Checkout</h1>
+          <p className="mt-2 text-xs sm:text-sm text-silver font-medium">
             Official CAVENHURST store · Dispatched via ShipMaxx360 from Andhra Pradesh Hub (521212)
           </p>
         </div>
 
         {/* Contact Information */}
         <section>
-          <h2 className="mb-4 text-sm font-bold tracking-brand">1. CONTACT INFORMATION</h2>
+          <h2 className="mb-4 font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">1. CONTACT INFORMATION</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <input
               required
@@ -441,7 +441,7 @@ function Checkout() {
         {/* Shipping Address */}
         <section>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-bold tracking-brand">2. DELIVERY ADDRESS</h2>
+            <h2 className="font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">2. DELIVERY ADDRESS</h2>
             <span className="flex items-center gap-1 text-xs text-silver">
               <Truck className="h-3.5 w-3.5" /> India-wide delivery
             </span>
@@ -568,7 +568,7 @@ function Checkout() {
         {/* Payment Method */}
         <section>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-sm font-bold tracking-brand">3. PAYMENT OPTION</h2>
+            <h2 className="font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">3. PAYMENT OPTION</h2>
             <span className="flex items-center gap-1 text-xs text-silver">
               <ShieldCheck className="h-3.5 w-3.5" /> 256-bit SSL encrypted
             </span>

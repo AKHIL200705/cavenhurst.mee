@@ -167,8 +167,8 @@ function AdminLogin() {
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-electric/10 text-electric border border-electric/30">
             <ShieldCheck className="h-6 w-6" />
           </div>
-          <p className="text-[11px] font-mono tracking-widest text-silver uppercase">Executive Portal</p>
-          <h1 className="font-serif text-3xl font-semibold tracking-wide text-foreground">
+          <p className="text-[11px] font-heading font-bold tracking-widest text-silver uppercase">Executive Portal</p>
+          <h1 className="font-heading text-3xl font-bold uppercase tracking-tight text-foreground">
             CAVENHURST Admin
           </h1>
           <p className="text-xs text-muted-foreground">

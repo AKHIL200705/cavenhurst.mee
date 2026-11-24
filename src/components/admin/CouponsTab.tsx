@@ -91,8 +91,8 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">Storewide Coupons & Promotional Discounts</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Storewide Coupons & Promotional Discounts</h2>
+          <p className="text-xs text-muted-foreground font-sans">
             Configure server-enforced coupon codes, percentage reductions, and cart eligibility
             limits.
           </p>
@@ -168,10 +168,10 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
           <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-4">
             <div className="flex items-start justify-between border-b border-border pb-3">
               <div>
-                <span className="font-mono text-xs uppercase tracking-brand text-silver">
+                <span className="font-heading text-xs uppercase tracking-wider text-silver">
                   DISCOUNT CAMPAIGN
                 </span>
-                <h3 className="font-serif text-xl italic">Create Promotional Coupon</h3>
+                <h3 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Create Promotional Coupon</h3>
               </div>
               <button
                 onClick={() => setShowAddModal(false)}

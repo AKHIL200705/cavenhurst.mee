@@ -146,23 +146,25 @@ export function ProductCard({ p, layout = "grid" }: { p: Product; layout?: "grid
         )}
 
         {/* Product Meta */}
-        <div className="relative z-10 flex flex-1 flex-col gap-1.5 p-3.5 sm:p-4">
+        <div className="relative z-10 flex flex-1 flex-col gap-1.5 p-3.5 sm:p-4 font-sans">
           <Link
             to="/product/$slug"
             params={{ slug: p.slug }}
-            className="text-sm font-bold leading-tight sm:text-base hover:text-electric transition-colors"
+            className="text-xs sm:text-sm font-bold uppercase tracking-tight text-paper-foreground hover:text-electric transition-colors line-clamp-1"
           >
             {p.name}
           </Link>
 
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-base font-extrabold sm:text-lg">{formatINR(p.price)}</span>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="text-base sm:text-lg font-black tracking-tight text-paper-foreground">
+              {formatINR(p.price)}
+            </span>
             {off > 0 && (
               <>
-                <span className="text-xs text-paper-foreground/50 line-through">
+                <span className="text-xs font-medium text-paper-foreground/50 line-through">
                   {formatINR(p.mrp)}
                 </span>
-                <span className="rounded bg-sale px-1.5 py-0.5 text-[10px] font-bold text-destructive-foreground">
+                <span className="rounded bg-sale px-1.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-destructive-foreground">
                   {off}% OFF
                 </span>
               </>

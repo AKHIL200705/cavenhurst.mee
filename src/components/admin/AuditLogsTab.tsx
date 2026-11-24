@@ -23,8 +23,8 @@ export function AuditLogsTab({ logs, loading, onRefresh }: AuditLogsTabProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">Administrative Security Audit Trail</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Administrative Security Audit Trail</h2>
+          <p className="text-xs text-muted-foreground font-sans">
             Immutable log of sensitive operations: status overrides, stock adjustments, refunds, and
             catalog changes.
           </p>

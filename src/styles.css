@@ -5,15 +5,16 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-serif: "Bodoni Moda", Didot, "Times New Roman", serif;
-  --font-sans: "Manrope", "Inter", Arial, sans-serif;
-  --font-ui: "Inter", "Manrope", Arial, sans-serif;
-  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-serif: "Oswald", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-heading: "Oswald", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-ui: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Oswald", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-script: "Parisienne", cursive;
   --font-mono: "IBM Plex Mono", monospace;
   --font-logo: "Cormorant Garamond", Georgia, serif;
-  --font-welcome: "Libre Baskerville", Georgia, serif;
-  --font-welcome-body: "IBM Plex Sans", "Inter", Arial, sans-serif;
+  --font-welcome: "Oswald", sans-serif;
+  --font-welcome-body: "Montserrat", sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -110,7 +111,10 @@
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    line-height: 1.65;
+    line-height: 1.6;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     background-image: radial-gradient(ellipse at top, oklch(0.27 0.065 254 / 50%), transparent 60%);
     background-attachment: fixed;
   }
@@ -118,13 +122,21 @@
 
 @layer base {
   h1,
-  h2 {
-    font-family: var(--font-serif);
-    line-height: 1.15;
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
   }
   input,
   select,
-  textarea {
+  textarea,
+  button {
     font-family: var(--font-ui);
   }
 }
@@ -323,7 +335,19 @@
 }
 
 @utility tracking-brand {
-  letter-spacing: 0.32em;
+  letter-spacing: 0.22em;
+}
+@utility tracking-heading {
+  letter-spacing: 0.03em;
+}
+@utility font-heading {
+  font-family: var(--font-heading);
+}
+@utility font-body {
+  font-family: var(--font-sans);
+}
+@utility font-ui {
+  font-family: var(--font-ui);
 }
 @utility shadow-card {
   box-shadow: var(--shadow-card);

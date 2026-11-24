@@ -146,10 +146,10 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary">
             <ShieldAlert className="h-8 w-8 text-gold" />
           </div>
-          <span className="mt-4 font-mono text-xs uppercase tracking-brand text-silver">
+          <span className="mt-4 font-heading text-xs uppercase tracking-wider text-silver">
             RESTRICTED ACCESS
           </span>
-          <h1 className="mt-1 font-serif text-3xl italic tracking-tight">
+          <h1 className="mt-1 font-heading text-3xl font-bold uppercase tracking-tight text-foreground">
             CAVENHURST Admin Portal
           </h1>
           <p className="mt-2 text-xs text-muted-foreground">

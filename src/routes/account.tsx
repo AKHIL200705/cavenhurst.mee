@@ -340,8 +340,8 @@ function Account() {
   if (!ready) return <div className="py-28 text-center text-muted-foreground">Loading…</div>;
   if (!user)
     return (
-      <div className="mx-auto max-w-3xl px-4 py-16">
-        <h1 className="font-serif text-5xl italic">My Account</h1>
+      <div className="mx-auto max-w-3xl px-4 py-16 font-sans">
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">My Account</h1>
         <p className="mt-3 text-muted-foreground">
           Sign in to see your saved bag, wishlist and orders on any device.
         </p>
@@ -357,16 +357,16 @@ function Account() {
   const name = user.phone ? `+${user.phone}` : user.email;
   return (
     <div className="mx-auto max-w-5xl space-y-12 px-4 py-16">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 font-sans">
         <div>
-          <h1 className="font-serif text-5xl italic">My Account</h1>
-          <p className="mt-2 text-silver">{name}</p>
+          <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">My Account</h1>
+          <p className="mt-2 font-medium text-silver">{name}</p>
         </div>
         <div className="flex items-center gap-3">
           {isAdmin && (
             <Link
               to="/admin"
-              className="flex items-center gap-2 rounded-md border border-electric/40 bg-electric/10 px-4 py-2 text-sm font-semibold text-electric"
+              className="flex items-center gap-2 rounded-md border border-electric/40 bg-electric/10 px-4 py-2 font-sans text-xs font-bold uppercase tracking-wider text-electric"
             >
               <Shield className="h-4 w-4" /> Admin Portal
             </Link>
@@ -376,7 +376,7 @@ function Account() {
               await signOut();
               void navigate({ to: "/login", replace: true });
             }}
-            className="rounded-md border border-border px-5 py-2 text-sm hover:bg-accent"
+            className="rounded-md border border-border px-5 py-2 font-sans text-xs font-bold uppercase tracking-wider hover:bg-accent transition-colors"
           >
             Sign out
           </button>
@@ -387,7 +387,7 @@ function Account() {
       <section className="rounded-2xl border border-border bg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-sm font-bold tracking-brand">ACCOUNT DETAILS</h2>
+            <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">ACCOUNT DETAILS</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Your registered email, name, and contact information.
             </p>
@@ -489,7 +489,7 @@ function Account() {
       {/* SAVED BAG */}
       <section>
         <div className="mb-4 flex justify-between">
-          <h2 className="text-sm font-bold tracking-brand">SAVED BAG ({cart.length})</h2>
+          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">SAVED BAG ({cart.length})</h2>
           <Link to="/cart" className="text-sm underline">
             Open bag
           </Link>
@@ -537,7 +537,7 @@ function Account() {
       {/* WISHLIST */}
       <section>
         <div className="mb-4 flex justify-between">
-          <h2 className="text-sm font-bold tracking-brand">WISHLIST ({wishlist.length})</h2>
+          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">WISHLIST ({wishlist.length})</h2>
           <Link to="/wishlist" className="text-sm underline">
             View all
           </Link>
@@ -569,7 +569,7 @@ function Account() {
       {/* SAVED ADDRESSES */}
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-sm font-bold tracking-brand">SAVED ADDRESSES ({addresses.length})</h2>
+          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">SAVED ADDRESSES ({addresses.length})</h2>
           {!showAddressForm && (
             <button
               onClick={() => {
@@ -767,7 +767,7 @@ function Account() {
 
       {/* ORDER HISTORY */}
       <section>
-        <h2 className="mb-4 text-sm font-bold tracking-brand">ORDER HISTORY</h2>
+        <h2 className="mb-4 font-heading text-base font-bold uppercase tracking-wider text-foreground">ORDER HISTORY</h2>
         {orders === null ? (
           <p className="text-muted-foreground">Loading…</p>
         ) : orders.length === 0 ? (

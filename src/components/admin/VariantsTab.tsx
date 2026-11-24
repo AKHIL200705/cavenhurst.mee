@@ -135,7 +135,7 @@ export function VariantsTab({ variants, products, loading, onRefresh, authToken 
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">Product Variants (Sizes & Colors)</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Product Variants (Sizes & Colors)</h2>
           <p className="text-xs text-muted-foreground">
             Manage SKU allocations, dimensional sizing, fabric color options, and real-time inventory counts.
           </p>
@@ -288,7 +288,7 @@ export function VariantsTab({ variants, products, loading, onRefresh, authToken 
             className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4"
           >
             <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-serif text-lg italic">
+              <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                 {editingId ? "Edit Product Variant" : "Add New Variant"}
               </h3>
               <button type="button" onClick={resetForm} className="text-muted-foreground hover:text-foreground">

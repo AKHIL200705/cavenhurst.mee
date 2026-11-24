@@ -7,16 +7,16 @@ import { COLLECTIONS } from "@/lib/products";
 
 export function AnnouncementBar() {
   return (
-    <div className="border-b border-border bg-navy-deep text-xs font-semibold text-silver">
-      <div className="mx-auto flex max-w-7xl items-center justify-center gap-4 px-4 py-2 sm:gap-6">
+    <div className="border-b border-border bg-navy-deep text-[11px] sm:text-xs font-bold uppercase tracking-[0.16em] text-silver font-sans">
+      <div className="mx-auto flex max-w-7xl items-center justify-center gap-4 px-4 py-2.5 sm:gap-6">
         <span className="flex items-center gap-2">
-          <Truck className="h-3.5 w-3.5" /> Free shipping above ₹1,999
+          <Truck className="h-3.5 w-3.5 text-electric" /> Free shipping above ₹1,999
         </span>
         <span className="hidden sm:flex items-center gap-2">
-          <RefreshCw className="h-3.5 w-3.5" /> Easy returns (7 days)
+          <RefreshCw className="h-3.5 w-3.5 text-electric" /> Easy returns (7 days)
         </span>
         <span className="hidden md:flex items-center gap-2">
-          <Lock className="h-3.5 w-3.5" /> Secure payments
+          <Lock className="h-3.5 w-3.5 text-electric" /> 100% Secure payments
         </span>
       </div>
     </div>
@@ -49,7 +49,7 @@ export function Header() {
                       key={n.slug}
                       to="/collections/$slug"
                       params={{ slug: n.slug }}
-                      className="rounded-md px-3 py-3 text-2xl font-semibold hover:bg-secondary"
+                      className="rounded-md px-3 py-3 font-heading text-2xl font-bold uppercase tracking-wide hover:bg-secondary transition-colors"
                     >
                       {n.label}
                     </Link>
@@ -57,7 +57,7 @@ export function Header() {
                     <Link
                       key={n.to}
                       to="/shop"
-                      className="rounded-md px-3 py-3 text-2xl font-semibold hover:bg-secondary"
+                      className="rounded-md px-3 py-3 font-heading text-2xl font-bold uppercase tracking-wide hover:bg-secondary transition-colors"
                     >
                       {n.label}
                     </Link>
@@ -73,7 +73,7 @@ export function Header() {
                   <Link
                     key={to}
                     to={to as "/about"}
-                    className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+                    className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
                   >
                     {l}
                   </Link>
@@ -81,23 +81,30 @@ export function Header() {
               </nav>
             </SheetContent>
           </Sheet>
-          <nav className="hidden lg:flex gap-6 text-xs font-semibold uppercase tracking-[0.2em] text-silver">
-            <Link to="/shop" className="hover:text-foreground">
-              Shop
+          <nav className="hidden lg:flex gap-8 text-xs font-bold uppercase tracking-[0.18em] text-silver font-sans">
+            <Link to="/shop" className="hover:text-foreground transition-colors">
+              Shop All
             </Link>
             <Link
               to="/collections/$slug"
               params={{ slug: "t-shirts" }}
-              className="hover:text-foreground"
+              className="hover:text-foreground transition-colors"
             >
               Tees
             </Link>
             <Link
               to="/collections/$slug"
               params={{ slug: "hoodies" }}
-              className="hover:text-foreground"
+              className="hover:text-foreground transition-colors"
             >
               Hoodies
+            </Link>
+            <Link
+              to="/collections/$slug"
+              params={{ slug: "oversized" }}
+              className="hover:text-foreground transition-colors"
+            >
+              Oversized
             </Link>
           </nav>
         </div>

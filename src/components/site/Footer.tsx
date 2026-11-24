@@ -106,11 +106,11 @@ export function Footer() {
 function FooterCol({ title, links }: { title: string; links: string[][] }) {
   return (
     <div>
-      <h4 className="mb-4 text-xs font-bold uppercase tracking-[0.25em] text-silver">{title}</h4>
-      <ul className="space-y-2 text-sm text-muted-foreground">
+      <h4 className="mb-4 font-heading text-sm font-bold uppercase tracking-[0.16em] text-silver">{title}</h4>
+      <ul className="space-y-2 text-xs font-medium text-muted-foreground">
         {links.map(([to, l]) => (
           <li key={to}>
-            <a href={to} className="hover:text-foreground">
+            <a href={to} className="hover:text-foreground transition-colors">
               {l}
             </a>
           </li>
@@ -129,13 +129,13 @@ export function BottomNav() {
     { to: "/account", label: "Account", Icon: User },
   ] as const;
   return (
-    <nav className="glass-navigation navigation-motion fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border pb-[env(safe-area-inset-bottom)] lg:hidden">
+    <nav className="glass-navigation navigation-motion fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-border pb-[env(safe-area-inset-bottom)] lg:hidden font-sans">
       {items.map(({ to, label, Icon }) => (
         <Link
           key={to}
           to={to as "/"}
           activeOptions={{ exact: true }}
-          className="flex flex-col items-center gap-1 py-2.5 text-[11px] text-muted-foreground data-[status=active]:font-bold data-[status=active]:text-foreground"
+          className="flex flex-col items-center gap-1 py-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground data-[status=active]:text-foreground"
         >
           <Icon className="h-5 w-5" />
           {label}

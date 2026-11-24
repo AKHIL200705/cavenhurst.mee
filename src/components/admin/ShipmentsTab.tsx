@@ -25,7 +25,7 @@ export function ShipmentsTab({ shipments, loading, onRefresh }: ShipmentsTabProp
     <div className="space-y-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
             ShipMaxx360 Logistics & Fulfillment Registry
           </h2>
           <p className="text-xs text-muted-foreground">

@@ -508,10 +508,10 @@ function AdminDashboard() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex h-16 items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <span className="font-serif text-2xl italic tracking-tight text-foreground">
+              <span className="font-logo text-2xl font-bold tracking-brand text-foreground">
                 CAVENHURST
               </span>
-              <span className="hidden sm:inline-block rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 font-mono text-[10px] font-bold text-gold">
+              <span className="hidden sm:inline-block rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-gold">
                 OPERATIONS CONSOLE
               </span>
             </div>

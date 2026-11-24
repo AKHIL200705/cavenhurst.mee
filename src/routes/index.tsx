@@ -62,22 +62,22 @@ function Home() {
         />
         <div className="absolute inset-0 bg-hero-gradient" />
         <div className="relative mx-auto flex h-[78vh] min-h-[560px] max-h-[760px] max-w-7xl flex-col justify-center px-4 py-20">
-          <p className="text-xs tracking-brand text-silver animate-in fade-in slide-in-from-bottom-2 duration-700">
+          <p className="font-heading text-xs uppercase tracking-brand text-silver animate-in fade-in slide-in-from-bottom-2 duration-700">
             CAVENHURST
           </p>
-          <h1 className="mt-4 font-serif text-6xl font-semibold uppercase italic leading-[0.9] sm:text-8xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+          <h1 className="mt-4 font-heading text-6xl sm:text-8xl lg:text-9xl font-bold uppercase tracking-tight leading-[0.88] animate-in fade-in slide-in-from-bottom-4 duration-700">
             Urban
             <br />
             Motion
           </h1>
-          <div className="mt-6 h-px w-12 bg-foreground" />
-          <p className="mt-6 max-w-xs text-lg text-silver">
+          <div className="mt-6 h-1 w-16 bg-electric" />
+          <p className="mt-6 max-w-sm font-sans text-base sm:text-lg font-medium text-silver">
             Modern fits. Premium comfort. Designed for the city.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
               to="/shop"
-              className="inline-flex w-fit items-center gap-3 rounded-md bg-primary px-6 py-3 font-bold text-primary-foreground transition hover:gap-4"
+              className="inline-flex w-fit items-center gap-3 rounded-md bg-primary px-7 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground transition hover:gap-4 shadow-xl"
             >
               Explore Collection <ArrowRight className="h-4 w-4" />
             </Link>
@@ -124,7 +124,7 @@ function Home() {
                 className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
               />
               <div className="absolute inset-0 bg-fade-gradient" />
-              <span className="absolute bottom-4 left-4 flex items-center gap-2 text-lg font-bold sm:text-xl">
+              <span className="absolute bottom-4 left-4 flex items-center gap-2 font-heading text-lg sm:text-xl font-bold uppercase tracking-wide">
                 {c.title} <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </span>
             </Link>
@@ -134,10 +134,12 @@ function Home() {
 
       <section className="mx-auto max-w-7xl px-4 pb-16">
         <div className="flex items-end justify-between">
-          <h2 className="text-xl font-bold tracking-brand sm:text-2xl">NEW ARRIVALS</h2>
+          <h2 className="font-heading text-2xl sm:text-3xl font-bold uppercase tracking-wider text-foreground">
+            NEW ARRIVALS
+          </h2>
           <Link
             to="/shop"
-            className="flex items-center gap-2 text-sm font-semibold hover:gap-3 transition-all"
+            className="flex items-center gap-2 font-sans text-xs sm:text-sm font-bold uppercase tracking-wider text-silver hover:text-foreground transition-all"
           >
             View All <ArrowRight className="h-4 w-4" />
           </Link>
@@ -163,17 +165,19 @@ function Home() {
             <WingMark className="h-32 w-auto text-silver drop-shadow-2xl" />
           </div>
           <div className="md:border-l md:border-border md:pl-10">
-            <p className="font-script text-2xl text-silver">The Essentials Edit</p>
-            <h2 className="mt-3 font-serif text-5xl font-semibold uppercase italic leading-none">
+            <p className="font-heading text-xs font-bold uppercase tracking-brand text-electric">THE ESSENTIALS EDIT</p>
+            <h2 className="mt-3 font-heading text-4xl sm:text-6xl font-bold uppercase leading-none tracking-tight">
               Made to move
               <br />
               with you.
             </h2>
-            <p className="mt-4 text-silver">Versatile fits. Timeless design. Everyday wear.</p>
+            <p className="mt-4 font-sans text-sm sm:text-base font-medium text-silver">
+              Versatile fits. Timeless design. Everyday wear.
+            </p>
             <Link
               to="/collections/$slug"
               params={{ slug: "oversized" }}
-              className="mt-6 inline-flex items-center gap-3 rounded-md bg-primary px-6 py-3 font-bold text-primary-foreground"
+              className="mt-6 inline-flex items-center gap-3 rounded-md bg-primary px-7 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground transition hover:opacity-90 shadow-lg"
             >
               Shop Oversized <ArrowRight className="h-4 w-4" />
             </Link>
@@ -190,16 +194,16 @@ function Home() {
             className="aspect-[16/10] w-full rounded-xl object-cover"
           />
           <div>
-            <p className="text-xs tracking-brand">OUR STORY</p>
-            <h2 className="mt-3 font-serif text-4xl font-semibold sm:text-5xl">
+            <p className="font-heading text-xs font-bold uppercase tracking-brand text-electric">OUR STORY</p>
+            <h2 className="mt-3 font-heading text-3xl sm:text-5xl font-bold uppercase tracking-tight text-paper-foreground">
               A Unisex Clothing Brand Rooted in Simplicity
             </h2>
-            <p className="mt-4 text-paper-foreground/70">
+            <p className="mt-4 font-sans text-sm sm:text-base font-medium text-paper-foreground/75 leading-relaxed">
               We create modern, versatile and long-lasting wardrobe essentials for everyone.
             </p>
             <Link
               to="/about"
-              className="mt-6 inline-flex items-center gap-3 rounded-md bg-paper-foreground px-6 py-3 font-bold text-paper"
+              className="mt-6 inline-flex items-center gap-3 rounded-md bg-paper-foreground px-7 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-paper transition hover:opacity-90 shadow-lg"
             >
               Read Our Story <ArrowRight className="h-4 w-4" />
             </Link>
@@ -214,7 +218,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-center gap-5">
       <span className="h-px w-16 bg-silver/60" />
-      <h2 className="text-center text-lg font-bold uppercase tracking-brand sm:text-xl">
+      <h2 className="text-center font-heading text-xl sm:text-2xl font-bold uppercase tracking-wider text-foreground">
         {children}
       </h2>
       <span className="h-px w-16 bg-silver/60" />

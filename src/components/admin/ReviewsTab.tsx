@@ -62,8 +62,8 @@ export function ReviewsTab({ reviews, loading, onRefresh, authToken }: ReviewsTa
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">Product Reviews & Ratings Moderation</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Product Reviews & Ratings Moderation</h2>
+          <p className="text-xs text-muted-foreground font-sans">
             Moderate verified customer testimonials, star ratings, and community feedback.
           </p>
         </div>

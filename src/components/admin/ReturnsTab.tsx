@@ -66,8 +66,8 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-serif text-xl italic">Customer Return Requests</h2>
-          <p className="text-xs text-muted-foreground">
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Customer Return Requests</h2>
+          <p className="text-xs text-muted-foreground font-sans">
             Process return authorizations, reverse logistics pickups, and replacement/refund approvals.
           </p>
         </div>
@@ -171,7 +171,7 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
           >
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h3 className="font-serif text-lg italic text-foreground">
+                <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                   Process Return #{selectedReturn.return_number}
                 </h3>
                 <p className="text-xs text-muted-foreground">

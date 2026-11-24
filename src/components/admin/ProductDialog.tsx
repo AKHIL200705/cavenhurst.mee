@@ -183,10 +183,10 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
         {/* Header */}
         <div className="flex items-start justify-between border-b border-border pb-4">
           <div>
-            <span className="font-mono text-xs uppercase tracking-brand text-silver">
+            <span className="font-heading text-xs uppercase tracking-wider text-silver">
               CATALOG MANAGEMENT
             </span>
-            <h2 className="font-serif text-2xl italic">
+            <h2 className="font-heading text-xl sm:text-2xl font-bold uppercase tracking-tight text-foreground">
               {product?.id ? "Edit Product" : "Add New Garment to Catalog"}
             </h2>
           </div>

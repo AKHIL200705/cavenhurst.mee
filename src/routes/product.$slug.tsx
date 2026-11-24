@@ -327,24 +327,24 @@ function ProductPage() {
           </div>
         </div>
 
-        <div>
-          <p className="text-xs tracking-brand text-silver">CAVENHURST</p>
-          <h1 className="mt-2 font-serif text-4xl font-semibold sm:text-5xl">{p.name}</h1>
-          <div className="mt-4 flex items-center gap-3">
-            <span className="text-2xl font-bold">{formatINR(p.price)}</span>
+        <div className="font-sans">
+          <p className="font-heading text-xs uppercase tracking-brand text-electric">CAVENHURST</p>
+          <h1 className="mt-2 font-heading text-3xl sm:text-5xl lg:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">{p.name}</h1>
+          <div className="mt-4 flex flex-wrap items-baseline gap-3">
+            <span className="text-2xl sm:text-3xl font-black tracking-tight text-foreground">{formatINR(p.price)}</span>
             {off > 0 && (
               <>
-                <span className="text-muted-foreground line-through">{formatINR(p.mrp)}</span>
-                <span className="rounded bg-sale px-2 py-0.5 text-xs font-bold">{off}% OFF</span>
+                <span className="text-base font-medium text-muted-foreground line-through">{formatINR(p.mrp)}</span>
+                <span className="rounded bg-sale px-2.5 py-0.5 font-heading text-xs font-bold uppercase tracking-wider text-destructive-foreground">{off}% OFF</span>
               </>
             )}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">Inclusive of all taxes</p>
-          <p className="mt-5 text-silver">{p.description}</p>
+          <p className="mt-5 text-sm sm:text-base text-silver leading-relaxed">{p.description}</p>
 
           <div className="mt-6">
-            <p className="text-sm font-semibold">
-              Color: <span className="font-bold text-silver">{color}</span>
+            <p className="text-xs uppercase font-bold tracking-wider text-muted-foreground">
+              Color: <span className="text-foreground font-extrabold">{color}</span>
             </p>
             <div className="mt-2 flex gap-2">
               {p.colors.map((c) => (
@@ -366,14 +366,14 @@ function ProductPage() {
           </div>
 
           <div className="mt-6">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-semibold">
-                Size{size && <span className="font-bold">: {size}</span>}
+            <div className="flex items-center justify-between text-xs uppercase font-bold tracking-wider">
+              <span>
+                Size{size && <span className="text-foreground font-extrabold">: {size}</span>}
               </span>
               <Dialog>
-                <DialogTrigger className="underline text-silver">Size guide</DialogTrigger>
+                <DialogTrigger className="underline text-silver hover:text-foreground">Size guide</DialogTrigger>
                 <DialogContent className="bg-background">
-                  <DialogTitle className="font-serif text-2xl">Size guide (inches)</DialogTitle>
+                  <DialogTitle className="font-heading text-2xl font-bold uppercase tracking-tight">Size guide (inches)</DialogTitle>
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-silver">
@@ -459,13 +459,13 @@ function ProductPage() {
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
               onClick={() => addToBag()}
-              className="rounded-md border border-foreground py-3.5 font-bold hover:bg-foreground/10"
+              className="rounded-md border border-foreground py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] hover:bg-foreground/10 transition-colors"
             >
               Add to Cart
             </button>
             <button
               onClick={() => addToBag(true)}
-              className="rounded-md bg-primary py-3.5 font-bold text-primary-foreground"
+              className="rounded-md bg-primary py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground hover:bg-primary/90 transition-opacity"
             >
               Buy Now
             </button>

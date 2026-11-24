@@ -23,8 +23,8 @@ function Wishlist() {
   const { wishlist } = useStore();
   const items = products.filter((p) => wishlist.includes(p.slug));
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12">
-      <h1 className="font-serif text-5xl italic">Wishlist</h1>
+    <div className="mx-auto max-w-7xl px-4 py-12 font-sans">
+      <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">Wishlist</h1>
       {items.length === 0 ? (
         <div className="py-20 text-center text-muted-foreground">
           Nothing saved yet.{" "}

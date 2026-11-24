@@ -18,11 +18,11 @@ function Cart() {
   const [code, setCode] = useState("");
   if (cart.length === 0)
     return (
-      <div className="py-28 text-center">
-        <h1 className="font-serif text-5xl italic">Your bag is empty</h1>
+      <div className="py-28 text-center font-sans">
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">Your bag is empty</h1>
         <Link
           to="/shop"
-          className="mt-6 inline-block rounded-md bg-primary px-6 py-3 text-primary-foreground"
+          className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
         >
           Continue shopping
         </Link>
@@ -30,12 +30,12 @@ function Cart() {
     );
   const remaining = FREE_SHIPPING_THRESHOLD - subtotal;
   return (
-    <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-[1fr_380px]">
+    <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-[1fr_380px] font-sans">
       <div>
-        <h1 className="font-serif text-5xl italic">Shopping Bag</h1>
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">Shopping Bag</h1>
         {remaining > 0 && (
-          <p className="mt-3 text-sm text-silver">
-            Add <span className="font-bold">{formatINR(remaining)}</span> more for free shipping.
+          <p className="mt-3 text-xs sm:text-sm text-silver font-medium">
+            Add <span className="font-bold text-foreground">{formatINR(remaining)}</span> more for free shipping.
           </p>
         )}
         <ul className="mt-8 divide-y divide-border">
@@ -108,7 +108,7 @@ function Cart() {
         </ul>
       </div>
       <aside className="h-fit rounded-xl border border-border bg-card p-6 lg:sticky lg:top-24">
-        <h2 className="mb-4 text-sm font-bold tracking-brand">ORDER SUMMARY</h2>
+        <h2 className="mb-4 font-heading text-base font-bold uppercase tracking-wider text-foreground">ORDER SUMMARY</h2>
         <form
           className="mb-5 flex gap-2"
           onSubmit={(e) => {
@@ -124,9 +124,9 @@ function Cart() {
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="Coupon code"
-            className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm uppercase outline-none"
+            className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none"
           />
-          <button className="rounded-md bg-secondary px-4 text-sm font-bold">Apply</button>
+          <button className="rounded-md bg-secondary px-4 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 transition-colors">Apply</button>
         </form>
         {coupon && (
           <button
@@ -139,7 +139,7 @@ function Cart() {
         <Summary />
         <Link
           to="/checkout"
-          className="mt-6 block rounded-md bg-primary py-3.5 text-center font-bold text-primary-foreground"
+          className="mt-6 block rounded-md bg-primary py-3.5 text-center font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
         >
           Proceed to Checkout
         </Link>

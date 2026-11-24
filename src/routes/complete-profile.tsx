@@ -147,13 +147,13 @@ export function CompleteProfilePage() {
           {/* Brand Wordmark & Crest */}
           <div className="flex flex-col items-center text-center">
             <WingMark className="h-12 w-auto text-silver" />
-            <span className="mt-4 font-mono text-[10px] uppercase tracking-brand text-silver">
+            <span className="mt-4 font-heading text-[10px] font-bold uppercase tracking-wider text-silver">
               MANDATORY ACCOUNT VERIFICATION
             </span>
-            <h1 className="mt-1 font-serif text-3xl italic tracking-tight text-foreground sm:text-4xl">
+            <h1 className="mt-1 font-heading text-3xl sm:text-4xl font-bold uppercase tracking-tight text-foreground leading-none">
               COMPLETE YOUR PROFILE
             </h1>
-            <p className="mt-2 text-xs text-muted-foreground leading-relaxed max-w-sm">
+            <p className="mt-2 font-sans text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-sm">
               Welcome to CAVENHURST. Complete your details to continue.
             </p>
           </div>
@@ -230,7 +230,7 @@ export function CompleteProfilePage() {
             <Button
               type="submit"
               disabled={submitting || success}
-              className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-mono text-xs font-bold tracking-brand uppercase shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center gap-2 group cursor-pointer"
+              className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-sans text-xs sm:text-sm font-bold tracking-[0.16em] uppercase shadow-lg hover:bg-primary/90 transition-all flex items-center justify-center gap-2 group cursor-pointer"
             >
               {submitting ? (
                 <>

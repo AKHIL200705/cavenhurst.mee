@@ -229,14 +229,14 @@ export function OrderDetailsDialog({
         <div className="flex items-start justify-between border-b border-border pb-4">
           <div>
             <div className="flex items-center gap-2.5">
-              <span className="font-mono text-xs uppercase tracking-brand text-silver">
+              <span className="font-heading text-xs uppercase tracking-wider text-silver">
                 ORDER DETAILS
               </span>
               <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-bold text-primary">
                 {order.order_number || order.id.slice(0, 8)}
               </span>
             </div>
-            <h2 className="mt-1 font-serif text-2xl italic">Order Fulfillment & Payment Docket</h2>
+            <h2 className="mt-1 font-heading text-xl sm:text-2xl font-bold uppercase tracking-tight text-foreground">Order Fulfillment & Payment Docket</h2>
             <p className="text-xs text-muted-foreground">
               Placed on {new Date(order.created_at).toLocaleString()}
             </p>

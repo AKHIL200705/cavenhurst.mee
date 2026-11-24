@@ -299,7 +299,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
               <span className="text-xs font-mono uppercase tracking-brand text-silver">
                 SALES & REVENUE ANALYTICS
               </span>
-              <h2 className="font-serif text-xl italic text-foreground">
+              <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
                 {metric === "revenue" ? "Revenue Trajectory" : "Order Volume Trajectory"}
               </h2>
             </div>
@@ -428,7 +428,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
           <div>
             <div className="flex items-center gap-2 text-amber-500 mb-2">
               <AlertTriangle className="h-5 w-5" />
-              <h2 className="font-serif text-lg italic text-foreground">Low-Stock Watchlist</h2>
+              <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">Low-Stock Watchlist</h2>
             </div>
             <p className="text-xs text-muted-foreground mb-4">
               Variants with remaining stock of 5 or fewer units require warehouse replenishment.
@@ -480,7 +480,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
               <span className="text-xs font-mono uppercase tracking-brand text-silver">
                 PAYMENT METHODS
               </span>
-              <h2 className="font-serif text-lg italic text-foreground">
+              <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                 Payment Channel Distribution
               </h2>
             </div>
@@ -546,7 +546,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
               <span className="text-xs font-mono uppercase tracking-brand text-silver">
                 BESTSELLERS
               </span>
-              <h2 className="font-serif text-lg italic text-foreground">
+              <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                 Top-Selling Products
               </h2>
             </div>
@@ -595,7 +595,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
         {/* Recent Orders */}
         <div className="rounded-xl border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-serif text-lg italic text-foreground">Recent Orders</h2>
+            <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">Recent Orders</h2>
             <button
               onClick={() => onNavigateTab("orders")}
               className="text-xs font-semibold text-primary hover:underline"
@@ -645,7 +645,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
         {/* Recent Customer Registrations */}
         <div className="rounded-xl border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-serif text-lg italic text-foreground">
+            <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
               Recent Customer Registrations
             </h2>
             <button

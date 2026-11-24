@@ -33,8 +33,8 @@ function SearchPage() {
       )
     : [];
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12">
-      <h1 className="font-serif text-5xl italic">Search</h1>
+    <div className="mx-auto max-w-7xl px-4 py-12 font-sans">
+      <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">Search</h1>
       <div className="relative mt-6">
         <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
         <input
