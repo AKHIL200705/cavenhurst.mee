@@ -30,7 +30,7 @@ export const Route = createFileRoute("/complete-profile")({
   component: CompleteProfilePage,
 });
 
-export function CompleteProfilePage() {
+function CompleteProfilePage() {
   const { user, sessionToken, ready, profileCompleted, profileChecking, refreshProfile, signOut } =
     useAuth();
   const search = useSearch({ from: "/complete-profile" });

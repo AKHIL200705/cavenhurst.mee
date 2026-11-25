@@ -145,6 +145,70 @@ export function verifyRazorpayWebhookSignature(rawBody: string, signature: strin
 }
 
 /**
+ * Updates an order's pending payment ledger row or creates one if absent,
+ * preventing duplicate payment rows across checkout verification and webhook delivery.
+ */
+async function upsertOrderPaymentLedger(params: {
+  orderId: string;
+  userId?: string | null | undefined;
+  razorpayOrderId?: string | null | undefined;
+  razorpayPaymentId?: string | null | undefined;
+  razorpaySignature?: string | null | undefined;
+  amount: number;
+  status: "captured" | "failed";
+  payload?: Json | undefined;
+}) {
+  const { data: byOrder } = await supabaseAdmin
+    .from("payments")
+    .select("id")
+    .eq("order_id", params.orderId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const existingId =
+    byOrder?.id ??
+    (params.razorpayPaymentId
+      ? (
+        await supabaseAdmin
+          .from("payments")
+          .select("id")
+          .eq("razorpay_payment_id", params.razorpayPaymentId)
+          .maybeSingle()
+      ).data?.id
+      : undefined);
+
+  const updateFields = {
+    status: params.status,
+    ...(params.razorpayOrderId ? { razorpay_order_id: params.razorpayOrderId } : {}),
+    ...(params.razorpayPaymentId ? { razorpay_payment_id: params.razorpayPaymentId } : {}),
+    ...(params.razorpaySignature ? { razorpay_signature: params.razorpaySignature } : {}),
+    ...(params.payload !== undefined ? { payload: params.payload } : {}),
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingId) {
+    await supabaseAdmin.from("payments").update(updateFields).eq("id", existingId);
+    return;
+  }
+
+  await supabaseAdmin.from("payments").insert({
+    order_id: params.orderId,
+    user_id: params.userId || null,
+    gateway: "razorpay",
+    payment_method: "online",
+    razorpay_order_id: params.razorpayOrderId || null,
+    razorpay_payment_id: params.razorpayPaymentId || null,
+    razorpay_signature: params.razorpaySignature || null,
+    amount: params.amount,
+    amount_paise: Math.round(params.amount * 100),
+    currency: "INR",
+    status: params.status,
+    ...(params.payload !== undefined ? { payload: params.payload } : {}),
+  });
+}
+
+/**
  * Verifies payment, checks order ID match, verifies amount/currency,
  * ensures captured status, prevents duplicate processing, and marks order as paid in Supabase.
  */
@@ -294,37 +358,17 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     }
   }
 
-  // 6. Record verified payment in payments ledger (prevent duplicate records)
-  const { data: existingPayment } = await supabaseAdmin
-    .from("payments")
-    .select("id")
-    .eq("razorpay_payment_id", input.razorpayPaymentId)
-    .maybeSingle();
-
-  if (!existingPayment) {
-    await supabaseAdmin.from("payments").insert({
-      order_id: input.orderId,
-      user_id: input.userId || existingOrder.user_id || null,
-      gateway: "razorpay",
-      payment_method: "online",
-      razorpay_order_id: input.razorpayOrderId,
-      razorpay_payment_id: input.razorpayPaymentId,
-      razorpay_signature: input.razorpaySignature,
-      amount: existingOrder.total,
-      amount_paise: existingOrder.total * 100,
-      currency: "INR",
-      status: "captured",
-      payload: input as unknown as Json,
-    });
-  } else {
-    await supabaseAdmin
-      .from("payments")
-      .update({
-        status: "captured",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", existingPayment.id);
-  }
+  // 6. Update existing pending ledger row or insert if missing (prevent duplicate payment records)
+  await upsertOrderPaymentLedger({
+    orderId: input.orderId,
+    userId: input.userId || existingOrder.user_id || null,
+    razorpayOrderId: input.razorpayOrderId,
+    razorpayPaymentId: input.razorpayPaymentId,
+    razorpaySignature: input.razorpaySignature,
+    amount: existingOrder.total,
+    status: "captured",
+    payload: input as unknown as Json,
+  });
 
   // 7. Update order state to paid & confirmed (never touch shipment_status!)
   await supabaseAdmin
@@ -440,7 +484,7 @@ export async function processRazorpayWebhook(
     // Find matching order in Supabase
     const { data: order } = await supabaseAdmin
       .from("orders")
-      .select("id, payment_status, total")
+      .select("id, order_number, payment_status, total, user_id, razorpay_order_id")
       .eq("razorpay_order_id", razorpayOrderId)
       .maybeSingle();
 
@@ -455,6 +499,16 @@ export async function processRazorpayWebhook(
           return { processed: false, error: "Payment amount mismatch in webhook payload" };
         }
       }
+
+      await upsertOrderPaymentLedger({
+        orderId: order.id,
+        userId: order.user_id,
+        razorpayOrderId: order.razorpay_order_id || razorpayOrderId,
+        razorpayPaymentId: razorpayPaymentId || null,
+        amount: order.total,
+        status: "captured",
+        payload: eventPayload as unknown as Json,
+      });
 
       await supabaseAdmin
         .from("orders")
@@ -484,7 +538,7 @@ export async function processRazorpayWebhook(
         if (orderItems && orderItems.length > 0) {
           await commitOrderInventory(
             order.id,
-            `CVH-${order.id.slice(0, 8)}`,
+            order.order_number || order.id,
             orderItems.map((oi) => ({
               productId: oi.product_id || "",
               variantId: oi.variant_id || undefined,
@@ -503,11 +557,21 @@ export async function processRazorpayWebhook(
   } else if (eventType === "payment.failed") {
     const { data: order } = await supabaseAdmin
       .from("orders")
-      .select("id, payment_status")
+      .select("id, payment_status, total, user_id, razorpay_order_id")
       .eq("razorpay_order_id", razorpayOrderId)
       .maybeSingle();
 
     if (order && order.payment_status === "pending") {
+      await upsertOrderPaymentLedger({
+        orderId: order.id,
+        userId: order.user_id,
+        razorpayOrderId: order.razorpay_order_id || razorpayOrderId,
+        razorpayPaymentId: razorpayPaymentId || null,
+        amount: order.total,
+        status: "failed",
+        payload: eventPayload as unknown as Json,
+      });
+
       await supabaseAdmin
         .from("orders")
         .update({

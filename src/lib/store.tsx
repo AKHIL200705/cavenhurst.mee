@@ -38,57 +38,80 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [syncedUser, setSyncedUser] = useState<string | null>(null);
   const cartRef = useRef(cart);
   const wishlistRef = useRef(wishlist);
+  const storageOwnerRef = useRef<string | null>(null);
 
   useEffect(() => {
     cartRef.current = cart;
     wishlistRef.current = wishlist;
   }, [cart, wishlist]);
 
-  // Initialize from local storage on mount (guest state)
+  // Initialize from local storage on mount (guest or cached state)
   useEffect(() => {
     try {
       const s = JSON.parse(localStorage.getItem("cavenhurst-store") || "{}");
       if (Array.isArray(s.cart)) setCart(s.cart);
       if (Array.isArray(s.wishlist)) setWishlist(s.wishlist);
       setCoupon(s.coupon ?? null);
+      storageOwnerRef.current = typeof s.ownerId === "string" ? s.ownerId : null;
     } catch {
       // Ignore corrupted local storage
     }
     setReady(true);
   }, []);
 
-  // Save guest cart / fallback to localStorage
+  // Save cart / wishlist to localStorage
   useEffect(() => {
     if (ready) {
-      localStorage.setItem("cavenhurst-store", JSON.stringify({ cart, wishlist, coupon }));
+      localStorage.setItem(
+        "cavenhurst-store",
+        JSON.stringify({ cart, wishlist, coupon, ownerId: storageOwnerRef.current }),
+      );
     }
   }, [cart, wishlist, coupon, ready]);
 
-  // When customer signs in: synchronize guest cart & wishlist with authoritative Supabase tables
+  // When customer signs in: synchronize only unowned guest items with authoritative Supabase tables
   useEffect(() => {
-    if (!ready || !user) {
+    if (!ready) return;
+
+    if (!user) {
+      if (storageOwnerRef.current !== null) {
+        storageOwnerRef.current = null;
+        setCart([]);
+        setWishlist([]);
+      }
       setSyncedUser(null);
       return;
     }
 
     if (syncedUser === user.id) return;
 
+    const shouldMergeGuest = storageOwnerRef.current === null;
     let active = true;
     syncCartServerFn({
       data: {
         authToken: sessionToken || undefined,
-        guestCart: cartRef.current,
-        guestWishlist: wishlistRef.current,
+        guestCart: shouldMergeGuest ? cartRef.current : [],
+        guestWishlist: shouldMergeGuest ? wishlistRef.current : [],
       },
     })
       .then((res) => {
         if (!active) return;
+        storageOwnerRef.current = user.id;
         if (res && res.cart) {
           setCart(res.cart);
         }
         if (res && res.wishlist) {
           setWishlist(res.wishlist);
         }
+        localStorage.setItem(
+          "cavenhurst-store",
+          JSON.stringify({
+            cart: res?.cart ?? cartRef.current,
+            wishlist: res?.wishlist ?? wishlistRef.current,
+            coupon,
+            ownerId: user.id,
+          }),
+        );
         setSyncedUser(user.id);
       })
       .catch((err) => {
@@ -98,7 +121,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [user, sessionToken, ready, syncedUser]);
+  }, [user, sessionToken, ready, syncedUser, coupon]);
 
   const stockFor = (item: CartItem): number => {
     if (typeof item.maxStock === "number" && item.maxStock >= 0) {

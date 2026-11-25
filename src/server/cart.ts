@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getAuthenticatedCustomerId } from "./auth-helpers";
+import { getVariantAvailableStock, parseStockMap } from "./inventory";
 import type { Size } from "@/lib/products";
 
 export interface CartItemData {
@@ -110,6 +111,20 @@ async function getOrCreateWishlist(customerUuid?: string, authUid?: string): Pro
   return newWish.id;
 }
 
+async function resolveCartItemStock(
+  productId: string,
+  rawStock: unknown,
+  size: string,
+  color?: string,
+): Promise<number> {
+  const variantStock = await getVariantAvailableStock(productId, size, color);
+  if (variantStock.variantId) {
+    return variantStock.available;
+  }
+  const parsed = parseStockMap(rawStock);
+  return parsed[size] ?? 0;
+}
+
 /**
  * Reads full cart items from Supabase cart_items joined with products.
  */
@@ -157,30 +172,33 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
       slug: string;
       name: string;
       price: number;
-      stock: Record<string, number> | null;
+      stock: unknown;
       images: string[] | null;
     } | null;
   }
 
-  return (items as unknown as CartItemJoinRow[]).map((row) => {
-    const prod = row.products;
-    const stockObj = (prod?.stock || {}) as Record<string, number>;
-    const sizeKey = row.size || "M";
-    const maxStock = stockObj[sizeKey] ?? 0;
-    const qty = Math.max(1, Math.min(row.quantity, maxStock > 0 ? maxStock : row.quantity));
+  return await Promise.all(
+    (items as unknown as CartItemJoinRow[]).map(async (row) => {
+      const prod = row.products;
+      const sizeKey = row.size || "M";
+      const maxStock = prod?.id
+        ? await resolveCartItemStock(prod.id, prod.stock, sizeKey, row.color || undefined)
+        : (parseStockMap(prod?.stock)[sizeKey] ?? 0);
+      const qty = Math.max(1, Math.min(row.quantity, maxStock > 0 ? maxStock : row.quantity));
 
-    return {
-      id: row.id,
-      slug: row.product_slug || prod?.slug || "",
-      size: (row.size as Size) || "M",
-      color: row.color || "Default",
-      qty,
-      name: prod?.name || "Apparel Item",
-      price: row.unit_price || prod?.price || 0,
-      image: prod?.images?.[0] ?? null,
-      maxStock,
-    };
-  });
+      return {
+        id: row.id,
+        slug: row.product_slug || prod?.slug || "",
+        size: (row.size as Size) || "M",
+        color: row.color || "Default",
+        qty,
+        name: prod?.name || "Apparel Item",
+        price: row.unit_price || prod?.price || 0,
+        image: prod?.images?.[0] ?? null,
+        maxStock,
+      };
+    }),
+  );
 }
 
 /**
@@ -239,8 +257,7 @@ export const syncCartServerFn = createServerFn({ method: "POST" })
 
         if (!prod) continue;
 
-        const stockMap = (prod.stock || {}) as Record<string, number>;
-        const available = stockMap[item.size] ?? 0;
+        const available = await resolveCartItemStock(prod.id, prod.stock, item.size, item.color);
         if (available <= 0) continue;
 
         // Check if item already exists in cart_items
@@ -339,8 +356,7 @@ export const updateCartItemServerFn = createServerFn({ method: "POST" })
         throw new Error("Product unavailable.");
       }
 
-      const stockMap = (prod.stock || {}) as Record<string, number>;
-      const available = stockMap[item.size] ?? 0;
+      const available = await resolveCartItemStock(prod.id, prod.stock, item.size, item.color);
       if (available <= 0) {
         throw new Error("Item is out of stock in this size.");
       }
@@ -385,8 +401,9 @@ export const updateCartItemServerFn = createServerFn({ method: "POST" })
         .eq("slug", item.slug)
         .maybeSingle();
 
-      const stockMap = (prod?.stock || {}) as Record<string, number>;
-      const available = stockMap[item.size] ?? 0;
+      const available = prod?.id
+        ? await resolveCartItemStock(prod.id, prod.stock, item.size, item.color)
+        : 0;
       const clampedQty = Math.max(1, Math.min(item.qty, available > 0 ? available : item.qty));
 
       await supabaseAdmin

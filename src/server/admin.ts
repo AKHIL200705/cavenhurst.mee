@@ -871,6 +871,40 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
     };
   });
 
+function resolveOrderItemsWithFallback(
+  order: Tables<"orders">,
+  items: Tables<"order_items">[] | null | undefined,
+): Tables<"order_items">[] {
+  if (items && items.length > 0) return items;
+  if (!Array.isArray(order.items)) return [];
+  return (
+    order.items as Array<{
+      name?: string;
+      size?: string;
+      color?: string;
+      qty?: number;
+      price?: number;
+      product_id?: string | null;
+      productId?: string | null;
+      product_slug?: string | null;
+      slug?: string | null;
+    }>
+  ).map((raw, idx) => ({
+    id: `${order.id}-item-${idx}`,
+    order_id: order.id,
+    product_id: raw.product_id || raw.productId || null,
+    variant_id: null,
+    product_slug: raw.product_slug || raw.slug || "",
+    name: raw.name || "Garment",
+    size: raw.size || "M",
+    color: raw.color || "Default",
+    qty: Number(raw.qty) || 1,
+    price: Number(raw.price) || 0,
+    image: null,
+    created_at: order.created_at,
+  }));
+}
+
 export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
   .validator((params: AdminAuthParams & { orderId: string }) => params)
   .handler(async ({ data }) => {
@@ -917,13 +951,13 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
 
           return {
             order,
-            items: items || [],
-            shippingAddress: addressRows[0] || null,
+            items: resolveOrderItemsWithFallback(order, items),
+            address: addressRows[0] || null,
             payment: paymentRows[0] || null,
             shipment: shipmentRows[0] || null,
             refunds: refunds || [],
-            statusHistory: history || [],
-            trackingEvents: trackingEvents || [],
+            history: history || [],
+            tracking: trackingEvents || [],
           };
         }
       } catch (dbErr) {
@@ -965,7 +999,7 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
 
     return {
       order,
-      items: itemsRes.data || [],
+      items: resolveOrderItemsWithFallback(order, itemsRes.data),
       address: addressRes.data || null,
       payment: paymentRes.data || null,
       shipment: shipmentRes.data || null,

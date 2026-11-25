@@ -19,6 +19,31 @@ interface VariantAvailabilityRow {
 }
 
 /**
+ * Normalizes products.stock JSONB values (safely handling stringified JSON or numeric char spreads).
+ */
+export function parseStockMap(raw: unknown): Record<string, number> {
+  let obj: unknown = raw;
+  if (typeof obj === "string") {
+    try {
+      obj = JSON.parse(obj);
+    } catch {
+      return {};
+    }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return {};
+
+  const cleaned: Record<string, number> = {};
+  for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+    if (/^\d+$/.test(key)) continue;
+    const num = Number(val);
+    if (Number.isFinite(num)) {
+      cleaned[key] = num;
+    }
+  }
+  return cleaned;
+}
+
+/**
  * Checks available stock for a specific variant (stock_quantity - reserved_quantity).
  */
 export async function getVariantAvailableStock(
@@ -148,7 +173,7 @@ export async function reserveOrderInventory(
               ${orderId},
               ${item.variantId},
               ${item.qty},
-              'reserved',
+              'active',
               ${expiresAt},
               NOW(),
               NOW()
@@ -199,7 +224,7 @@ export async function reserveOrderInventory(
         order_id: orderId,
         variant_id: item.variantId,
         quantity: item.qty,
-        status: "reserved",
+        status: "active",
         expires_at: expiresAt,
       });
     }
@@ -289,27 +314,27 @@ export async function commitOrderInventory(
               )
             `;
 
-            // Update reservation status to fulfilled
+            // Update reservation status to completed
             await tx`
               UPDATE public.inventory_reservations
               SET 
-                status = 'fulfilled',
+                status = 'completed',
                 updated_at = NOW()
               WHERE order_id = ${orderId} AND variant_id = ${item.variantId}
             `;
           }
 
           // Sync product.stock JSONB
-          const [pRow] = await tx<{ stock: Record<string, number> | null }[]>`
+          const [pRow] = await tx<{ stock: unknown }[]>`
             SELECT stock FROM public.products WHERE id = ${item.productId}
           `;
           if (pRow) {
-            const stockMap = (pRow["stock"] || {}) as Record<string, number>;
+            const stockMap = parseStockMap(pRow["stock"]);
             const curVal = stockMap[item.size] ?? 0;
             const updatedStock = { ...stockMap, [item.size]: Math.max(0, curVal - item.qty) };
             await tx`
               UPDATE public.products
-              SET stock = ${JSON.stringify(updatedStock)}::jsonb, updated_at = NOW()
+              SET stock = ${sql.json(updatedStock)}, updated_at = NOW()
               WHERE id = ${item.productId}
             `;
           }
@@ -372,7 +397,7 @@ export async function commitOrderInventory(
           await supabaseAdmin
             .from("inventory_reservations")
             .update({
-              status: "fulfilled",
+              status: "completed",
               updated_at: new Date().toISOString(),
             })
             .eq("order_id", orderId)
@@ -423,13 +448,13 @@ export async function releaseOrderInventoryReservations(
         FROM public.inventory_reservations r
         WHERE r.order_id = ${orderId}
           AND r.variant_id = i.variant_id
-          AND r.status = 'reserved'
+          AND r.status = 'active'
       `;
 
       await sql`
         UPDATE public.inventory_reservations
         SET status = 'released', updated_at = NOW()
-        WHERE order_id = ${orderId} AND status = 'reserved'
+        WHERE order_id = ${orderId} AND status = 'active'
       `;
 
       return { success: true };
@@ -444,7 +469,7 @@ export async function releaseOrderInventoryReservations(
       .from("inventory_reservations")
       .select("id, variant_id, quantity")
       .eq("order_id", orderId)
-      .eq("status", "reserved");
+      .eq("status", "active");
 
     if (reservations) {
       for (const res of reservations) {

@@ -31,6 +31,7 @@ export function IntroAnimation() {
   return (
     <div
       data-intro
+      suppressHydrationWarning
       role="dialog"
       aria-label="CAVENHURST intro"
       className={`fixed inset-0 z-[100] grid place-items-center bg-background transition-opacity duration-500 ease-out ${leaving ? "pointer-events-none opacity-0" : "opacity-100"}`}

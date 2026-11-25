@@ -233,7 +233,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             INSERT INTO public.admin_users (
               auth_user_id, email, full_name, role, permissions, is_active, last_login, created_at, updated_at
             ) VALUES (
-              ${authUserId}, ${emailLower}, ${googleUser.name || "Admin"}, 'admin', ${JSON.stringify(["*"])}::jsonb, true, now(), now(), now()
+              ${authUserId}, ${emailLower}, ${googleUser.name || "Admin"}, 'admin', ${sql.json(["*"])}, true, now(), now(), now()
             )
             ON CONFLICT (email) DO UPDATE SET
               auth_user_id = EXCLUDED.auth_user_id,

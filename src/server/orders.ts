@@ -3,7 +3,11 @@ import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProduct, type Size } from "@/lib/products";
 import { computeTotals } from "@/lib/pricing";
-import { verifyGoogleSessionOrToken, isWhitelistedAdminEmail } from "./auth-helpers";
+import {
+  getAuthenticatedCustomerId,
+  verifyGoogleSessionOrToken,
+  isWhitelistedAdminEmail,
+} from "./auth-helpers";
 import {
   createRazorpayOrder,
   confirmVerifiedPayment,
@@ -41,6 +45,7 @@ export interface CheckoutCartItemInput {
 }
 
 export interface PlaceOrderInput {
+  authToken?: string | undefined;
   customer: CheckoutCustomerInput;
   cart: CheckoutCartItemInput[];
   coupon: string | null;
@@ -294,12 +299,13 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       throw new Error("Your shopping bag is empty.");
     }
 
-    // 2. Derive verified user identity from server session (never trust browser!)
-    const authUser = await getServerSessionUser();
-    const verifiedUserId = authUser ? authUser.id : null;
-    let customerUuid: string | null = null;
+    // 2. Derive verified user identity from server session or passed token (never trust client userId!)
+    const tokenAuth = await getAuthenticatedCustomerId(data.authToken);
+    const headerAuth = tokenAuth ? null : await getServerSessionUser();
+    const verifiedUserId = tokenAuth?.id ?? headerAuth?.id ?? null;
+    let customerUuid: string | null = tokenAuth?.customerUuid ?? null;
 
-    if (verifiedUserId) {
+    if (!customerUuid && verifiedUserId) {
       const { data: c } = await supabaseAdmin
         .from("customers")
         .select("id")
@@ -325,20 +331,25 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       throw new Error("No valid products found in your order.");
     }
 
-    // 4. Verify logistics serviceability before creating order
+    // 4. Verify live courier serviceability when ShipMaxx360 is connected;
+    // when credentials are pending, 6-digit Indian PIN format check above gates checkout cleanly.
     const serviceCheck = await checkShipMaxxServiceability({
       deliveryPincode: customer.pin.trim(),
       paymentMode: paymentMethod === "cod" ? "cod" : "prepaid",
     });
 
-    if (!serviceCheck.serviceable) {
+    if (serviceCheck.providerStatus === "connected" && !serviceCheck.serviceable) {
       throw new Error(
         serviceCheck.message ||
           "Delivery to this PIN code is currently unavailable. Please verify your address.",
       );
     }
 
-    if (paymentMethod === "cod" && !serviceCheck.codAvailable) {
+    if (
+      serviceCheck.providerStatus === "connected" &&
+      paymentMethod === "cod" &&
+      !serviceCheck.codAvailable
+    ) {
       throw new Error(
         "Cash on Delivery (COD) is not available for this delivery PIN code. Please select Pay Online.",
       );
@@ -629,6 +640,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
 export const verifyPaymentServerFn = createServerFn({ method: "POST" })
   .validator(
     (input: {
+      authToken?: string | undefined;
       orderId: string;
       razorpayOrderId: string;
       razorpayPaymentId: string;
@@ -637,7 +649,8 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     // 1. Derive verified user from session
-    const authUser = await getServerSessionUser();
+    const authUser =
+      (await getAuthenticatedCustomerId(data.authToken)) || (await getServerSessionUser());
     const verifiedUserId = authUser ? authUser.id : null;
 
     // 2. Verify Razorpay cryptographic signature, amount, currency, and mark order paid

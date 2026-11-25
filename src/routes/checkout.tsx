@@ -109,6 +109,7 @@ function Checkout() {
   const [shippingInfo, setShippingInfo] = useState<{
     checking: boolean;
     serviceable: boolean | null;
+    providerStatus?: "connected" | "pending_credentials" | undefined;
     message?: string | undefined;
     courier?: string | undefined;
     estimatedDays?: number | undefined;
@@ -202,6 +203,7 @@ function Checkout() {
       setShippingInfo({
         checking: false,
         serviceable: res.serviceable,
+        providerStatus: res.providerStatus,
         message: res.message,
         courier: res.courierPartner,
         estimatedDays: res.estimatedDays,
@@ -210,6 +212,7 @@ function Checkout() {
       setShippingInfo({
         checking: false,
         serviceable: false,
+        providerStatus: "connected",
         message:
           err instanceof Error ? err.message : "Could not verify serviceability with ShipMaxx360.",
       });
@@ -305,6 +308,7 @@ function Checkout() {
       // Step 1: Place Order through secure server function (derives customer identity from session)
       const orderRes = await placeOrderServerFn({
         data: {
+          authToken: sessionToken || undefined,
           customer: f,
           cart,
           coupon,
@@ -377,6 +381,7 @@ function Checkout() {
               // Server-side cryptographic signature & monetary verification
               const verifyRes = await verifyPaymentServerFn({
                 data: {
+                  authToken: sessionToken || undefined,
                   orderId: orderRes.orderId,
                   razorpayOrderId: response.razorpay_order_id,
                   razorpayPaymentId: response.razorpay_payment_id,
@@ -584,12 +589,19 @@ function Checkout() {
                     : ""}
                 </p>
               )}
-              {shippingInfo.serviceable === false && (
-                <p className="mt-2 text-xs font-semibold text-rose-500">
-                  {shippingInfo.message ||
-                    "This delivery pincode is not serviceable by ShipMaxx360."}
+              {shippingInfo.providerStatus === "pending_credentials" && (
+                <p className="mt-2 flex items-center gap-2 text-xs font-semibold text-emerald-500">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Valid 6-digit Indian PIN code · Courier dispatch scheduled upon order confirmation
                 </p>
               )}
+              {shippingInfo.serviceable === false &&
+                shippingInfo.providerStatus !== "pending_credentials" && (
+                  <p className="mt-2 text-xs font-semibold text-rose-500">
+                    {shippingInfo.message ||
+                      "This delivery pincode is not serviceable by ShipMaxx360."}
+                  </p>
+                )}
             </div>
           </div>
         </section>
@@ -679,7 +691,10 @@ function Checkout() {
 
         <button
           type="submit"
-          disabled={busy || shippingInfo.serviceable === false}
+          disabled={
+            busy ||
+            (shippingInfo.providerStatus === "connected" && shippingInfo.serviceable === false)
+          }
           className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-primary py-3.5 font-bold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
         >
           {busy ? (
