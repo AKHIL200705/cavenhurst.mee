@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   ArrowRight,
   Loader2,
@@ -31,44 +31,27 @@ export const Route = createFileRoute("/complete-profile")({
 });
 
 function CompleteProfilePage() {
-  const { user, sessionToken, ready, profileCompleted, profileChecking, refreshProfile, signOut } =
-    useAuth();
+  const { user, sessionToken, refreshProfile, signOut } = useAuth();
   const search = useSearch({ from: "/complete-profile" });
   const navigate = useNavigate();
 
-  const [fullName, setFullName] = useState("");
-  const [mobileNumber, setMobileNumber] = useState("");
+  const [fullName, setFullName] = useState(() => {
+    const metaName = user?.user_metadata?.["full_name"] || user?.user_metadata?.["name"] || "";
+    return typeof metaName === "string" && metaName && metaName.toLowerCase() !== "customer"
+      ? metaName
+      : "";
+  });
+  const [mobileNumber, setMobileNumber] = useState(() => {
+    const metaPhone =
+      user?.user_metadata?.["mobile_number"] || user?.user_metadata?.["phone"] || user?.phone || "";
+    if (!metaPhone) return "";
+    const clean = String(metaPhone).replace(/\D/g, "").slice(-10);
+    return clean.length === 10 ? clean : "";
+  });
   const [countryCode, setCountryCode] = useState("+91");
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [success, setSuccess] = useState(false);
-
-  // Pre-fill existing metadata if available
-  useEffect(() => {
-    if (user) {
-      const metaName = user.user_metadata?.["full_name"] || user.user_metadata?.["name"] || "";
-      if (typeof metaName === "string" && metaName && metaName.toLowerCase() !== "customer") {
-        setFullName((prev) => (prev ? prev : metaName));
-      }
-
-      const metaPhone =
-        user.user_metadata?.["mobile_number"] || user.user_metadata?.["phone"] || user.phone || "";
-      if (metaPhone) {
-        const clean = String(metaPhone).replace(/\D/g, "").slice(-10);
-        if (clean.length === 10) {
-          setMobileNumber((prev) => (prev ? prev : clean));
-        }
-      }
-    }
-  }, [user]);
-
-  // If already completed and verified, redirect to target or home
-  useEffect(() => {
-    if (ready && !profileChecking && profileCompleted) {
-      const destination = search.returnTo || "/account";
-      void navigate({ to: destination, replace: true });
-    }
-  }, [ready, profileChecking, profileCompleted, search.returnTo, navigate]);
 
   // Handle Indian mobile number formatting (only digits, max 10)
   const handleMobileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,12 +101,8 @@ function CompleteProfilePage() {
         setSuccess(true);
         toast.success("Profile completed successfully. Welcome to CAVENHURST.");
         await refreshProfile();
-
-        // Redirect after short feedback pause
-        setTimeout(async () => {
-          const destination = search.returnTo || "/";
-          await navigate({ to: destination, replace: true });
-        }, 600);
+        const destination = search.returnTo || "/";
+        void navigate({ to: destination, replace: true });
       }
     } catch (err) {
       const msg =

@@ -94,7 +94,7 @@ export const Route = createFileRoute("/product/$slug")({
 function ProductPage() {
   const { product: p, reviews: initialReviews, related } = Route.useLoaderData();
   const { user } = useAuth();
-  const { add, toggleWish, wishlist } = useStore();
+  const { add, startDirectBuy, toggleWish, wishlist } = useStore();
   const navigate = useNavigate();
   const [img, setImg] = useState(0);
   const [color, setColor] = useState(p.colors[0]?.name || "Default");
@@ -205,7 +205,7 @@ function ProductPage() {
     }
   };
 
-  const addToBag = (buy = false) => {
+  const addToBag = () => {
     if (!size) {
       toast.error("Please select a size");
       return;
@@ -214,12 +214,51 @@ function ProductPage() {
       toast.error("This size is out of stock");
       return;
     }
-    if (!add({ slug: p.slug, size, color, qty })) {
+    if (
+      !add({
+        slug: p.slug,
+        name: p.name,
+        price: p.price,
+        mrp: p.mrp,
+        image: main,
+        size,
+        color,
+        qty,
+        maxStock: stock,
+      })
+    ) {
       toast.error(`Only ${stock} left in ${size}`);
       return;
     }
     toast.success(`Added to bag — ${p.name}, ${color}, ${size}`);
-    if (buy) navigate({ to: "/checkout" });
+  };
+
+  const buyNow = () => {
+    if (!size) {
+      toast.error("Please select a size");
+      return;
+    }
+    if (stock <= 0) {
+      toast.error("This size is out of stock");
+      return;
+    }
+    if (
+      !startDirectBuy({
+        slug: p.slug,
+        name: p.name,
+        price: p.price,
+        mrp: p.mrp,
+        image: main,
+        size,
+        color,
+        qty,
+        maxStock: stock,
+      })
+    ) {
+      toast.error(`Only ${stock} left in ${size}`);
+      return;
+    }
+    navigate({ to: "/checkout", search: { mode: "direct" } });
   };
 
   const checkPin = () => {
@@ -499,13 +538,13 @@ function ProductPage() {
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
-              onClick={() => addToBag()}
+              onClick={addToBag}
               className="rounded-md border border-foreground py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] hover:bg-foreground/10 transition-colors"
             >
               Add to Cart
             </button>
             <button
-              onClick={() => addToBag(true)}
+              onClick={buyNow}
               className="rounded-md bg-primary py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground hover:bg-primary/90 transition-opacity"
             >
               Buy Now

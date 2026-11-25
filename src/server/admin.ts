@@ -211,7 +211,129 @@ interface DbOrderOverviewRow {
 }
 
 interface DbRefundRow {
+  order_id?: string | null;
   amount: number;
+}
+
+function isOrderExcludedFromRevenue(order: Pick<DbOrderOverviewRow, "status" | "payment_status">) {
+  return ["cancelled", "refunded"].includes(order.status) || order.payment_status === "refunded";
+}
+
+function computeOverviewSalesAndCounts(allOrders: DbOrderOverviewRow[], refunds: DbRefundRow[]) {
+  const paidOrders = allOrders.filter(
+    (o) => o.payment_status === "paid" && !isOrderExcludedFromRevenue(o),
+  );
+  const codOrders = allOrders.filter(
+    (o) => o.payment_method === "cod" && !isOrderExcludedFromRevenue(o),
+  );
+  const activePaidIds = new Set(paidOrders.map((o) => o.id));
+
+  const totalRefunded = (refunds || []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+  const activePaidRefunds = (refunds || []).reduce(
+    (sum, r) => (r.order_id && activePaidIds.has(r.order_id) ? sum + (Number(r.amount) || 0) : sum),
+    0,
+  );
+
+  const totalPaidRevenue = Math.max(
+    0,
+    paidOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0) - activePaidRefunds,
+  );
+  const totalCodRevenue = codOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+
+  const dailySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    dailySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
+  }
+
+  const weeklyBuckets: Array<{
+    startMs: number;
+    endMs: number;
+    entry: { date: string; revenue: number; orders: number };
+  }> = [];
+  for (let i = 7; i >= 0; i--) {
+    const bucketEnd = new Date(today);
+    bucketEnd.setDate(bucketEnd.getDate() - i * 7);
+    const bucketStart = new Date(bucketEnd);
+    bucketStart.setDate(bucketStart.getDate() - 6);
+    bucketStart.setHours(0, 0, 0, 0);
+    const label = `Wk ${bucketEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    weeklyBuckets.push({
+      startMs: bucketStart.getTime(),
+      endMs: bucketEnd.getTime(),
+      entry: { date: label, revenue: 0, orders: 0 },
+    });
+  }
+
+  const monthlySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const key = d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+    monthlySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
+  }
+
+  for (const o of allOrders) {
+    const orderDate = o.created_at ? new Date(o.created_at) : null;
+    if (!orderDate || Number.isNaN(orderDate.getTime())) continue;
+
+    const countsAsRevenue = o.payment_status === "paid" && !isOrderExcludedFromRevenue(o);
+    const countsAsOrder = !isOrderExcludedFromRevenue(o);
+    const orderTotal = Number(o.total) || 0;
+
+    const dateKey = orderDate.toISOString().slice(0, 10);
+    const dailyEntry = dailySalesMap.get(dateKey);
+    if (dailyEntry) {
+      if (countsAsOrder) dailyEntry.orders += 1;
+      if (countsAsRevenue) dailyEntry.revenue += orderTotal;
+    }
+
+    const orderMs = orderDate.getTime();
+    const weekBucket = weeklyBuckets.find((b) => orderMs >= b.startMs && orderMs <= b.endMs);
+    if (weekBucket) {
+      if (countsAsOrder) weekBucket.entry.orders += 1;
+      if (countsAsRevenue) weekBucket.entry.revenue += orderTotal;
+    }
+
+    const monthKey = orderDate.toLocaleDateString("en-US", {
+      month: "short",
+      year: "2-digit",
+    });
+    const monthEntry = monthlySalesMap.get(monthKey);
+    if (monthEntry) {
+      if (countsAsOrder) monthEntry.orders += 1;
+      if (countsAsRevenue) monthEntry.revenue += orderTotal;
+    }
+  }
+
+  return {
+    paidOrders,
+    codOrders,
+    totalRefunded,
+    totalPaidRevenue,
+    totalCodRevenue,
+    pendingPayments: allOrders.filter((o) => o.payment_status === "pending").length,
+    pendingOrders: allOrders.filter(
+      (o) => o.status === "pending_payment" || o.payment_status === "pending",
+    ).length,
+    processingOrders: allOrders.filter((o) => o.status === "processing").length,
+    shippedOrders: allOrders.filter((o) =>
+      ["shipped", "in_transit", "out_for_delivery"].includes(o.shipment_status || ""),
+    ).length,
+    deliveredOrders: allOrders.filter((o) => o.shipment_status === "delivered").length,
+    cancelledOrders: allOrders.filter((o) => o.status === "cancelled").length,
+    rtoOrders: allOrders.filter((o) =>
+      ["rto_initiated", "rto_delivered"].includes(o.shipment_status || ""),
+    ).length,
+    returnOrders: allOrders.filter((o) => o.status === "returned").length,
+    dailySales: Array.from(dailySalesMap.values()),
+    weeklySales: weeklyBuckets.map((b) => b.entry),
+    monthlySales: Array.from(monthlySalesMap.values()),
+  };
 }
 
 interface DbProductRow {
@@ -281,8 +403,8 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
               payment_method: (r as { payment_method?: string | null }).payment_method || "online",
             }));
           }),
-          sql<DbRefundRow[]>`SELECT amount FROM refunds`
-            .catch(() => sql<DbRefundRow[]>`SELECT amount FROM payment_refunds`)
+          sql<DbRefundRow[]>`SELECT order_id, amount FROM refunds`
+            .catch(() => sql<DbRefundRow[]>`SELECT order_id, amount FROM payment_refunds`)
             .catch(() => []),
           sql<DbProductRow[]>`SELECT slug, name, stock FROM products`.catch(() => []),
           sql<DbCountRow[]>`SELECT count(*)::int as count FROM profiles`
@@ -372,31 +494,7 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
 
         const allOrders = orders || [];
         const totalOrders = allOrders.length;
-
-        const paidOrders = allOrders.filter((o) => o.payment_status === "paid");
-        const codOrders = allOrders.filter((o) => o.payment_method === "cod");
-
-        const totalRefunded = (refunds || []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-        const totalPaidRevenue = Math.max(
-          0,
-          paidOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0) - totalRefunded,
-        );
-        const totalCodRevenue = codOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-
-        const pendingPayments = allOrders.filter((o) => o.payment_status === "pending").length;
-        const pendingOrders = allOrders.filter(
-          (o) => o.status === "pending_payment" || o.payment_status === "pending",
-        ).length;
-        const processingOrders = allOrders.filter((o) => o.status === "processing").length;
-        const shippedOrders = allOrders.filter((o) =>
-          ["shipped", "in_transit", "out_for_delivery"].includes(o.shipment_status || ""),
-        ).length;
-        const deliveredOrders = allOrders.filter((o) => o.shipment_status === "delivered").length;
-        const cancelledOrders = allOrders.filter((o) => o.status === "cancelled").length;
-        const rtoOrders = allOrders.filter((o) =>
-          ["rto_initiated", "rto_delivered"].includes(o.shipment_status || ""),
-        ).length;
-        const returnOrders = allOrders.filter((o) => o.status === "returned").length;
+        const agg = computeOverviewSalesAndCounts(allOrders, refunds || []);
 
         // Calculate live inventory alerts directly from public.inventory
         let outOfStockCount = 0;
@@ -445,99 +543,39 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           }
         }
 
-        // Daily Sales (Last 14 days)
-        const dailySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
-        const today = new Date();
-        for (let i = 13; i >= 0; i--) {
-          const d = new Date(today);
-          d.setDate(d.getDate() - i);
-          const key = d.toISOString().slice(0, 10);
-          dailySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
-        }
-
-        // Weekly Sales (Last 8 weeks)
-        const weeklySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
-        for (let i = 7; i >= 0; i--) {
-          const d = new Date(today);
-          d.setDate(d.getDate() - i * 7);
-          const key = `Wk ${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-          weeklySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
-        }
-
-        // Monthly Sales (Last 12 months)
-        const monthlySalesMap = new Map<
-          string,
-          { date: string; revenue: number; orders: number }
-        >();
-        for (let i = 11; i >= 0; i--) {
-          const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-          const key = d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
-          monthlySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
-        }
-
-        for (const o of allOrders) {
-          const orderDate = o.created_at ? new Date(o.created_at) : null;
-          if (!orderDate) continue;
-
-          const dateKey = orderDate.toISOString().slice(0, 10);
-          const dailyEntry = dailySalesMap.get(dateKey);
-          if (dailyEntry) {
-            dailyEntry.orders += 1;
-            if (o.payment_status === "paid") {
-              dailyEntry.revenue += Number(o.total) || 0;
-            }
-          }
-
-          const monthKey = orderDate.toLocaleDateString("en-US", {
-            month: "short",
-            year: "2-digit",
-          });
-          const monthEntry = monthlySalesMap.get(monthKey);
-          if (monthEntry) {
-            monthEntry.orders += 1;
-            if (o.payment_status === "paid") {
-              monthEntry.revenue += Number(o.total) || 0;
-            }
-          }
-        }
-
-        const dailySales = Array.from(dailySalesMap.values());
-        const monthlySales = Array.from(monthlySalesMap.values());
-        const weeklySales = Array.from(weeklySalesMap.values());
-
         return {
           totalCustomers: custCountRows[0]?.count ?? 0,
           newCustomers: newCustRow[0]?.count ?? 0,
           totalProducts: prodCountRows[0]?.count ?? 0,
           totalOrders,
-          totalPaidRevenue,
-          totalCodRevenue,
-          totalPaidOrders: paidOrders.length,
-          totalCodOrders: codOrders.length,
-          pendingPayments,
-          pendingOrders,
-          processingOrders,
-          shippedOrders,
-          deliveredOrders,
-          cancelledOrders,
-          rtoOrders,
-          returnOrders,
+          totalPaidRevenue: agg.totalPaidRevenue,
+          totalCodRevenue: agg.totalCodRevenue,
+          totalPaidOrders: agg.paidOrders.length,
+          totalCodOrders: agg.codOrders.length,
+          pendingPayments: agg.pendingPayments,
+          pendingOrders: agg.pendingOrders,
+          processingOrders: agg.processingOrders,
+          shippedOrders: agg.shippedOrders,
+          deliveredOrders: agg.deliveredOrders,
+          cancelledOrders: agg.cancelledOrders,
+          rtoOrders: agg.rtoOrders,
+          returnOrders: agg.returnOrders,
           pendingReturns: pendingReturnsRow[0]?.count ?? 0,
-          totalRefunded,
+          totalRefunded: agg.totalRefunded,
           lowStockCount,
           outOfStockCount,
           lowStockAlerts,
-          dailySales,
-          weeklySales,
-          monthlySales,
+          dailySales: agg.dailySales,
+          weeklySales: agg.weeklySales,
+          monthlySales: agg.monthlySales,
           paymentMethodBreakdown: {
             online: {
-              count: paidOrders.length,
-              revenue: totalPaidRevenue,
+              count: agg.paidOrders.length,
+              revenue: agg.totalPaidRevenue,
             },
             cod: {
-              count: codOrders.length,
-              revenue: totalCodRevenue,
+              count: agg.codOrders.length,
+              revenue: agg.totalCodRevenue,
             },
           },
           topSellingProducts: (topSellingRows || []).map((t) => ({
@@ -594,129 +632,102 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
 
     const totalOrders = allOrders.length;
 
-    const paidOrders = allOrders.filter((o) => o.payment_status === "paid");
-    const codOrders = allOrders.filter((o) => o.payment_method === "cod");
-
     // Fetch verified refunds to calculate net realized revenue
-    let totalRefunded = 0;
-    const { data: allRefunds } = await supabaseAdmin.from("refunds").select("amount");
+    let refundRows: DbRefundRow[] = [];
+    const { data: allRefunds } = await supabaseAdmin.from("refunds").select("order_id, amount");
     if (allRefunds && allRefunds.length > 0) {
-      totalRefunded = allRefunds.reduce((sum, r) => sum + (r.amount || 0), 0);
+      refundRows = allRefunds as DbRefundRow[];
     } else {
-      const { data: payRefunds } = await supabaseAdmin.from("payment_refunds").select("amount");
+      const { data: payRefunds } = await supabaseAdmin
+        .from("payment_refunds")
+        .select("order_id, amount");
       if (payRefunds && payRefunds.length > 0) {
-        totalRefunded = payRefunds.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+        refundRows = payRefunds.map((r) => ({
+          order_id: r.order_id,
+          amount: Number(r.amount) || 0,
+        }));
       }
     }
 
-    const totalPaidRevenue = Math.max(
-      0,
-      paidOrders.reduce((sum, o) => sum + (o.total || 0), 0) - totalRefunded,
-    );
-    const totalCodRevenue = codOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-
-    const pendingPayments = allOrders.filter((o) => o.payment_status === "pending").length;
-    const processingOrders = allOrders.filter((o) => o.status === "processing").length;
-    const shippedOrders = allOrders.filter((o) =>
-      ["shipped", "in_transit", "out_for_delivery"].includes(o.shipment_status || ""),
-    ).length;
-    const deliveredOrders = allOrders.filter((o) => o.shipment_status === "delivered").length;
-    const cancelledOrders = allOrders.filter((o) => o.status === "cancelled").length;
-    const rtoOrders = allOrders.filter((o) =>
-      ["rto_initiated", "rto_delivered"].includes(o.shipment_status || ""),
-    ).length;
-    const returnOrders = allOrders.filter((o) => o.status === "returned").length;
+    const agg = computeOverviewSalesAndCounts(allOrders, refundRows);
 
     const { data: dbProducts } = await supabaseAdmin.from("products").select("slug, name, stock");
     const productList = dbProducts || [];
 
+    let outOfStockCount = 0;
     let lowStockCount = 0;
     const lowStockAlerts: Array<{ name: string; slug: string; size: string; stock: number }> = [];
 
     for (const p of productList) {
       const stockObj = (p.stock || {}) as Record<string, number>;
       for (const [size, count] of Object.entries(stockObj)) {
-        if (typeof count === "number" && count <= 3) {
-          lowStockCount++;
-          if (lowStockAlerts.length < 10) {
+        if (typeof count === "number") {
+          if (count === 0) outOfStockCount++;
+          else if (count <= 3) {
+            lowStockCount++;
+          }
+          if (count <= 3 && lowStockAlerts.length < 10) {
             lowStockAlerts.push({ name: p.name, slug: p.slug, size, stock: count });
           }
         }
       }
     }
 
-    const dailySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
-    const today = new Date();
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const key = d.toISOString().slice(0, 10);
-      dailySalesMap.set(key, { date: key, revenue: 0, orders: 0 });
-    }
-
-    for (const o of allOrders) {
-      const dateKey = (o.created_at || "").slice(0, 10);
-      const entry = dailySalesMap.get(dateKey);
-      if (entry) {
-        entry.orders += 1;
-        // Only count paid orders as realized revenue (do not report uncollected COD orders as received revenue)
-        if (o.payment_status === "paid") {
-          entry.revenue += o.total || 0;
-        }
-      }
-    }
-
-    const dailySales = Array.from(dailySalesMap.values());
-
-    const [custCountRes, prodCountRes, recentOrdersRes, recentCustRes] = await Promise.all([
-      supabaseAdmin.from("customers").select("id", { count: "exact", head: true }),
-      supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
-      supabaseAdmin
-        .from("orders")
-        .select(
-          "id, order_number, customer_name, customer_email, total, status, payment_status, created_at",
-        )
-        .order("created_at", { ascending: false })
-        .limit(5),
-      supabaseAdmin
-        .from("customers")
-        .select("id, full_name, email, phone, created_at")
-        .order("created_at", { ascending: false })
-        .limit(5),
-    ]);
+    const [custCountRes, prodCountRes, recentOrdersRes, recentCustRes, pendingReturnsRes] =
+      await Promise.all([
+        supabaseAdmin.from("customers").select("id", { count: "exact", head: true }),
+        supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
+        supabaseAdmin
+          .from("orders")
+          .select(
+            "id, order_number, customer_name, customer_email, total, status, payment_status, created_at",
+          )
+          .order("created_at", { ascending: false })
+          .limit(5),
+        supabaseAdmin
+          .from("customers")
+          .select("id, full_name, email, phone, created_at")
+          .order("created_at", { ascending: false })
+          .limit(5),
+        supabaseAdmin
+          .from("returns")
+          .select("id", { count: "exact", head: true })
+          .in("status", ["requested", "pending", "under_review"]),
+      ]);
 
     return {
       totalCustomers: custCountRes.count ?? 0,
+      newCustomers: 0,
       totalProducts: prodCountRes.count ?? 0,
       totalOrders,
-      totalPaidRevenue,
-      totalCodRevenue,
-      totalPaidOrders: paidOrders.length,
-      totalCodOrders: codOrders.length,
-      pendingPayments,
-      pendingOrders: allOrders.filter((o) => o.status === "pending").length,
-      processingOrders,
-      shippedOrders,
-      deliveredOrders,
-      cancelledOrders,
-      rtoOrders,
-      returnOrders,
-      pendingReturns: 0,
-      totalRefunded,
+      totalPaidRevenue: agg.totalPaidRevenue,
+      totalCodRevenue: agg.totalCodRevenue,
+      totalPaidOrders: agg.paidOrders.length,
+      totalCodOrders: agg.codOrders.length,
+      pendingPayments: agg.pendingPayments,
+      pendingOrders: agg.pendingOrders,
+      processingOrders: agg.processingOrders,
+      shippedOrders: agg.shippedOrders,
+      deliveredOrders: agg.deliveredOrders,
+      cancelledOrders: agg.cancelledOrders,
+      rtoOrders: agg.rtoOrders,
+      returnOrders: agg.returnOrders,
+      pendingReturns: pendingReturnsRes.count ?? 0,
+      totalRefunded: agg.totalRefunded,
       lowStockCount,
-      outOfStockCount: 0,
+      outOfStockCount,
       lowStockAlerts,
-      dailySales,
-      weeklySales: [],
-      monthlySales: [],
+      dailySales: agg.dailySales,
+      weeklySales: agg.weeklySales,
+      monthlySales: agg.monthlySales,
       paymentMethodBreakdown: {
         online: {
-          count: paidOrders.length,
-          revenue: totalPaidRevenue,
+          count: agg.paidOrders.length,
+          revenue: agg.totalPaidRevenue,
         },
         cod: {
-          count: codOrders.length,
-          revenue: totalCodRevenue,
+          count: agg.codOrders.length,
+          revenue: agg.totalCodRevenue,
         },
       },
       topSellingProducts: [],
@@ -2345,6 +2356,93 @@ export const getAdminAuditLogsServerFn = createServerFn({ method: "POST" })
       if (!error && logs) return logs;
     } catch (err) {
       console.warn("[Admin Audit Logs] Supabase error:", err);
+    }
+
+    return [];
+  });
+
+export const getSystemErrorLogsServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params?: (AdminAuthParams & { limit?: number | undefined }) | undefined) => params || {},
+  )
+  .handler(async ({ data }) => {
+    await verifyAdminSession(data.authToken);
+
+    const limit = data.limit || 50;
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<
+          Array<{
+            id: string;
+            actor_email: string | null;
+            action: string;
+            target_type: string;
+            target_id: string;
+            details: Json | null;
+            created_at: string;
+          }>
+        >`
+          SELECT id, actor_email, action, target_type, target_id, details, created_at
+          FROM public.audit_logs
+          WHERE action LIKE 'error_%'
+          ORDER BY created_at DESC
+          LIMIT ${limit}
+        `;
+        return rows.map((row) => ({
+          ...row,
+          details: row.details ?? undefined,
+        }));
+      } catch (dbErr) {
+        console.warn("[System Error Logs] Direct DB notice:", dbErr);
+      }
+    }
+
+    try {
+      interface AuditLogsQueryClient {
+        from: (table: string) => {
+          select: (cols: string) => {
+            ilike: (
+              col: string,
+              pattern: string,
+            ) => {
+              order: (
+                col: string,
+                opts: { ascending: boolean },
+              ) => {
+                limit: (n: number) => Promise<{
+                  data: Array<{
+                    id: string;
+                    actor_email: string | null;
+                    action: string;
+                    target_type: string;
+                    target_id: string;
+                    details: Json | null;
+                    created_at: string;
+                  }> | null;
+                  error: unknown;
+                }>;
+              };
+            };
+          };
+        };
+      }
+      const client = supabaseAdmin as unknown as AuditLogsQueryClient;
+      const { data: logs, error } = await client
+        .from("audit_logs")
+        .select("id, actor_email, action, target_type, target_id, details, created_at")
+        .ilike("action", "error_%")
+        .order("created_at", { ascending: false })
+        .limit(limit);
+
+      if (!error && logs) {
+        return logs.map((row) => ({
+          ...row,
+          details: row.details ?? undefined,
+        }));
+      }
+    } catch (err) {
+      console.warn("[System Error Logs] Query notice:", err);
     }
 
     return [];

@@ -3,7 +3,7 @@ import { Search } from "lucide-react";
 import { useState } from "react";
 import { ProductCard } from "@/components/site/ProductCard";
 import { meta } from "@/components/site/InfoPage";
-import type { Product } from "@/lib/products";
+import { resolveProductAsset, type Product } from "@/lib/products";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 import { formatINR } from "@/lib/pricing";
 
@@ -55,7 +55,11 @@ function SearchPage() {
                 params={{ slug: p.slug }}
                 className="flex items-center gap-3 rounded-lg p-2 hover:bg-secondary"
               >
-                <img src={p.images[0]} alt="" className="h-12 w-10 rounded object-cover" />
+                <img
+                  src={resolveProductAsset(p.images[0])}
+                  alt=""
+                  className="h-12 w-10 rounded object-cover"
+                />
                 <span className="flex-1">{p.name}</span>
                 <span className="text-sm text-silver">{formatINR(p.price)}</span>
               </Link>

@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProduct, type Size } from "@/lib/products";
-import { computeTotals } from "@/lib/pricing";
+import { calculateOrderPricingPaise, type CouponPricingRule } from "@/lib/pricing";
+import { logStructuredServerError } from "./logger";
 import {
   getAuthenticatedCustomerId,
   verifyGoogleSessionOrToken,
@@ -50,6 +51,8 @@ export interface PlaceOrderInput {
   cart: CheckoutCartItemInput[];
   coupon: string | null;
   paymentMethod: "online" | "cod";
+  checkoutMode?: "DIRECT_BUY" | "CART_CHECKOUT" | undefined;
+  idempotencyKey?: string | undefined;
 }
 
 /**
@@ -213,48 +216,174 @@ async function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: s
   }
 
   // 2. Validate coupon strictly from Supabase coupons table
-  let discount = 0;
-  if (couponCode && couponCode.trim()) {
-    const cleanCode = couponCode.trim().toUpperCase();
-    const { data: couponRow } = await supabaseAdmin
+  let couponRule: CouponPricingRule | null = null;
+  const cleanCode = couponCode?.trim().toUpperCase() || null;
+
+  if (cleanCode) {
+    const { data: couponRow, error: couponErr } = await supabaseAdmin
       .from("coupons")
       .select("*")
       .ilike("code", cleanCode)
       .eq("is_active", true)
       .maybeSingle();
 
-    if (couponRow) {
-      const now = new Date();
-      const notExpired = !couponRow.expires_at || new Date(couponRow.expires_at) > now;
-      const underUsageLimit =
-        !couponRow.usage_limit || (couponRow.times_used || 0) < couponRow.usage_limit;
-      const meetsMinOrder = subtotal >= (couponRow.min_order_value || 0);
-
-      if (notExpired && underUsageLimit && meetsMinOrder) {
-        if (couponRow.discount_type === "percentage") {
-          const calculatedDiscount = Math.round((subtotal * couponRow.discount_value) / 100);
-          discount = couponRow.max_discount
-            ? Math.min(calculatedDiscount, couponRow.max_discount)
-            : calculatedDiscount;
-        } else {
-          discount = Math.min(couponRow.discount_value, subtotal);
-        }
-      }
+    if (couponErr) {
+      await logStructuredServerError({
+        source: "checkout",
+        action: "load_coupon",
+        targetId: cleanCode,
+        error: couponErr,
+      });
+      throw new Error("Could not verify coupon code right now. Please try again.");
     }
+
+    if (!couponRow) {
+      throw new Error(`Coupon code "${cleanCode}" is invalid or inactive.`);
+    }
+
+    const now = new Date();
+    const notExpired = !couponRow.expires_at || new Date(couponRow.expires_at) > now;
+    const underUsageLimit =
+      !couponRow.usage_limit || (couponRow.times_used || 0) < couponRow.usage_limit;
+
+    if (!notExpired) {
+      throw new Error(`Coupon code "${cleanCode}" has expired.`);
+    }
+    if (!underUsageLimit) {
+      throw new Error(`Coupon code "${cleanCode}" has reached its redemption limit.`);
+    }
+
+    couponRule = {
+      code: couponRow.code,
+      discountType: couponRow.discount_type === "fixed" ? "fixed" : "percentage",
+      discountValue: Number(couponRow.discount_value) || 0,
+      minOrderValue: couponRow.min_order_value,
+      maxDiscount: couponRow.max_discount,
+    };
   }
 
-  // 3. Free shipping above threshold ₹4,999
-  const shippingFee = subtotal >= 4999 || subtotal === 0 ? 0 : 199;
-  const total = Math.max(0, subtotal - discount + shippingFee);
+  // 3. Single integer-paise calculation engine aligned 1:1 with UI and Razorpay
+  const pricing = calculateOrderPricingPaise({
+    items: itemsWithDetails.map((item) => ({ price: item.price, qty: item.qty })),
+    couponCode: cleanCode,
+    couponRule,
+  });
+
+  if (cleanCode && pricing.couponRejectionReason) {
+    throw new Error(pricing.couponRejectionReason);
+  }
 
   return {
-    subtotal,
-    discount,
-    shippingFee,
-    total,
+    subtotal: pricing.subtotal,
+    discount: pricing.discount,
+    shippingFee: pricing.shipping,
+    taxes: pricing.taxes,
+    total: pricing.total,
+    totalPaise: pricing.totalPaise,
+    appliedCouponCode: pricing.appliedCouponCode,
     itemsWithDetails,
   };
 }
+
+/**
+ * Server Function: Live Coupon Validation against Supabase coupons table
+ */
+export const validateCouponServerFn = createServerFn({ method: "POST" })
+  .validator((input: { code: string; subtotalRupees: number }) => input)
+  .handler(async ({ data }) => {
+    const cleanCode = (data.code || "").trim().toUpperCase();
+    if (!cleanCode) {
+      return {
+        valid: false as const,
+        code: null,
+        rule: null,
+        message: "Please enter a coupon code.",
+      };
+    }
+
+    const { data: couponRow, error } = await supabaseAdmin
+      .from("coupons")
+      .select("*")
+      .ilike("code", cleanCode)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (error) {
+      await logStructuredServerError({
+        source: "checkout",
+        action: "validate_coupon",
+        targetId: cleanCode,
+        error,
+      });
+      return {
+        valid: false as const,
+        code: cleanCode,
+        rule: null,
+        message: "Unable to verify coupon right now. Please try again.",
+      };
+    }
+
+    if (!couponRow) {
+      return {
+        valid: false as const,
+        code: cleanCode,
+        rule: null,
+        message: `Coupon code "${cleanCode}" is invalid or inactive.`,
+      };
+    }
+
+    const now = new Date();
+    if (couponRow.expires_at && new Date(couponRow.expires_at) <= now) {
+      return {
+        valid: false as const,
+        code: couponRow.code,
+        rule: null,
+        message: `Coupon code "${couponRow.code}" has expired.`,
+      };
+    }
+    if (couponRow.usage_limit && (couponRow.times_used || 0) >= couponRow.usage_limit) {
+      return {
+        valid: false as const,
+        code: couponRow.code,
+        rule: null,
+        message: `Coupon code "${couponRow.code}" has reached its usage limit.`,
+      };
+    }
+
+    const rule: CouponPricingRule = {
+      code: couponRow.code,
+      discountType: couponRow.discount_type === "fixed" ? "fixed" : "percentage",
+      discountValue: Number(couponRow.discount_value) || 0,
+      minOrderValue: couponRow.min_order_value,
+      maxDiscount: couponRow.max_discount,
+      label:
+        couponRow.discount_type === "percentage"
+          ? `${couponRow.discount_value}% off${couponRow.min_order_value ? ` orders ₹${couponRow.min_order_value}+` : ""}`
+          : `₹${couponRow.discount_value} off`,
+    };
+
+    const preview = calculateOrderPricingPaise({
+      subtotalRupees: data.subtotalRupees,
+      couponCode: rule.code,
+      couponRule: rule,
+    });
+
+    if (preview.couponRejectionReason) {
+      return {
+        valid: false as const,
+        code: rule.code,
+        rule,
+        message: preview.couponRejectionReason,
+      };
+    }
+
+    return {
+      valid: true as const,
+      code: rule.code,
+      rule,
+      message: `${rule.code} applied — ${rule.label}`,
+    };
+  });
 
 /**
  * Server Function: Serviceability Check
@@ -322,13 +451,71 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       if (c) customerUuid = c.id;
     }
 
-    // 3. Server-side price calculation directly from Supabase database
-    const { subtotal, discount, shippingFee, total, itemsWithDetails } = await calculateOrderTotals(
-      cart,
-      coupon,
-    );
+    // 3. Server-side price calculation directly from Supabase database (integer paise)
+    const { subtotal, discount, shippingFee, taxes, total, totalPaise, itemsWithDetails } =
+      await calculateOrderTotals(cart, coupon);
     if (itemsWithDetails.length === 0) {
       throw new Error("No valid products found in your order.");
+    }
+
+    const checkoutMode = data.checkoutMode === "DIRECT_BUY" ? "DIRECT_BUY" : "CART_CHECKOUT";
+    const cleanIdemKey = data.idempotencyKey?.trim().slice(0, 128) || null;
+
+    // 3b. Idempotency check to block duplicate order creation on double-click or retry
+    if (cleanIdemKey) {
+      const { data: existingOrder } = await supabaseAdmin
+        .from("orders")
+        .select(
+          "id, order_number, status, payment_method, payment_status, total, razorpay_order_id, awb_number, courier_partner",
+        )
+        .filter("shipping->>idempotencyKey", "eq", cleanIdemKey)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingOrder) {
+        if (existingOrder.payment_status === "paid") {
+          throw new Error(
+            "This order has already been paid and confirmed. Please check your Account order history.",
+          );
+        }
+        if (
+          existingOrder.payment_method === "online" &&
+          existingOrder.status === "pending_payment" &&
+          existingOrder.razorpay_order_id &&
+          existingOrder.total === total
+        ) {
+          const rzpKey = getRazorpayKeyId();
+          if (rzpKey) {
+            return {
+              success: true,
+              orderId: existingOrder.id,
+              orderNumber: existingOrder.order_number || `CVH-${existingOrder.id.slice(0, 8)}`,
+              paymentMethod: "online" as const,
+              razorpayOrderId: existingOrder.razorpay_order_id,
+              amountInPaise: totalPaise,
+              currency: "INR",
+              keyId: rzpKey,
+              total: existingOrder.total,
+              reused: true,
+            };
+          }
+        }
+        if (existingOrder.payment_method === "cod" && existingOrder.status === "confirmed") {
+          return {
+            success: true,
+            orderId: existingOrder.id,
+            orderNumber: existingOrder.order_number || `CVH-${existingOrder.id.slice(0, 8)}`,
+            paymentMethod: "cod" as const,
+            cod: true,
+            total: existingOrder.total,
+            awbNumber: existingOrder.awb_number || undefined,
+            courierPartner: existingOrder.courier_partner || undefined,
+            shipmentSuccess: true,
+            reused: true,
+          };
+        }
+      }
     }
 
     // 4. Verify live courier serviceability when ShipMaxx360 is connected;
@@ -371,7 +558,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         subtotal,
         discount,
         shipping_fee: shippingFee,
-        taxes: 0,
+        taxes,
         total,
         status: paymentMethod === "cod" ? "confirmed" : "pending_payment",
         payment_method: paymentMethod,
@@ -383,13 +570,22 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
           state: customer.state.trim(),
           pincode: customer.pin.trim(),
           country: "India",
+          checkoutMode,
+          ...(cleanIdemKey ? { idempotencyKey: cleanIdemKey } : {}),
         } as unknown as Json,
       })
       .select("id")
       .single();
 
     if (orderErr || !order) {
-      console.error("[Orders] Failed to create order in database:", orderErr);
+      await logStructuredServerError({
+        source: "checkout",
+        action: "create_order",
+        targetId: orderNumber,
+        actorEmail: customer.email.trim(),
+        error: orderErr || new Error("Order insert returned null"),
+        context: { checkoutMode, paymentMethod, total },
+      });
       throw new Error("Failed to create order record. Please try again.");
     }
 
@@ -541,18 +737,27 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         );
       }
 
-      // Create Razorpay Order on Razorpay servers
+      // Create Razorpay Order on Razorpay servers using exact integer paise
       const rzpRes = await createRazorpayOrder({
-        amountInPaise: total * 100,
+        amountInPaise: totalPaise,
         receipt: orderNumber,
         notes: {
           order_id: orderId,
           order_number: orderNumber,
+          checkout_mode: checkoutMode,
           customer_email: customer.email.trim(),
         },
       });
 
       if (!rzpRes.success || !rzpRes.order) {
+        await logStructuredServerError({
+          source: "payment",
+          action: "create_razorpay_order",
+          targetId: orderNumber,
+          actorEmail: customer.email.trim(),
+          error: rzpRes.error || "Razorpay initialization failed",
+          context: { orderId, totalPaise, checkoutMode },
+        });
         // Rollback pending order and release reserved stock if Razorpay initialization fails
         await releaseOrderInventoryReservations(orderId);
         await supabaseAdmin.from("orders").delete().eq("id", orderId);
@@ -575,7 +780,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         payment_method: "online",
         razorpay_order_id: rzpRes.order.id,
         amount: total,
-        amount_paise: total * 100,
+        amount_paise: totalPaise,
         currency: "INR",
         status: "pending",
       });

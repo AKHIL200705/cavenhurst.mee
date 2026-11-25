@@ -612,10 +612,8 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                         <div key={pmt.id} className="flex items-center justify-between p-3 bg-card">
                           <div>
                             <span className="font-mono font-bold text-foreground">
-                              {(pmt.gateway || pmt.payment_method || "razorpay").toUpperCase()} •{" "}
-                              {pmt.razorpay_payment_id ||
-                                pmt.razorpay_order_id ||
-                                pmt.id.slice(0, 8)}
+                              {(pmt.gateway || "razorpay").toUpperCase()} •{" "}
+                              {pmt.razorpay_payment_id || pmt.id.slice(0, 8)}
                             </span>
                           </div>
                           <div className="flex items-center gap-3">

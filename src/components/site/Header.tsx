@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Heart, Lock, Menu, RefreshCw, Search, ShoppingBag, Truck, User } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -30,11 +31,12 @@ const nav = [
 
 export function Header() {
   const { count, wishlist } = useStore();
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
     <header className="glass-navigation navigation-motion sticky top-0 z-40 border-b border-border">
       <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-4">
         <div className="flex items-center gap-6">
-          <Sheet>
+          <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger aria-label="Open menu" className="p-1">
               <Menu className="h-6 w-6" />
             </SheetTrigger>
@@ -49,6 +51,7 @@ export function Header() {
                       key={n.slug}
                       to="/collections/$slug"
                       params={{ slug: n.slug }}
+                      onClick={() => setMenuOpen(false)}
                       className="rounded-md px-3 py-3 font-heading text-2xl font-bold uppercase tracking-wide hover:bg-secondary transition-colors"
                     >
                       {n.label}
@@ -57,6 +60,7 @@ export function Header() {
                     <Link
                       key={n.to}
                       to="/shop"
+                      onClick={() => setMenuOpen(false)}
                       className="rounded-md px-3 py-3 font-heading text-2xl font-bold uppercase tracking-wide hover:bg-secondary transition-colors"
                     >
                       {n.label}
@@ -73,6 +77,7 @@ export function Header() {
                   <Link
                     key={to}
                     to={to as "/about"}
+                    onClick={() => setMenuOpen(false)}
                     className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
                   >
                     {l}

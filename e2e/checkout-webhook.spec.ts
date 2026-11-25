@@ -239,7 +239,7 @@ test.describe("Product Selection -> Cart -> Checkout -> Razorpay Webhook", () =>
       }),
     );
 
-    await page.getByRole("button", { name: /Pay Online via Razorpay/i }).click();
+    await page.getByRole("button", { name: /Pay .*Online via Razorpay/i }).click();
 
     // Wait for server-created order row in PostgreSQL
     const sql = getE2eSql();

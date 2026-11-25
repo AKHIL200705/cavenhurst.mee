@@ -293,11 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setSessionToken(newSessionToken);
     setReady(true);
-    setWelcome({
-      userId: newUser.id,
-      seen: Boolean(newUser.isAdmin),
-      error: false,
-    });
+    setWelcome(newUser.isAdmin ? { userId: newUser.id, seen: true, error: false } : null);
     checkProfileCompletionServerFn({ data: { authToken: newSessionToken } })
       .then((res) => setProfileCompleted(Boolean(res.profileCompleted)))
       .catch(() => {});

@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { commitOrderInventory, releaseOrderInventoryReservations } from "./inventory";
+import { logStructuredServerError } from "./logger";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface CreateRazorpayOrderInput {
@@ -170,12 +171,12 @@ async function upsertOrderPaymentLedger(params: {
     byOrder?.id ??
     (params.razorpayPaymentId
       ? (
-        await supabaseAdmin
-          .from("payments")
-          .select("id")
-          .eq("razorpay_payment_id", params.razorpayPaymentId)
-          .maybeSingle()
-      ).data?.id
+          await supabaseAdmin
+            .from("payments")
+            .select("id")
+            .eq("razorpay_payment_id", params.razorpayPaymentId)
+            .maybeSingle()
+        ).data?.id
       : undefined);
 
   const updateFields = {
@@ -229,9 +230,12 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
     existingOrder.razorpay_order_id &&
     existingOrder.razorpay_order_id !== input.razorpayOrderId
   ) {
-    console.error(
-      `[Razorpay Security] Order ID mismatch: stored=${existingOrder.razorpay_order_id}, received=${input.razorpayOrderId}`,
-    );
+    await logStructuredServerError({
+      source: "payment",
+      action: "order_id_mismatch",
+      targetId: existingOrder.order_number || input.orderId,
+      error: `Order ID mismatch: stored=${existingOrder.razorpay_order_id}, received=${input.razorpayOrderId}`,
+    });
     return {
       success: false,
       error: "Security validation error: Stored order reference does not match payment response.",
@@ -246,6 +250,16 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
   });
 
   if (!validSignature) {
+    await logStructuredServerError({
+      source: "payment",
+      action: "invalid_signature",
+      targetId: existingOrder.order_number || input.orderId,
+      error: "Cryptographic HMAC SHA256 signature verification failed.",
+      context: {
+        razorpayOrderId: input.razorpayOrderId,
+        razorpayPaymentId: input.razorpayPaymentId,
+      },
+    });
     // Record failed verification attempt in payments ledger
     await supabaseAdmin.from("payments").insert({
       order_id: input.orderId,

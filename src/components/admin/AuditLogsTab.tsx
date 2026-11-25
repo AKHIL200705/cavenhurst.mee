@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface AdminAuditLogItem {
@@ -12,13 +12,24 @@ export interface AdminAuditLogItem {
   created_at: string;
 }
 
+export interface SystemErrorLogItem {
+  id: string;
+  actor_email?: string | null | undefined;
+  action: string;
+  target_type: string;
+  target_id: string;
+  details?: Json | undefined;
+  created_at: string;
+}
+
 interface AuditLogsTabProps {
   logs: AdminAuditLogItem[];
+  errorLogs?: SystemErrorLogItem[] | undefined;
   loading: boolean;
   onRefresh: () => void;
 }
 
-export function AuditLogsTab({ logs, loading, onRefresh }: AuditLogsTabProps) {
+export function AuditLogsTab({ logs, errorLogs = [], loading, onRefresh }: AuditLogsTabProps) {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -90,6 +101,59 @@ export function AuditLogsTab({ logs, loading, onRefresh }: AuditLogsTabProps) {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <h3 className="flex items-center gap-2 font-heading text-base font-bold uppercase tracking-tight text-foreground">
+            <AlertTriangle className="h-4 w-4 text-amber-400" /> System & Checkout Error Telemetry
+          </h3>
+          <p className="text-xs text-muted-foreground font-sans">
+            Structured backend exceptions logged during checkout, Razorpay verification, and API
+            workflows.
+          </p>
+        </div>
+
+        <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-muted/40 font-mono text-muted-foreground border-b border-border">
+                <tr>
+                  <th className="p-3.5">Timestamp</th>
+                  <th className="p-3.5">Event</th>
+                  <th className="p-3.5">Source / Target</th>
+                  <th className="p-3.5">Diagnostic Payload</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {errorLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="p-6 text-center text-muted-foreground italic">
+                      No recent system or checkout errors recorded.
+                    </td>
+                  </tr>
+                ) : (
+                  errorLogs.map((err) => (
+                    <tr key={err.id} className="hover:bg-accent/20 transition">
+                      <td className="p-3.5 text-muted-foreground font-mono text-[11px]">
+                        {new Date(err.created_at).toLocaleString()}
+                      </td>
+                      <td className="p-3.5 font-mono font-bold text-amber-400 uppercase text-[11px]">
+                        {err.action}
+                      </td>
+                      <td className="p-3.5 font-mono text-[11px] text-silver">
+                        {err.target_type} · {err.target_id}
+                      </td>
+                      <td className="p-3.5 font-mono text-[10px] text-muted-foreground max-w-md truncate">
+                        {JSON.stringify(err.details || {})}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

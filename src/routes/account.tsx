@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
 import { useAuth } from "@/lib/auth";
 import { useStore } from "@/lib/store";
-import { getProduct, imageFor } from "@/lib/products";
+import { getProduct, imageFor, resolveProductAsset } from "@/lib/products";
 import { formatINR } from "@/lib/pricing";
 import { supabase } from "@/integrations/supabase/client";
 import {
@@ -524,7 +524,7 @@ function Account() {
               const itemName = c.name || p?.name;
               if (!itemName) return null;
               const itemPrice = c.price ?? p?.price ?? 0;
-              const itemImage = c.image || (p ? imageFor(p, c.color) : "");
+              const itemImage = resolveProductAsset(c.image) || (p ? imageFor(p, c.color) : "");
               return (
                 <li
                   key={`${c.slug}${c.size}${c.color}`}
@@ -802,52 +802,112 @@ function Account() {
           ORDER HISTORY
         </h2>
         {orders === null ? (
-          <p className="text-muted-foreground">Loading…</p>
-        ) : orders.length === 0 ? (
-          <p className="text-muted-foreground">No orders yet.</p>
-        ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border">
-            {orders.map((o) => (
-              <li
-                key={o.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-4 text-sm gap-3"
-              >
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="font-mono font-bold">
-                      #{o.order_number || o.id.slice(0, 8).toUpperCase()}
-                    </p>
-                    <span className="rounded bg-secondary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">
-                      {o.payment_status || "Pending"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {new Date(o.created_at).toLocaleDateString("en-IN", {
-                      day: "numeric",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-4 sm:text-right justify-between sm:justify-end">
-                  {o.awb_number && (
-                    <Link
-                      to="/track-order"
-                      className="flex items-center gap-1.5 text-xs text-silver hover:text-foreground border border-border rounded px-2.5 py-1"
-                    >
-                      <Truck className="h-3.5 w-3.5" /> Track #{o.awb_number}
-                    </Link>
-                  )}
-                  <div>
-                    <p className="font-bold font-mono">{formatINR(o.total)}</p>
-                    <p className="capitalize text-xs text-silver">
-                      {o.shipment_status?.replace(/_/g, " ") || o.status.replace(/_/g, " ")}
-                    </p>
-                  </div>
-                </div>
-              </li>
+          <div className="space-y-3">
+            {[1, 2].map((n) => (
+              <div key={n} className="luxury-skeleton h-20 rounded-xl border border-border" />
             ))}
+          </div>
+        ) : orders.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card/50 p-6 text-center">
+            <p className="text-sm text-muted-foreground">You haven&apos;t placed any orders yet.</p>
+            <Link
+              to="/shop"
+              className="mt-3 inline-block rounded-md bg-primary px-5 py-2 text-xs font-bold uppercase tracking-wider text-primary-foreground hover:opacity-90"
+            >
+              Explore Collection
+            </Link>
+          </div>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border bg-card/40">
+            {orders.map((o) => {
+              const items = Array.isArray(o.items)
+                ? (o.items as Array<{
+                    name?: string;
+                    size?: string;
+                    color?: string;
+                    qty?: number;
+                    price?: number;
+                    image?: string | null;
+                  }>)
+                : [];
+              const firstImg = resolveProductAsset(items[0]?.image);
+              const refCode = o.awb_number || o.order_number || o.id;
+              return (
+                <li
+                  key={o.id}
+                  className="flex flex-col gap-3 p-4 text-sm transition-colors hover:bg-accent/20 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex items-start gap-3">
+                    {firstImg ? (
+                      <img
+                        src={firstImg}
+                        alt={items[0]?.name || "Order item"}
+                        className="h-14 w-11 shrink-0 rounded object-cover border border-border/60"
+                      />
+                    ) : null}
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-mono font-bold">
+                          #{o.order_number || o.id.slice(0, 8).toUpperCase()}
+                        </p>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            o.payment_status === "paid"
+                              ? "bg-emerald-500/15 text-emerald-400"
+                              : o.status === "cancelled"
+                                ? "bg-rose-500/15 text-rose-400"
+                                : "bg-secondary text-muted-foreground"
+                          }`}
+                        >
+                          {o.status === "cancelled" ? "Cancelled" : o.payment_status || "Pending"}
+                        </span>
+                      </div>
+                      {items.length > 0 && (
+                        <p className="mt-1 text-xs text-silver">
+                          {items
+                            .slice(0, 2)
+                            .map(
+                              (item) =>
+                                `${item.name || "Item"} (${item.size || "-"}) ×${item.qty || 1}`,
+                            )
+                            .join(" · ")}
+                          {items.length > 2 ? ` +${items.length - 2} more` : ""}
+                        </p>
+                      )}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {new Date(o.created_at).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 sm:justify-end sm:text-right">
+                    {o.status !== "cancelled" && (
+                      <Link
+                        to="/track-order"
+                        search={{ order: refCode }}
+                        className="flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs text-silver transition hover:border-electric hover:text-foreground"
+                      >
+                        <Truck className="h-3.5 w-3.5" />{" "}
+                        {o.awb_number ? `Track #${o.awb_number}` : "Track Order"}
+                      </Link>
+                    )}
+                    <div>
+                      <p className="font-mono font-bold">{formatINR(o.total)}</p>
+                      <p className="text-xs capitalize text-silver">
+                        {(o.shipment_status && o.shipment_status !== "unfulfilled"
+                          ? o.shipment_status
+                          : o.status
+                        ).replace(/_/g, " ")}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

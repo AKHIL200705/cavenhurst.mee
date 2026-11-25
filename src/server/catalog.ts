@@ -1,7 +1,14 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
-import { PRODUCTS, getProduct, type Product, type Size } from "@/lib/products";
+import {
+  COLOR_PHOTOS,
+  PRODUCTS,
+  getProduct,
+  resolveProductAsset,
+  type Product,
+  type Size,
+} from "@/lib/products";
 import type { Json } from "@/integrations/supabase/types";
 
 interface DbProductRow {
@@ -43,16 +50,31 @@ function mapDbProductToFrontend(row: DbProductRow): Product {
       })
     : [{ name: "Standard", hex: "#1C1917" }];
 
+  const category = (row.category_slug as Product["category"]) || "t-shirts";
+  const staticFallback = PRODUCTS.find((item) => item.slug === row.slug);
+  const rawImages =
+    Array.isArray(row.images) && row.images.length > 0 ? row.images : staticFallback?.images || [];
+  const resolvedImages = rawImages
+    .map((img) => resolveProductAsset(img))
+    .filter((img): img is string => Boolean(img));
+
+  const colorMap =
+    staticFallback?.colorImages ??
+    (row.slug === "mythic-graphic-tee" || row.slug === "flow-print-tee"
+      ? COLOR_PHOTOS["graphic"]
+      : COLOR_PHOTOS[category]);
+
   return {
     slug: row.slug,
     name: row.name,
-    category: (row.category_slug as Product["category"]) || "t-shirts",
+    category,
     tags: Array.isArray(row.tags) ? (row.tags as Product["tags"]) : ["essentials"],
+    ...(colorMap ? { colorImages: colorMap } : {}),
     price: Number(row.price) || 0,
     mrp: Number(row.mrp) || Number(row.price) || 0,
     colors,
     stock: stockObj,
-    images: Array.isArray(row.images) && row.images.length > 0 ? row.images : ["/favicon.png"],
+    images: resolvedImages.length > 0 ? resolvedImages : ["/favicon.png"],
     description: row.description || "",
     fabric: row.fabric || "100% Cotton",
     fit: row.fit || "Regular",

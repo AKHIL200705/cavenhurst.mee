@@ -190,10 +190,19 @@ function AuthGate() {
     profileChecking,
   } = useAuth();
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const searchStr = useRouterState({ select: (s) => s.location.searchStr });
   const navigate = useNavigate();
   const legal = path === "/terms" || path === "/privacy";
   const checked = ready && (!user || (welcomeReady && !profileChecking));
-  const destination = accountDestination(Boolean(user), welcomeSeen, profileCompleted, path);
+  const baseDestination = accountDestination(Boolean(user), welcomeSeen, profileCompleted, path);
+  const rawReturnTo =
+    path === "/complete-profile" && profileCompleted && searchStr
+      ? new URLSearchParams(searchStr).get("returnTo")
+      : null;
+  const destination =
+    rawReturnTo && rawReturnTo.startsWith("/") && !rawReturnTo.startsWith("//")
+      ? rawReturnTo
+      : baseDestination;
   // The welcome flag only describes a welcome screen that is on screen right now.
   if (path !== "/welcome" && welcomeShown) resetWelcomeShown();
   const redirectNeeded =

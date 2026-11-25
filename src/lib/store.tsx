@@ -1,6 +1,7 @@
 import type React from "react";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { getProduct, type Size } from "./products";
+import { getProduct } from "./products";
+import { type CouponPricingRule } from "./pricing";
 import { useAuth } from "./auth";
 import {
   syncCartServerFn,
@@ -11,16 +12,26 @@ import {
 
 export type CartItem = CartItemData;
 
+const DIRECT_BUY_STORAGE_KEY = "cavenhurst-direct-buy";
+
 type Store = {
   cart: CartItem[];
   wishlist: string[];
   coupon: string | null;
+  couponRule: CouponPricingRule | null;
+  directBuyItem: CartItem | null;
+  directBuyCoupon: string | null;
+  directBuyCouponRule: CouponPricingRule | null;
   add: (item: CartItem) => boolean;
   setQty: (i: number, qty: number) => void;
   remove: (i: number) => void;
   clear: () => void;
   toggleWish: (slug: string) => boolean;
-  setCoupon: (c: string | null) => void;
+  setCoupon: (c: string | null, rule?: CouponPricingRule | null) => void;
+  startDirectBuy: (item: CartItem) => boolean;
+  setDirectBuyQty: (qty: number) => void;
+  setDirectBuyCoupon: (c: string | null, rule?: CouponPricingRule | null) => void;
+  clearDirectBuy: () => void;
   count: number;
   subtotal: number;
 };
@@ -32,7 +43,11 @@ const Ctx = (g.__cavenStoreCtx ??= createContext<Store | null>(null));
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [wishlist, setWishlist] = useState<string[]>([]);
-  const [coupon, setCoupon] = useState<string | null>(null);
+  const [coupon, setCouponState] = useState<string | null>(null);
+  const [couponRule, setCouponRule] = useState<CouponPricingRule | null>(null);
+  const [directBuyItem, setDirectBuyItem] = useState<CartItem | null>(null);
+  const [directBuyCoupon, setDirectBuyCouponState] = useState<string | null>(null);
+  const [directBuyCouponRule, setDirectBuyCouponRule] = useState<CouponPricingRule | null>(null);
   const [ready, setReady] = useState(false);
   const { user, sessionToken } = useAuth();
   const [syncedUser, setSyncedUser] = useState<string | null>(null);
@@ -45,29 +60,72 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     wishlistRef.current = wishlist;
   }, [cart, wishlist]);
 
-  // Initialize from local storage on mount (guest or cached state)
+  // Initialize cart from localStorage and Direct Buy session from sessionStorage on mount
   useEffect(() => {
     try {
       const s = JSON.parse(localStorage.getItem("cavenhurst-store") || "{}");
       if (Array.isArray(s.cart)) setCart(s.cart);
       if (Array.isArray(s.wishlist)) setWishlist(s.wishlist);
-      setCoupon(s.coupon ?? null);
+      setCouponState(s.coupon ?? null);
+      setCouponRule(s.couponRule ?? null);
       storageOwnerRef.current = typeof s.ownerId === "string" ? s.ownerId : null;
     } catch {
       // Ignore corrupted local storage
     }
+
+    try {
+      const rawDirect = sessionStorage.getItem(DIRECT_BUY_STORAGE_KEY);
+      if (rawDirect) {
+        const d = JSON.parse(rawDirect);
+        if (d?.item && typeof d.item.slug === "string") {
+          setDirectBuyItem(d.item);
+          setDirectBuyCouponState(d.coupon ?? null);
+          setDirectBuyCouponRule(d.couponRule ?? null);
+        }
+      }
+    } catch {
+      // Ignore corrupted direct-buy session storage
+    }
+
     setReady(true);
   }, []);
 
-  // Save cart / wishlist to localStorage
+  // Save cart / wishlist to localStorage (never touches directBuyItem)
   useEffect(() => {
     if (ready) {
       localStorage.setItem(
         "cavenhurst-store",
-        JSON.stringify({ cart, wishlist, coupon, ownerId: storageOwnerRef.current }),
+        JSON.stringify({
+          cart,
+          wishlist,
+          coupon,
+          couponRule,
+          ownerId: storageOwnerRef.current,
+        }),
       );
     }
-  }, [cart, wishlist, coupon, ready]);
+  }, [cart, wishlist, coupon, couponRule, ready]);
+
+  // Save Direct Buy item strictly in sessionStorage (isolated from cart)
+  useEffect(() => {
+    if (!ready) return;
+    try {
+      if (directBuyItem) {
+        sessionStorage.setItem(
+          DIRECT_BUY_STORAGE_KEY,
+          JSON.stringify({
+            item: directBuyItem,
+            coupon: directBuyCoupon,
+            couponRule: directBuyCouponRule,
+          }),
+        );
+      } else {
+        sessionStorage.removeItem(DIRECT_BUY_STORAGE_KEY);
+      }
+    } catch {
+      // Ignore storage quota issues
+    }
+  }, [directBuyItem, directBuyCoupon, directBuyCouponRule, ready]);
 
   // When customer signs in: synchronize only unowned guest items with authoritative Supabase tables
   useEffect(() => {
@@ -195,6 +253,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const clear = () => {
     setCart([]);
+    setCouponState(null);
+    setCouponRule(null);
     if (user && sessionToken) {
       void updateCartItemServerFn({
         data: {
@@ -202,6 +262,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           action: "clear",
         },
       }).catch((e) => console.error("[Store] Clear cart server sync error:", e));
+    }
+  };
+
+  const setCoupon = (c: string | null, rule?: CouponPricingRule | null) => {
+    setCouponState(c);
+    setCouponRule(c ? (rule ?? null) : null);
+  };
+
+  const startDirectBuy = (item: CartItem) => {
+    const max = stockFor(item);
+    if (max <= 0 || item.qty <= 0 || item.qty > max) return false;
+    const cleanItem: CartItem = { ...item, maxStock: max };
+    setDirectBuyItem(cleanItem);
+    setDirectBuyCouponState(null);
+    setDirectBuyCouponRule(null);
+    try {
+      sessionStorage.setItem(
+        DIRECT_BUY_STORAGE_KEY,
+        JSON.stringify({ item: cleanItem, coupon: null, couponRule: null }),
+      );
+    } catch {
+      // Ignore storage quota issues
+    }
+    return true;
+  };
+
+  const setDirectBuyQty = (qty: number) => {
+    setDirectBuyItem((prev) => {
+      if (!prev) return null;
+      const max = stockFor(prev);
+      const finalQty = Math.max(1, Math.min(qty, max > 0 ? max : qty));
+      return { ...prev, qty: finalQty };
+    });
+  };
+
+  const setDirectBuyCoupon = (c: string | null, rule?: CouponPricingRule | null) => {
+    setDirectBuyCouponState(c);
+    setDirectBuyCouponRule(c ? (rule ?? null) : null);
+  };
+
+  const clearDirectBuy = () => {
+    setDirectBuyItem(null);
+    setDirectBuyCouponState(null);
+    setDirectBuyCouponRule(null);
+    try {
+      sessionStorage.removeItem(DIRECT_BUY_STORAGE_KEY);
+    } catch {
+      // Ignore storage errors
     }
   };
 
@@ -233,12 +341,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         cart,
         wishlist,
         coupon,
+        couponRule,
+        directBuyItem,
+        directBuyCoupon,
+        directBuyCouponRule,
         add,
         setQty,
         remove,
         clear,
         toggleWish,
         setCoupon,
+        startDirectBuy,
+        setDirectBuyQty,
+        setDirectBuyCoupon,
+        clearDirectBuy,
         count: cart.reduce((s, c) => s + c.qty, 0),
         subtotal,
       }}

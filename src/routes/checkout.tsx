@@ -1,18 +1,29 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { CheckCircle2, Loader2, Lock, ShieldCheck, Truck } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Loader2,
+  Lock,
+  Minus,
+  Plus,
+  ShieldCheck,
+  Trash2,
+  Truck,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
 import { Summary } from "@/components/site/Summary";
 import { useStore } from "@/lib/store";
-import { getProduct, imageFor } from "@/lib/products";
-import { formatINR } from "@/lib/pricing";
+import { getProduct, imageFor, resolveProductAsset } from "@/lib/products";
+import { calculateOrderPricingPaise, formatINR } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
 import {
   placeOrderServerFn,
   verifyPaymentServerFn,
   checkPincodeServiceabilityFn,
+  validateCouponServerFn,
 } from "@/server/orders";
 import { getCustomerAddressesServerFn } from "@/server/customers";
 
@@ -39,6 +50,9 @@ interface SavedAddressOption {
 }
 
 export const Route = createFileRoute("/checkout")({
+  validateSearch: (search: Record<string, unknown>): { mode?: "direct" | "cart" | undefined } => ({
+    mode: search["mode"] === "direct" ? "direct" : search["mode"] === "cart" ? "cart" : undefined,
+  }),
   head: () => meta("Checkout", "Secure checkout for CAVENHURST orders across India."),
   component: Checkout,
 });
@@ -94,9 +108,57 @@ function loadRazorpayScript(): Promise<boolean> {
 }
 
 function Checkout() {
-  const { cart, clear, coupon } = useStore();
+  const search = Route.useSearch();
+  const isDirectBuy = search.mode === "direct";
+  const checkoutMode: "DIRECT_BUY" | "CART_CHECKOUT" = isDirectBuy ? "DIRECT_BUY" : "CART_CHECKOUT";
+
+  const {
+    cart,
+    clear,
+    coupon,
+    couponRule,
+    setCoupon,
+    setQty,
+    remove,
+    directBuyItem,
+    directBuyCoupon,
+    directBuyCouponRule,
+    setDirectBuyQty,
+    setDirectBuyCoupon,
+    clearDirectBuy,
+  } = useStore();
   const { user, sessionToken } = useAuth();
   const navigate = useNavigate();
+
+  const checkoutItems = useMemo(
+    () => (isDirectBuy ? (directBuyItem ? [directBuyItem] : []) : cart),
+    [isDirectBuy, directBuyItem, cart],
+  );
+  const activeCoupon = isDirectBuy ? directBuyCoupon : coupon;
+  const activeCouponRule = isDirectBuy ? directBuyCouponRule : couponRule;
+  const setActiveCoupon = isDirectBuy ? setDirectBuyCoupon : setCoupon;
+
+  const checkoutPricedItems = useMemo(
+    () =>
+      checkoutItems.map((c) => ({
+        price: c.price ?? getProduct(c.slug)?.price ?? 0,
+        qty: c.qty,
+      })),
+    [checkoutItems],
+  );
+
+  const checkoutPricing = useMemo(
+    () =>
+      calculateOrderPricingPaise({
+        items: checkoutPricedItems,
+        couponCode: activeCoupon,
+        couponRule: activeCouponRule,
+      }),
+    [checkoutPricedItems, activeCoupon, activeCouponRule],
+  );
+
+  const [couponInput, setCouponInput] = useState("");
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
 
   const [paymentMode, setPaymentMode] = useState<"online" | "cod">("online");
   const [busy, setBusy] = useState(false);
@@ -219,18 +281,45 @@ function Checkout() {
     }
   };
 
-  if (cart.length === 0 && !orderSuccess) {
+  const clearCompletedOrderSource = () => {
+    attemptKeyRef.current = null;
+    if (isDirectBuy) {
+      clearDirectBuy();
+    } else {
+      clear();
+    }
+  };
+
+  const attemptKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
+
+  if (checkoutItems.length === 0 && !orderSuccess) {
     return (
-      <div className="py-28 text-center font-sans">
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">
-          Your bag is empty
+      <div className="mx-auto max-w-xl px-4 py-28 text-center font-sans">
+        <h1 className="font-heading text-4xl sm:text-5xl font-bold uppercase tracking-tight text-foreground">
+          {isDirectBuy ? "No direct checkout item" : "Your bag is empty"}
         </h1>
-        <Link
-          to="/shop"
-          className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90"
-        >
-          Shop now
-        </Link>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {isDirectBuy
+            ? "Your Buy Now item is no longer active. Select a product or continue with your shopping bag."
+            : "Add pieces from the collection to proceed with checkout."}
+        </p>
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <Link
+            to="/shop"
+            className="inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90"
+          >
+            Shop now
+          </Link>
+          {isDirectBuy && cart.length > 0 && (
+            <Link
+              to="/checkout"
+              search={{ mode: "cart" }}
+              className="inline-block rounded-md border border-border px-6 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.14em] text-foreground hover:bg-accent"
+            >
+              Checkout Bag ({cart.reduce((sum, item) => sum + item.qty, 0)})
+            </Link>
+          )}
+        </div>
       </div>
     );
   }
@@ -305,20 +394,34 @@ function Checkout() {
     setBusy(true);
 
     try {
+      const attemptFingerprint = `${checkoutMode}|${JSON.stringify(
+        checkoutItems.map((item) => [item.slug, item.size, item.color, item.qty]),
+      )}|${activeCoupon || ""}|${paymentMode}|${f.pin.trim()}`;
+
+      if (!attemptKeyRef.current || attemptKeyRef.current.fingerprint !== attemptFingerprint) {
+        const key =
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        attemptKeyRef.current = { fingerprint: attemptFingerprint, key };
+      }
+
       // Step 1: Place Order through secure server function (derives customer identity from session)
       const orderRes = await placeOrderServerFn({
         data: {
           authToken: sessionToken || undefined,
           customer: f,
-          cart,
-          coupon,
+          cart: checkoutItems,
+          coupon: activeCoupon,
           paymentMethod: paymentMode,
+          checkoutMode,
+          idempotencyKey: attemptKeyRef.current.key,
         },
       });
 
       // Handle Cash on Delivery (COD)
       if (paymentMode === "cod") {
-        clear();
+        clearCompletedOrderSource();
         setOrderSuccess({
           orderNumber: orderRes.orderNumber,
           isCod: true,
@@ -367,7 +470,11 @@ function Checkout() {
           modal: {
             ondismiss: () => {
               setBusy(false);
-              toast.info("Payment window closed. Your items remain in your cart.");
+              toast.info(
+                isDirectBuy
+                  ? "Payment window closed. Your Buy Now item remains ready."
+                  : "Payment window closed. Your items remain in your cart.",
+              );
             },
           },
           handler: async (response: {
@@ -392,7 +499,7 @@ function Checkout() {
               toast.dismiss("pay-verify");
 
               if (verifyRes.success) {
-                clear();
+                clearCompletedOrderSource();
                 setOrderSuccess({
                   orderNumber: verifyRes.orderNumber,
                   isCod: false,
@@ -411,6 +518,16 @@ function Checkout() {
         };
 
         const rzp = new window.Razorpay(options);
+        if (typeof rzp.on === "function") {
+          rzp.on("payment.failed", (failedResp: unknown) => {
+            setBusy(false);
+            const errObj = failedResp as { error?: { description?: string } };
+            toast.error(
+              errObj?.error?.description ||
+                "Payment could not be completed. You can retry safely without duplicate charges.",
+            );
+          });
+        }
         rzp.open();
       }
     } catch (err) {
@@ -658,36 +775,206 @@ function Checkout() {
 
       {/* Order Summary Aside */}
       <aside className="h-fit rounded-xl border border-border bg-card p-6 lg:sticky lg:top-24">
-        <h2 className="mb-4 text-sm font-bold tracking-brand">YOUR ORDER</h2>
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold tracking-brand">YOUR ORDER</h2>
+              <span
+                className={cn(
+                  "rounded px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-wider",
+                  isDirectBuy
+                    ? "bg-electric/20 text-electric border border-electric/30"
+                    : "bg-secondary text-silver",
+                )}
+              >
+                {isDirectBuy ? "Buy Now" : "Bag"}
+              </span>
+            </div>
+          </div>
+          {isDirectBuy && checkoutItems[0] ? (
+            <Link
+              to="/product/$slug"
+              params={{ slug: checkoutItems[0].slug }}
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="h-3 w-3" /> Back to item
+            </Link>
+          ) : (
+            <Link
+              to="/cart"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="h-3 w-3" /> Edit bag
+            </Link>
+          )}
+        </div>
+
         <ul className="mb-5 space-y-3">
-          {cart.map((c) => {
+          {checkoutItems.map((c, idx) => {
             const p = getProduct(c.slug);
             const itemName = c.name || p?.name;
             if (!itemName) return null;
             const itemPrice = c.price ?? p?.price ?? 0;
-            const itemImage = c.image || (p ? imageFor(p, c.color) : "");
+            const itemImage = resolveProductAsset(c.image) || (p ? imageFor(p, c.color) : "");
+            const maxStock = c.maxStock ?? p?.stock?.[c.size] ?? 10;
             return (
-              <li key={`${c.slug}-${c.size}-${c.color}`} className="flex gap-3 text-sm">
+              <li
+                key={`${c.slug}-${c.size}-${c.color}`}
+                className="flex gap-3 rounded-lg border border-border/60 bg-background/40 p-2.5 text-sm"
+              >
                 {itemImage ? (
-                  <img src={itemImage} alt={itemName} className="h-16 w-12 rounded object-cover" />
+                  <img src={itemImage} alt={itemName} className="h-20 w-16 rounded object-cover" />
                 ) : (
-                  <div className="h-16 w-12 rounded bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
+                  <div className="h-20 w-16 rounded bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
                     CAV
                   </div>
                 )}
-                <div className="flex-1">
-                  <p className="font-semibold">{itemName}</p>
+                <div className="flex flex-1 flex-col">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-semibold leading-snug">{itemName}</p>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${itemName}`}
+                      onClick={() => {
+                        if (isDirectBuy) {
+                          clearDirectBuy();
+                        } else {
+                          remove(idx);
+                        }
+                      }}
+                      className="text-muted-foreground transition hover:text-sale"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    {c.color} · {c.size} · ×{c.qty}
+                    {c.color} · Size {c.size}
                   </p>
-                  <p className="mt-0.5 font-bold">{formatINR(itemPrice * c.qty)}</p>
+                  <div className="mt-auto flex items-center justify-between pt-2">
+                    <div className="flex items-center rounded border border-border">
+                      <button
+                        type="button"
+                        aria-label="Decrease quantity"
+                        disabled={c.qty <= 1}
+                        onClick={() => {
+                          if (isDirectBuy) setDirectBuyQty(c.qty - 1);
+                          else setQty(idx, c.qty - 1);
+                        }}
+                        className="px-2 py-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <span className="w-6 text-center text-xs font-semibold">{c.qty}</span>
+                      <button
+                        type="button"
+                        aria-label="Increase quantity"
+                        disabled={c.qty >= maxStock}
+                        onClick={() => {
+                          if (c.qty >= maxStock) {
+                            toast.error(`Only ${maxStock} left in ${c.size}`);
+                            return;
+                          }
+                          if (isDirectBuy) setDirectBuyQty(c.qty + 1);
+                          else setQty(idx, c.qty + 1);
+                        }}
+                        className="px-2 py-1 text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <p className="font-bold">{formatINR(itemPrice * c.qty)}</p>
+                  </div>
                 </div>
               </li>
             );
           })}
         </ul>
 
-        <Summary />
+        <div className="mb-4 flex gap-2">
+          <input
+            value={couponInput}
+            onChange={(e) => setCouponInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void (async () => {
+                  const k = couponInput.trim().toUpperCase();
+                  if (!k) return;
+                  setApplyingCoupon(true);
+                  try {
+                    const res = await validateCouponServerFn({
+                      data: { code: k, subtotalRupees: checkoutPricing.subtotal },
+                    });
+                    if (res.valid && res.rule) {
+                      setActiveCoupon(res.rule.code, res.rule);
+                      setCouponInput("");
+                      toast.success(res.message);
+                    } else {
+                      toast.error(res.message || "Invalid coupon code");
+                    }
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Could not verify coupon");
+                  } finally {
+                    setApplyingCoupon(false);
+                  }
+                })();
+              }
+            }}
+            placeholder="Promo code (e.g. CAVEN10)"
+            disabled={applyingCoupon}
+            className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none focus:border-electric disabled:opacity-60"
+          />
+          <button
+            type="button"
+            disabled={applyingCoupon}
+            onClick={async () => {
+              const k = couponInput.trim().toUpperCase();
+              if (!k) {
+                toast.error("Enter a coupon code");
+                return;
+              }
+              setApplyingCoupon(true);
+              try {
+                const res = await validateCouponServerFn({
+                  data: { code: k, subtotalRupees: checkoutPricing.subtotal },
+                });
+                if (res.valid && res.rule) {
+                  setActiveCoupon(res.rule.code, res.rule);
+                  setCouponInput("");
+                  toast.success(res.message);
+                } else {
+                  toast.error(res.message || "Invalid coupon code");
+                }
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Could not verify coupon");
+              } finally {
+                setApplyingCoupon(false);
+              }
+            }}
+            className="rounded-md bg-secondary px-3.5 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 disabled:opacity-60"
+          >
+            {applyingCoupon ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply"}
+          </button>
+        </div>
+
+        {activeCoupon && (
+          <div className="mb-3 flex items-center justify-between text-xs text-muted-foreground">
+            <span>Coupon applied: {activeCoupon}</span>
+            <button
+              type="button"
+              onClick={() => setActiveCoupon(null, null)}
+              className="underline hover:text-foreground"
+            >
+              Remove
+            </button>
+          </div>
+        )}
+
+        <Summary
+          items={checkoutPricedItems}
+          couponCodeOverride={activeCoupon}
+          couponRuleOverride={activeCouponRule}
+        />
 
         <button
           type="submit"
@@ -702,9 +989,9 @@ function Checkout() {
               <Loader2 className="h-4 w-4 animate-spin" /> Processing order...
             </>
           ) : paymentMode === "online" ? (
-            "Pay Online via Razorpay"
+            `Pay ${formatINR(checkoutPricing.total)} Online via Razorpay`
           ) : (
-            "Confirm Cash on Delivery Order"
+            `Confirm COD Order (${formatINR(checkoutPricing.total)})`
           )}
         </button>
 

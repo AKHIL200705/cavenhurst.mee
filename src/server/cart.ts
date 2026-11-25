@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getAuthenticatedCustomerId } from "./auth-helpers";
 import { getVariantAvailableStock, parseStockMap } from "./inventory";
-import type { Size } from "@/lib/products";
+import { resolveProductAsset, type Size } from "@/lib/products";
 
 export interface CartItemData {
   slug: string;
@@ -12,6 +12,7 @@ export interface CartItemData {
   id?: string;
   name?: string;
   price?: number;
+  mrp?: number;
   image?: string | null | undefined;
   maxStock?: number;
 }
@@ -194,7 +195,7 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
         qty,
         name: prod?.name || "Apparel Item",
         price: row.unit_price || prod?.price || 0,
-        image: prod?.images?.[0] ?? null,
+        image: prod?.images?.[0] ? resolveProductAsset(prod.images[0]) : null,
         maxStock,
       };
     }),

@@ -4,6 +4,7 @@ import teeGraphic from "@/assets/tee-graphic.jpg";
 import hoodieNavy from "@/assets/hoodie-navy.jpg";
 import jacketNavy from "@/assets/jacket-navy.jpg";
 import hero from "@/assets/hero-urban-motion.jpg";
+import fabricNavy from "@/assets/fabric-navy.jpg";
 import teeSilver from "@/assets/tee-silver.jpg";
 import teeWhite from "@/assets/tee-white.jpg";
 import teeBlack from "@/assets/tee-black.jpg";
@@ -13,6 +14,48 @@ import hoodieSilver from "@/assets/hoodie-silver.jpg";
 import graphicNavy from "@/assets/tee-graphic-navy.jpg";
 import fanBlack from "@/assets/tee-fan-black.jpg";
 import fanWhite from "@/assets/tee-fan-white.jpg";
+
+const PRODUCT_ASSET_BY_FILENAME: Record<string, string> = {
+  "fabric-navy.jpg": fabricNavy,
+  "hero-urban-motion.jpg": hero,
+  "hoodie-black.jpg": hoodieBlack,
+  "hoodie-navy.jpg": hoodieNavy,
+  "hoodie-silver.jpg": hoodieSilver,
+  "jacket-navy.jpg": jacketNavy,
+  "tee-black.jpg": teeBlack,
+  "tee-cream.jpg": teeCream,
+  "tee-fan-black.jpg": fanBlack,
+  "tee-fan-white.jpg": fanWhite,
+  "tee-graphic-navy.jpg": graphicNavy,
+  "tee-graphic.jpg": teeGraphic,
+  "tee-navy.jpg": teeNavy,
+  "tee-silver.jpg": teeSilver,
+  "tee-sky.jpg": teeSky,
+  "tee-white.jpg": teeWhite,
+};
+
+/**
+ * Resolves raw `/src/assets/...` paths persisted in Supabase into Vite-bundled asset URLs
+ * so images load cleanly in both dev mode and production builds.
+ */
+export function resolveProductAsset(src?: string | null): string {
+  if (!src) return "";
+  const trimmed = src.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:")
+  ) {
+    return trimmed;
+  }
+  if (trimmed.includes("/assets/") && !trimmed.includes("/src/assets/")) {
+    return trimmed;
+  }
+  const cleanPath = trimmed.split("?")[0] || trimmed;
+  const filename = cleanPath.split("/").pop() || cleanPath;
+  return PRODUCT_ASSET_BY_FILENAME[filename] || trimmed;
+}
 
 export type Color = { name: string; hex: string };
 export const SIZES = ["XS", "S", "M", "L", "XL", "XXL"] as const;
@@ -311,7 +354,7 @@ export const getAllProducts = (): Product[] => {
 
 export const inStock = (p: Product) => Object.values(p.stock).some((n) => (n ?? 0) > 0);
 
-const COLOR_PHOTOS: Record<string, Record<string, string>> = {
+export const COLOR_PHOTOS: Record<string, Record<string, string>> = {
   "t-shirts": {
     "Midnight Navy": teeNavy,
     "Silver Grey": teeSilver,
@@ -325,11 +368,13 @@ const COLOR_PHOTOS: Record<string, Record<string, string>> = {
 };
 /** The photo to show for a product in the chosen colour. */
 export const imageFor = (p: Product, color?: string) => {
-  if (!color) return p.images[0]!;
+  const primary = resolveProductAsset(p.images[0]) || p.images[0] || "";
+  if (!color) return primary;
   const map =
     p.colorImages ??
     (p.slug === "mythic-graphic-tee" || p.slug === "flow-print-tee"
       ? COLOR_PHOTOS["graphic"]
       : COLOR_PHOTOS[p.category]);
-  return map?.[color] ?? p.images[0]!;
+  const mapped = map?.[color];
+  return (mapped ? resolveProductAsset(mapped) : "") || primary;
 };

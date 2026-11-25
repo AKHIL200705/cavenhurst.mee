@@ -173,7 +173,20 @@
   }
 }
 .page-transition {
-  animation: page-reveal 420ms var(--ease-store) both;
+  animation: page-reveal 360ms var(--ease-store) both;
+}
+.luxury-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: oklch(0.16 0.03 250 / 70%);
+}
+.luxury-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, oklch(0.84 0.02 250 / 8%), transparent);
+  animation: shimmer-sweep 1.8s ease-in-out infinite;
 }
 .glass-navigation,
 .glass-panel,
@@ -242,6 +255,7 @@
 @media (prefers-reduced-motion: reduce) {
   .welcome-reveal,
   .page-transition,
+  .luxury-skeleton::after,
   .product-image,
   .animate-heart-pop,
   .animate-float-badge,

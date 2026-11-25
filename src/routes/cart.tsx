@@ -1,12 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { Loader2, Minus, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
-import { getProduct, imageFor } from "@/lib/products";
-import { COUPONS, FREE_SHIPPING_THRESHOLD, formatINR } from "@/lib/pricing";
+import { getProduct, imageFor, resolveProductAsset } from "@/lib/products";
+import { calculateOrderPricingPaise, FREE_SHIPPING_THRESHOLD, formatINR } from "@/lib/pricing";
 import { Summary } from "@/components/site/Summary";
 import { useStore } from "@/lib/store";
+import { validateCouponServerFn } from "@/server/orders";
 
 export const Route = createFileRoute("/cart")({
   head: () => meta("Shopping Bag", "Review your CAVENHURST shopping bag."),
@@ -14,8 +15,10 @@ export const Route = createFileRoute("/cart")({
 });
 
 function Cart() {
-  const { cart, setQty, remove, subtotal, coupon, setCoupon } = useStore();
+  const { cart, setQty, remove, subtotal, coupon, couponRule, setCoupon } = useStore();
   const [code, setCode] = useState("");
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+
   if (cart.length === 0)
     return (
       <div className="py-28 text-center font-sans">
@@ -30,7 +33,13 @@ function Cart() {
         </Link>
       </div>
     );
-  const remaining = FREE_SHIPPING_THRESHOLD - subtotal;
+
+  const pricing = calculateOrderPricingPaise({
+    subtotalRupees: subtotal,
+    couponCode: coupon,
+    couponRule,
+  });
+  const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - pricing.subtotal + pricing.discount);
   return (
     <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-[1fr_380px] font-sans">
       <div>
@@ -49,7 +58,7 @@ function Cart() {
             const itemName = c.name || p?.name;
             if (!itemName) return null;
             const itemPrice = c.price ?? p?.price ?? 0;
-            const itemImage = c.image || (p ? imageFor(p, c.color) : "");
+            const itemImage = resolveProductAsset(c.image) || (p ? imageFor(p, c.color) : "");
             const maxStock = c.maxStock ?? p?.stock?.[c.size] ?? 10;
 
             return (
@@ -117,36 +126,59 @@ function Cart() {
         </h2>
         <form
           className="mb-5 flex gap-2"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             const k = code.trim().toUpperCase();
-            if (COUPONS[k]) {
-              setCoupon(k);
-              toast.success(`${k} applied — ${COUPONS[k].label}`);
-            } else toast.error("Invalid coupon code");
+            if (!k) {
+              toast.error("Enter a coupon code");
+              return;
+            }
+            setApplyingCoupon(true);
+            try {
+              const res = await validateCouponServerFn({
+                data: { code: k, subtotalRupees: subtotal },
+              });
+              if (res.valid && res.rule) {
+                setCoupon(res.rule.code, res.rule);
+                setCode("");
+                toast.success(res.message);
+              } else {
+                toast.error(res.message || "Invalid coupon code");
+              }
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Could not verify coupon");
+            } finally {
+              setApplyingCoupon(false);
+            }
           }}
         >
           <input
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="Coupon code"
-            className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none"
+            placeholder="Coupon code (e.g. CAVEN10)"
+            disabled={applyingCoupon}
+            className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none focus:border-electric disabled:opacity-60"
           />
-          <button className="rounded-md bg-secondary px-4 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 transition-colors">
-            Apply
+          <button
+            disabled={applyingCoupon}
+            className="flex items-center justify-center rounded-md bg-secondary px-4 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 transition-colors disabled:opacity-60"
+          >
+            {applyingCoupon ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply"}
           </button>
         </form>
         {coupon && (
           <button
-            onClick={() => setCoupon(null)}
-            className="mb-3 text-xs underline text-muted-foreground"
+            type="button"
+            onClick={() => setCoupon(null, null)}
+            className="mb-3 text-xs underline text-muted-foreground hover:text-foreground"
           >
             Remove {coupon}
           </button>
         )}
-        <Summary />
+        <Summary couponCodeOverride={coupon} couponRuleOverride={couponRule} />
         <Link
           to="/checkout"
+          search={{ mode: "cart" }}
           className="mt-6 block rounded-md bg-primary py-3.5 text-center font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
         >
           Proceed to Checkout

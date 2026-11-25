@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Clock, Loader2, MapPin, Package, Search, Truck } from "lucide-react";
 import { InfoPage, meta } from "@/components/site/InfoPage";
 import { trackOrderServerFn } from "@/server/orders";
 
 export const Route = createFileRoute("/track-order")({
+  validateSearch: (search: Record<string, unknown>): { order?: string | undefined } => ({
+    order: typeof search["order"] === "string" ? search["order"] : undefined,
+  }),
   head: () => meta("Track Order", "Track your CAVENHURST shipment across India via ShipMaxx360."),
   component: Track,
 });
@@ -30,7 +33,8 @@ type ShipmentDetails = {
 };
 
 function Track() {
-  const [id, setId] = useState("");
+  const search = Route.useSearch();
+  const [id, setId] = useState(search.order || "");
   const [busy, setBusy] = useState(false);
   const [searched, setSearched] = useState(false);
   const [result, setResult] = useState<{
@@ -40,9 +44,8 @@ function Track() {
     providerStatus?: string;
   } | null>(null);
 
-  const onTrack = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const query = id.trim();
+  const performTrack = useCallback(async (rawQuery: string, silentIfMissing = false) => {
+    const query = rawQuery.trim();
     if (!query) {
       toast.error("Please enter an Order Number or AWB Number");
       return;
@@ -54,7 +57,7 @@ function Track() {
     try {
       const res = await trackOrderServerFn({ data: { query } });
       setResult(res as typeof result);
-      if (!res.found) {
+      if (!res.found && !silentIfMissing) {
         toast.info("No shipment found for this reference. Please check and try again.");
       }
     } catch (err) {
@@ -62,6 +65,18 @@ function Track() {
     } finally {
       setBusy(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (search.order && search.order.trim()) {
+      setId(search.order.trim());
+      void performTrack(search.order.trim(), true);
+    }
+  }, [search.order, performTrack]);
+
+  const onTrack = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await performTrack(id);
   };
 
   return (

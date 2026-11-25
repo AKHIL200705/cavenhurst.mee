@@ -38,7 +38,7 @@ import type { AdminCustomerItem } from "@/components/admin/CustomersTab";
 import type { AdminCouponItem } from "@/components/admin/CouponsTab";
 import type { AdminReviewItem } from "@/components/admin/ReviewsTab";
 import type { AdminUserRecord } from "@/components/admin/AdminUsersTab";
-import type { AdminAuditLogItem } from "@/components/admin/AuditLogsTab";
+import type { AdminAuditLogItem, SystemErrorLogItem } from "@/components/admin/AuditLogsTab";
 import type { AdminSettingsData } from "@/components/admin/SettingsTab";
 
 const OverviewTab = lazy(() =>
@@ -103,6 +103,7 @@ import {
   getAdminUsersServerFn,
   getAdminAuditLogsServerFn,
   getAdminSettingsServerFn,
+  getSystemErrorLogsServerFn,
   adminLoginServerFn,
 } from "@/server/admin";
 
@@ -151,7 +152,7 @@ const NAV_TABS = [
 ] as const;
 
 function AdminDashboard() {
-  const { user, sessionToken, ready } = useAuth();
+  const { user, sessionToken, ready, signOut } = useAuth();
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [authChecking, setAuthChecking] = useState(true);
   const [authToken, setAuthToken] = useState<string | undefined>(sessionToken || undefined);
@@ -188,6 +189,7 @@ function AdminDashboard() {
   const [reviews, setReviews] = useState<AdminReviewItem[]>([]);
   const [adminUsers, setAdminUsers] = useState<AdminUserRecord[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLogItem[]>([]);
+  const [systemErrorLogs, setSystemErrorLogs] = useState<SystemErrorLogItem[]>([]);
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
 
   // 1. Check admin authorization
@@ -429,8 +431,12 @@ function AdminDashboard() {
           break;
         }
         case "audit": {
-          const res = await getAdminAuditLogsServerFn({ data: { authToken: token } });
+          const [res, errLogs] = await Promise.all([
+            getAdminAuditLogsServerFn({ data: { authToken: token } }),
+            getSystemErrorLogsServerFn({ data: { authToken: token } }),
+          ]);
           setAuditLogs(res);
+          setSystemErrorLogs(errLogs);
           break;
         }
         case "settings": {
@@ -548,7 +554,12 @@ function AdminDashboard() {
   }, [isAdmin, loadActiveTabData]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    try {
+      localStorage.removeItem("cavenhurst_admin_token");
+    } catch {
+      /* ignore */
+    }
+    await signOut();
     setIsAdmin(false);
     setAuthToken(undefined);
     toast.info("Logged out of administrator session.");
@@ -763,6 +774,7 @@ function AdminDashboard() {
             <CustomersTab
               customers={customers}
               loading={loading}
+              authToken={authToken}
               onRefresh={() => void loadActiveTabData()}
             />
           )}
@@ -797,6 +809,7 @@ function AdminDashboard() {
           {activeTab === "audit" && (
             <AuditLogsTab
               logs={auditLogs}
+              errorLogs={systemErrorLogs}
               loading={loading}
               onRefresh={() => void loadActiveTabData()}
             />

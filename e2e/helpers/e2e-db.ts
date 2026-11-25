@@ -226,6 +226,9 @@ export async function cleanupE2eOrder(
   await sql`DELETE FROM public.inventory_reservations WHERE order_id = ${orderId}::uuid`.catch(
     () => {},
   );
+  await sql`DELETE FROM public.coupon_redemptions WHERE order_id = ${orderId}::uuid`.catch(
+    () => {},
+  );
   await sql`DELETE FROM public.order_items WHERE order_id = ${orderId}::uuid`.catch(() => {});
   await sql`DELETE FROM public.orders WHERE id = ${orderId}::uuid`.catch(() => {});
   for (const evtId of webhookEventIds) {
