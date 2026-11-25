@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Truck, Shield, MapPin, Plus, Trash2, Edit2, Check, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
@@ -115,9 +115,9 @@ function Account() {
     isDefault: false,
   });
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!user) return;
-    const userEmail = (user.email || profileData.email)?.toLowerCase();
+    const userEmail = user.email?.toLowerCase();
     if (
       user.isAdmin ||
       (userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail))
@@ -167,11 +167,11 @@ function Account() {
       .then(({ data }) => {
         if (data) setIsAdmin(true);
       });
-  };
+  }, [user, sessionToken]);
 
   useEffect(() => {
     void loadData();
-  }, [user, sessionToken]);
+  }, [loadData]);
 
   // Real-time updates for customer orders
   useEffect(() => {
@@ -194,7 +194,7 @@ function Account() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [user, loadData]);
 
   const resetForm = () => {
     setAddressForm({

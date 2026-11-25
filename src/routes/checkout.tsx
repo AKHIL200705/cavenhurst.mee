@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { CheckCircle2, Loader2, Lock, ShieldCheck, Truck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
 import { Summary } from "@/components/site/Summary";
@@ -106,6 +106,7 @@ function Checkout() {
 
   const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string>("new");
+  const applyAddressRef = useRef<(addr: any) => void>(() => {});
 
   const [f, setF] = useState({
     name: "",
@@ -142,7 +143,7 @@ function Checkout() {
             const defaultAddr = addrs.find((a: any) => a.is_default) || addrs[0];
             if (defaultAddr) {
               setSelectedAddressId(defaultAddr.id);
-              applyAddress(defaultAddr);
+              applyAddressRef.current(defaultAddr);
             }
           }
         })
@@ -165,6 +166,7 @@ function Checkout() {
       void checkPincode(addr.postal_code, paymentMode === "cod" ? "cod" : "prepaid");
     }
   };
+  applyAddressRef.current = applyAddress;
 
   const setField =
     (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {

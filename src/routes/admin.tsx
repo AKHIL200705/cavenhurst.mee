@@ -422,7 +422,7 @@ function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage, authToken]);
+  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage, authToken, sessionToken, user?.email]);
 
   useEffect(() => {
     if (isAdmin) {

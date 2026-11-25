@@ -1,5 +1,5 @@
 import type React from "react";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { getProduct, type Size } from "./products";
 import { useAuth } from "./auth";
 import {
@@ -36,6 +36,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const { user, sessionToken } = useAuth();
   const [syncedUser, setSyncedUser] = useState<string | null>(null);
+  const cartRef = useRef(cart);
+  const wishlistRef = useRef(wishlist);
+
+  useEffect(() => {
+    cartRef.current = cart;
+    wishlistRef.current = wishlist;
+  }, [cart, wishlist]);
 
   // Initialize from local storage on mount (guest state)
   useEffect(() => {
@@ -70,8 +77,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     syncCartServerFn({
       data: {
         authToken: sessionToken || undefined,
-        guestCart: cart,
-        guestWishlist: wishlist,
+        guestCart: cartRef.current,
+        guestWishlist: wishlistRef.current,
       },
     })
       .then((res) => {

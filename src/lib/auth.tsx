@@ -267,7 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [user?.id, sessionToken, attempt]);
+  }, [user, sessionToken, attempt]);
 
   const refreshProfile = async (): Promise<boolean> => {
     if (!user) return false;
