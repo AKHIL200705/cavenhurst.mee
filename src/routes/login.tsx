@@ -122,7 +122,6 @@ function Login() {
     ? ((search as Record<string, unknown>)["returnTo"] as string)
     : undefined;
   const navigate = useNavigate();
-  const googleBtnContainerRef = useRef<HTMLDivElement>(null);
   const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const googleClientId = ((import.meta.env["VITE_GOOGLE_CLIENT_ID"] || "") as string)
@@ -153,6 +152,15 @@ function Login() {
 
   const handlePostLoginRedirect = useCallback(
     async (isAdmin: boolean) => {
+      const savedReturnTo =
+        typeof window !== "undefined"
+          ? window.sessionStorage.getItem("cavenhurst_google_return_to") || undefined
+          : undefined;
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem("cavenhurst_google_return_to");
+      }
+      const targetReturnTo = returnTo || savedReturnTo;
+
       if (isAdmin) {
         await navigate({ to: "/admin" });
         return;
@@ -161,17 +169,17 @@ function Login() {
       if (!isCompleted) {
         await navigate({
           to: "/complete-profile",
-          search: { returnTo },
+          search: { returnTo: targetReturnTo },
         });
       } else {
-        await navigate({ to: returnTo || "/" });
+        await navigate({ to: targetReturnTo || "/" });
       }
     },
     [navigate, refreshProfile, returnTo],
   );
 
   // ---------------------------------------------------------------------------
-  // GOOGLE IDENTITY SERVICES (GIS) FOR EXISTING USERS
+  // GOOGLE OAUTH2 ACCOUNTS REDIRECT & CALLBACK HANDLING
   // ---------------------------------------------------------------------------
   const handleGoogleSuccess = useCallback(
     async (credentials: { idToken?: string; accessToken?: string }) => {
@@ -202,76 +210,38 @@ function Login() {
   );
 
   useEffect(() => {
-    if (!googleClientId || tab !== "login") return;
+    if (typeof window === "undefined" || !window.location.hash) return;
 
-    let unmounted = false;
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = hashParams.get("access_token");
+    const oauthError = hashParams.get("error");
+    const oauthErrorDesc = hashParams.get("error_description");
+    const returnedState = hashParams.get("state");
 
-    const setupGoogleGsi = () => {
-      const googleObj = (
-        window as unknown as {
-          google?: {
-            accounts?: {
-              id?: {
-                initialize: (config: unknown) => void;
-                renderButton: (el: HTMLElement, opts: unknown) => void;
-                prompt: () => void;
-              };
-            };
-          };
-        }
-      ).google;
-      if (!googleObj?.accounts?.id || unmounted) return;
+    if (!accessToken && !oauthError) return;
 
-      try {
-        googleObj.accounts.id.initialize({
-          client_id: googleClientId,
-          callback: (response: { credential?: string }) => {
-            if (response?.credential) {
-              void handleGoogleSuccess({ idToken: response.credential });
-            }
-          },
-          auto_select: false,
-          cancel_on_tap_outside: true,
-        });
+    // Clean the OAuth hash fragment from the URL immediately
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
 
-        if (googleBtnContainerRef.current) {
-          googleBtnContainerRef.current.innerHTML = "";
-          googleObj.accounts.id.renderButton(googleBtnContainerRef.current, {
-            theme: "outline",
-            size: "large",
-            width: 360,
-            text: "signin_with",
-            shape: "rectangular",
-          });
-        }
-      } catch (err) {
-        console.warn("[Google GIS] Setup notice:", err);
+    const expectedState = window.sessionStorage.getItem("cavenhurst_google_oauth_state");
+    window.sessionStorage.removeItem("cavenhurst_google_oauth_state");
+
+    if (oauthError) {
+      if (oauthError !== "access_denied") {
+        toast.error(oauthErrorDesc || `Google authentication error: ${oauthError}`);
       }
-    };
-
-    const googleObj = (window as unknown as { google?: { accounts?: unknown } }).google;
-    if (googleObj?.accounts) {
-      setupGoogleGsi();
-    } else {
-      const existingScript = document.querySelector(
-        'script[src*="accounts.google.com/gsi/client"]',
-      );
-      if (!existingScript) {
-        const script = document.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.async = true;
-        script.defer = true;
-        script.onload = setupGoogleGsi;
-        document.head.appendChild(script);
-      } else {
-        existingScript.addEventListener("load", setupGoogleGsi);
-      }
+      return;
     }
 
-    return () => {
-      unmounted = true;
-    };
-  }, [googleClientId, tab, handleGoogleSuccess]);
+    if (expectedState && returnedState !== expectedState) {
+      toast.error("Google authentication state mismatch. Please try again.");
+      return;
+    }
+
+    if (accessToken) {
+      void handleGoogleSuccess({ accessToken });
+    }
+  }, [handleGoogleSuccess]);
 
   const signInWithGoogleDirect = () => {
     if (!googleClientId) {
@@ -279,53 +249,28 @@ function Login() {
       return;
     }
 
-    const googleObj = (
-      window as unknown as {
-        google?: {
-          accounts?: {
-            oauth2?: {
-              initTokenClient: (config: unknown) => { requestAccessToken: () => void };
-            };
-            id?: {
-              prompt: () => void;
-            };
-          };
-        }
-      }
-    ).google;
+    setGoogleLoading(true);
+    const state =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    if (!googleObj?.accounts) {
-      toast.error("Connecting to Google Identity Services… Please try again in a moment.");
-      return;
+    window.sessionStorage.setItem("cavenhurst_google_oauth_state", state);
+    if (returnTo) {
+      window.sessionStorage.setItem("cavenhurst_google_return_to", returnTo);
     }
 
-    if (googleObj.accounts.oauth2) {
-      try {
-        const tokenClient = googleObj.accounts.oauth2.initTokenClient({
-          client_id: googleClientId,
-          scope: "email profile openid",
-          callback: (tokenResponse: { access_token?: string; error?: string }) => {
-            if (tokenResponse.error) {
-              if (tokenResponse.error !== "popup_closed_by_user") {
-                toast.error(`Google authentication error: ${tokenResponse.error}`);
-              }
-              return;
-            }
-            if (tokenResponse.access_token) {
-              void handleGoogleSuccess({ accessToken: tokenResponse.access_token });
-            }
-          },
-        });
-        tokenClient.requestAccessToken();
-        return;
-      } catch (err) {
-        console.warn("[Google Auth] OAuth2 popup fallback to ID prompt:", err);
-      }
-    }
+    const redirectUri = `${window.location.origin}/login`;
+    const params = new URLSearchParams({
+      client_id: googleClientId,
+      redirect_uri: redirectUri,
+      response_type: "token",
+      scope: "openid email profile",
+      prompt: "select_account",
+      state,
+    });
 
-    if (googleObj.accounts.id) {
-      googleObj.accounts.id.prompt();
-    }
+    window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
   };
 
   // ---------------------------------------------------------------------------
@@ -1233,11 +1178,6 @@ function Login() {
                   </>
                 )}
               </button>
-
-              <div
-                ref={googleBtnContainerRef}
-                className="mt-2 flex min-h-[44px] w-full justify-center overflow-hidden"
-              />
             </form>
           )}
 
