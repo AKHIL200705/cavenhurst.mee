@@ -68,7 +68,7 @@ export function gateNeedsRedirect({
 
   // Anonymous visitor
   if (!signedIn) {
-    return isAccountGatedRoute(path);
+    return isAccountGatedRoute(path) || path === "/welcome";
   }
 
   // Signed in: first-time welcome screen
