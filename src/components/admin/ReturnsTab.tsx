@@ -66,9 +66,12 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Customer Return Requests</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+            Customer Return Requests
+          </h2>
           <p className="text-xs text-muted-foreground font-sans">
-            Process return authorizations, reverse logistics pickups, and replacement/refund approvals.
+            Process return authorizations, reverse logistics pickups, and replacement/refund
+            approvals.
           </p>
         </div>
 
@@ -118,7 +121,9 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
                     #{r.orders?.order_number || r.order_id.slice(0, 8)}
                   </td>
                   <td className="p-3.5">
-                    <p className="font-semibold text-foreground">{r.orders?.customer_name || "Customer"}</p>
+                    <p className="font-semibold text-foreground">
+                      {r.orders?.customer_name || "Customer"}
+                    </p>
                     <p className="text-[11px] text-muted-foreground">{r.orders?.customer_email}</p>
                   </td>
                   <td className="p-3.5 max-w-xs truncate" title={r.reason}>
@@ -133,8 +138,8 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
                         r.status === "approved" || r.status === "refunded"
                           ? "bg-emerald-500/10 text-emerald-500"
                           : r.status === "rejected"
-                          ? "bg-sale/20 text-sale"
-                          : "bg-secondary text-foreground"
+                            ? "bg-sale/20 text-sale"
+                            : "bg-secondary text-foreground"
                       }`}
                     >
                       {r.status}
@@ -190,15 +195,21 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
             <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Customer:</span>
-                <span className="font-semibold text-foreground">{selectedReturn.orders?.customer_name}</span>
+                <span className="font-semibold text-foreground">
+                  {selectedReturn.orders?.customer_name}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Contact Email:</span>
-                <span className="font-semibold text-foreground">{selectedReturn.orders?.customer_email}</span>
+                <span className="font-semibold text-foreground">
+                  {selectedReturn.orders?.customer_email}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Refund Value:</span>
-                <span className="font-bold text-foreground font-mono">{formatINR(selectedReturn.refund_amount)}</span>
+                <span className="font-bold text-foreground font-mono">
+                  {formatINR(selectedReturn.refund_amount)}
+                </span>
               </div>
               <div className="pt-1 border-t border-border">
                 <span className="text-muted-foreground">Customer Reason:</span>
@@ -207,7 +218,9 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-muted-foreground">Update Return Status *</label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Update Return Status *
+              </label>
               <select
                 value={newStatus}
                 onChange={(e) => setNewStatus(e.target.value)}
@@ -223,7 +236,9 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-muted-foreground">Internal Admin Notes</label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Internal Admin Notes
+              </label>
               <textarea
                 rows={3}
                 className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs"

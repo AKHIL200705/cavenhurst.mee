@@ -82,6 +82,7 @@ export function CollectionView({
         <img
           src={fabric}
           alt=""
+          decoding="async"
           className="absolute inset-0 h-full w-full object-cover opacity-70"
           width={1600}
           height={1000}
@@ -118,7 +119,9 @@ export function CollectionView({
               Filter
             </SheetTrigger>
             <SheetContent side="left" className="w-80 overflow-y-auto bg-background">
-              <SheetTitle className="font-heading text-2xl font-bold uppercase tracking-tight">Filters</SheetTitle>
+              <SheetTitle className="font-heading text-2xl font-bold uppercase tracking-tight">
+                Filters
+              </SheetTitle>
               <div className="mt-6 space-y-7 text-sm">
                 <FilterGroup title="Category">
                   {["t-shirts", "hoodies"].map((c) => (
@@ -250,9 +253,12 @@ export function CollectionView({
 
         {products.length === 0 ? (
           <div className="py-24 text-center space-y-3">
-            <p className="font-heading text-2xl font-bold uppercase tracking-tight text-foreground">No Products Available</p>
+            <p className="font-heading text-2xl font-bold uppercase tracking-tight text-foreground">
+              No Products Available
+            </p>
             <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Our artisans are currently preparing new silhouettes in the workshop. Please check back shortly or visit our collections.
+              Our artisans are currently preparing new silhouettes in the workshop. Please check
+              back shortly or visit our collections.
             </p>
           </div>
         ) : list.length === 0 ? (
@@ -307,5 +313,3 @@ function Pill({
     </button>
   );
 }
-
-

@@ -25,7 +25,13 @@ interface VariantsTabProps {
   authToken?: string | undefined;
 }
 
-export function VariantsTab({ variants, products, loading, onRefresh, authToken }: VariantsTabProps) {
+export function VariantsTab({
+  variants,
+  products,
+  loading,
+  onRefresh,
+  authToken,
+}: VariantsTabProps) {
   const [selectedProduct, setSelectedProduct] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
@@ -135,9 +141,12 @@ export function VariantsTab({ variants, products, loading, onRefresh, authToken 
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Product Variants (Sizes & Colors)</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+            Product Variants (Sizes & Colors)
+          </h2>
           <p className="text-xs text-muted-foreground">
-            Manage SKU allocations, dimensional sizing, fabric color options, and real-time inventory counts.
+            Manage SKU allocations, dimensional sizing, fabric color options, and real-time
+            inventory counts.
           </p>
         </div>
 
@@ -216,9 +225,12 @@ export function VariantsTab({ variants, products, loading, onRefresh, authToken 
                 filtered.map((v) => (
                   <tr key={v.id} className="hover:bg-accent/20 transition">
                     <td className="p-3.5 font-semibold text-foreground flex items-center gap-2">
-                      <Layers className="h-3.5 w-3.5 text-primary" /> {v.products?.name || "Apparel Item"}
+                      <Layers className="h-3.5 w-3.5 text-primary" />{" "}
+                      {v.products?.name || "Apparel Item"}
                     </td>
-                    <td className="p-3.5 font-mono text-[11px] text-muted-foreground">{v.sku || "—"}</td>
+                    <td className="p-3.5 font-mono text-[11px] text-muted-foreground">
+                      {v.sku || "—"}
+                    </td>
                     <td className="p-3.5 text-center font-mono font-bold">{v.size}</td>
                     <td className="p-3.5">
                       <span className="inline-flex items-center gap-1.5">
@@ -291,7 +303,11 @@ export function VariantsTab({ variants, products, loading, onRefresh, authToken 
               <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                 {editingId ? "Edit Product Variant" : "Add New Variant"}
               </h3>
-              <button type="button" onClick={resetForm} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -362,24 +378,32 @@ export function VariantsTab({ variants, products, loading, onRefresh, authToken 
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Stock Quantity *</label>
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Stock Quantity *
+                </label>
                 <input
                   required
                   type="number"
                   min={0}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
                   value={form.stockQuantity}
-                  onChange={(e) => setForm({ ...form, stockQuantity: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setForm({ ...form, stockQuantity: parseInt(e.target.value) || 0 })
+                  }
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Extra Price (₹)</label>
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Extra Price (₹)
+                </label>
                 <input
                   type="number"
                   min={0}
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
                   value={form.additionalPrice}
-                  onChange={(e) => setForm({ ...form, additionalPrice: parseInt(e.target.value) || 0 })}
+                  onChange={(e) =>
+                    setForm({ ...form, additionalPrice: parseInt(e.target.value) || 0 })
+                  }
                 />
               </div>
             </div>

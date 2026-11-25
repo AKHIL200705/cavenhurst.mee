@@ -1,7 +1,15 @@
 import wolfLogo from "@/assets/wolf-logo.png";
 
 export function WingMark({ className = "h-6 w-auto" }: { className?: string }) {
-  return <img src={wolfLogo} alt="" aria-hidden className={`${className} object-contain`} />;
+  return (
+    <img
+      src={wolfLogo}
+      alt=""
+      aria-hidden
+      decoding="async"
+      className={`${className} object-contain`}
+    />
+  );
 }
 
 export function Logo({ compact = false }: { compact?: boolean }) {

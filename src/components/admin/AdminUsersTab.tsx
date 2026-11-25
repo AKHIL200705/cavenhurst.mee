@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { ShieldCheck, Plus, Edit2, CheckCircle2, XCircle, RefreshCw, X, Loader2 } from "lucide-react";
+import {
+  ShieldCheck,
+  Plus,
+  Edit2,
+  CheckCircle2,
+  XCircle,
+  RefreshCw,
+  X,
+  Loader2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { saveAdminUserServerFn, toggleAdminUserStatusServerFn } from "@/server/admin";
 
@@ -79,7 +88,11 @@ export function AdminUsersTab({ adminUsers, loading, onRefresh, authToken }: Adm
 
   const handleToggleStatus = async (id: string, currentStatus: boolean, email: string) => {
     const nextStatus = !currentStatus;
-    if (!confirm(`Are you sure you want to ${nextStatus ? "activate" : "deactivate"} admin access for ${email}?`)) {
+    if (
+      !confirm(
+        `Are you sure you want to ${nextStatus ? "activate" : "deactivate"} admin access for ${email}?`,
+      )
+    ) {
       return;
     }
 
@@ -98,9 +111,12 @@ export function AdminUsersTab({ adminUsers, loading, onRefresh, authToken }: Adm
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Administrative Users & Access Control</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+            Administrative Users & Access Control
+          </h2>
           <p className="text-xs text-muted-foreground font-sans">
-            Manage authenticated administrators, access roles, active privileges, and security whitelists.
+            Manage authenticated administrators, access roles, active privileges, and security
+            whitelists.
           </p>
         </div>
 
@@ -190,10 +206,16 @@ export function AdminUsersTab({ adminUsers, loading, onRefresh, authToken }: Adm
                         title={u.is_active ? "Suspend Access" : "Activate Access"}
                         onClick={() => handleToggleStatus(u.id, u.is_active, u.email)}
                         className={`rounded p-1 ${
-                          u.is_active ? "text-sale hover:bg-sale/10" : "text-emerald-500 hover:bg-emerald-500/10"
+                          u.is_active
+                            ? "text-sale hover:bg-sale/10"
+                            : "text-emerald-500 hover:bg-emerald-500/10"
                         }`}
                       >
-                        {u.is_active ? <XCircle className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                        {u.is_active ? (
+                          <XCircle className="h-3.5 w-3.5" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        )}
                       </button>
                     </div>
                   </td>
@@ -215,7 +237,11 @@ export function AdminUsersTab({ adminUsers, loading, onRefresh, authToken }: Adm
               <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                 {editingId ? "Edit Administrator" : "Authorize New Administrator"}
               </h3>
-              <button type="button" onClick={resetForm} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -242,7 +268,9 @@ export function AdminUsersTab({ adminUsers, loading, onRefresh, authToken }: Adm
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-muted-foreground">Administrative Role *</label>
+              <label className="text-xs font-semibold text-muted-foreground">
+                Administrative Role *
+              </label>
               <select
                 value={form.role}
                 onChange={(e) => setForm({ ...form, role: e.target.value })}

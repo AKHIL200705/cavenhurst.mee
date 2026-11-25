@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
 import { meta } from "@/components/site/InfoPage";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,25 +25,67 @@ import {
 } from "lucide-react";
 
 import { AdminAuthGate } from "@/components/admin/AdminAuthGate";
-import { OverviewTab, type OverviewData } from "@/components/admin/OverviewTab";
-import { OrdersTab, type AdminOrderItem } from "@/components/admin/OrdersTab";
-import { ProductsTab, type AdminProductListItem } from "@/components/admin/ProductsTab";
-import { CategoriesTab, type AdminCategoryItem } from "@/components/admin/CategoriesTab";
-import { VariantsTab, type AdminVariantItem } from "@/components/admin/VariantsTab";
-import {
-  InventoryTab,
-  type AdminInventoryItem,
-  type AdminInventoryMovement,
-} from "@/components/admin/InventoryTab";
-import { PaymentsTab, type AdminPaymentItem } from "@/components/admin/PaymentsTab";
-import { ShipmentsTab, type AdminShipmentItem } from "@/components/admin/ShipmentsTab";
-import { ReturnsTab, type AdminReturnItem } from "@/components/admin/ReturnsTab";
-import { CustomersTab, type AdminCustomerItem } from "@/components/admin/CustomersTab";
-import { CouponsTab, type AdminCouponItem } from "@/components/admin/CouponsTab";
-import { ReviewsTab, type AdminReviewItem } from "@/components/admin/ReviewsTab";
-import { AdminUsersTab, type AdminUserRecord } from "@/components/admin/AdminUsersTab";
-import { AuditLogsTab, type AdminAuditLogItem } from "@/components/admin/AuditLogsTab";
-import { SettingsTab, type AdminSettingsData } from "@/components/admin/SettingsTab";
+import type { OverviewData } from "@/components/admin/OverviewTab";
+import type { AdminOrderItem } from "@/components/admin/OrdersTab";
+import type { AdminProductListItem } from "@/components/admin/ProductsTab";
+import type { AdminCategoryItem } from "@/components/admin/CategoriesTab";
+import type { AdminVariantItem } from "@/components/admin/VariantsTab";
+import type { AdminInventoryItem, AdminInventoryMovement } from "@/components/admin/InventoryTab";
+import type { AdminPaymentItem } from "@/components/admin/PaymentsTab";
+import type { AdminShipmentItem } from "@/components/admin/ShipmentsTab";
+import type { AdminReturnItem } from "@/components/admin/ReturnsTab";
+import type { AdminCustomerItem } from "@/components/admin/CustomersTab";
+import type { AdminCouponItem } from "@/components/admin/CouponsTab";
+import type { AdminReviewItem } from "@/components/admin/ReviewsTab";
+import type { AdminUserRecord } from "@/components/admin/AdminUsersTab";
+import type { AdminAuditLogItem } from "@/components/admin/AuditLogsTab";
+import type { AdminSettingsData } from "@/components/admin/SettingsTab";
+
+const OverviewTab = lazy(() =>
+  import("@/components/admin/OverviewTab").then((m) => ({ default: m.OverviewTab })),
+);
+const OrdersTab = lazy(() =>
+  import("@/components/admin/OrdersTab").then((m) => ({ default: m.OrdersTab })),
+);
+const ProductsTab = lazy(() =>
+  import("@/components/admin/ProductsTab").then((m) => ({ default: m.ProductsTab })),
+);
+const CategoriesTab = lazy(() =>
+  import("@/components/admin/CategoriesTab").then((m) => ({ default: m.CategoriesTab })),
+);
+const VariantsTab = lazy(() =>
+  import("@/components/admin/VariantsTab").then((m) => ({ default: m.VariantsTab })),
+);
+const InventoryTab = lazy(() =>
+  import("@/components/admin/InventoryTab").then((m) => ({ default: m.InventoryTab })),
+);
+const PaymentsTab = lazy(() =>
+  import("@/components/admin/PaymentsTab").then((m) => ({ default: m.PaymentsTab })),
+);
+const ShipmentsTab = lazy(() =>
+  import("@/components/admin/ShipmentsTab").then((m) => ({ default: m.ShipmentsTab })),
+);
+const ReturnsTab = lazy(() =>
+  import("@/components/admin/ReturnsTab").then((m) => ({ default: m.ReturnsTab })),
+);
+const CustomersTab = lazy(() =>
+  import("@/components/admin/CustomersTab").then((m) => ({ default: m.CustomersTab })),
+);
+const CouponsTab = lazy(() =>
+  import("@/components/admin/CouponsTab").then((m) => ({ default: m.CouponsTab })),
+);
+const ReviewsTab = lazy(() =>
+  import("@/components/admin/ReviewsTab").then((m) => ({ default: m.ReviewsTab })),
+);
+const AdminUsersTab = lazy(() =>
+  import("@/components/admin/AdminUsersTab").then((m) => ({ default: m.AdminUsersTab })),
+);
+const AuditLogsTab = lazy(() =>
+  import("@/components/admin/AuditLogsTab").then((m) => ({ default: m.AuditLogsTab })),
+);
+const SettingsTab = lazy(() =>
+  import("@/components/admin/SettingsTab").then((m) => ({ default: m.SettingsTab })),
+);
 
 import {
   getAdminOverviewServerFn,
@@ -393,7 +435,7 @@ function AdminDashboard() {
         }
         case "settings": {
           const res = await getAdminSettingsServerFn({ data: { authToken: token } });
-          setSettings(res);
+          setSettings(res ?? null);
           break;
         }
       }
@@ -422,7 +464,16 @@ function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage, authToken, sessionToken, user?.email]);
+  }, [
+    isAdmin,
+    activeTab,
+    orderFilter,
+    orderSearch,
+    orderPage,
+    authToken,
+    sessionToken,
+    user?.email,
+  ]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -543,7 +594,11 @@ function AdminDashboard() {
                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
                     : "border-border bg-card text-muted-foreground"
                 }`}
-                title={realtimeConnected ? "Live Supabase Realtime active" : "Connecting to Supabase Realtime..."}
+                title={
+                  realtimeConnected
+                    ? "Live Supabase Realtime active"
+                    : "Connecting to Supabase Realtime..."
+                }
               >
                 <span
                   className={`h-2 w-2 rounded-full ${
@@ -606,149 +661,155 @@ function AdminDashboard() {
 
       {/* Main Content Workspace */}
       <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
-        {activeTab === "overview" && overviewData && (
-          <OverviewTab data={overviewData} onNavigateTab={(t) => setActiveTab(t as AdminTab)} />
-        )}
+        <Suspense
+          fallback={
+            <div className="h-64 w-full animate-pulse rounded-xl border border-border bg-card/50" />
+          }
+        >
+          {activeTab === "overview" && overviewData && (
+            <OverviewTab data={overviewData} onNavigateTab={(t) => setActiveTab(t as AdminTab)} />
+          )}
 
-        {activeTab === "orders" && (
-          <OrdersTab
-            orders={orders}
-            totalCount={totalOrdersCount}
-            currentPage={orderPage}
-            limit={25}
-            loading={loading}
-            filter={orderFilter}
-            search={orderSearch}
-            authToken={authToken}
-            onFilterChange={(f) => {
-              setOrderFilter(f);
-              setOrderPage(1);
-            }}
-            onSearchChange={(s) => {
-              setOrderSearch(s);
-              setOrderPage(1);
-            }}
-            onPageChange={(p) => setOrderPage(p)}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "orders" && (
+            <OrdersTab
+              orders={orders}
+              totalCount={totalOrdersCount}
+              currentPage={orderPage}
+              limit={25}
+              loading={loading}
+              filter={orderFilter}
+              search={orderSearch}
+              authToken={authToken}
+              onFilterChange={(f) => {
+                setOrderFilter(f);
+                setOrderPage(1);
+              }}
+              onSearchChange={(s) => {
+                setOrderSearch(s);
+                setOrderPage(1);
+              }}
+              onPageChange={(p) => setOrderPage(p)}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "products" && (
-          <ProductsTab
-            products={products}
-            loading={loading}
-            authToken={authToken}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "products" && (
+            <ProductsTab
+              products={products}
+              loading={loading}
+              authToken={authToken}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "categories" && (
-          <CategoriesTab
-            categories={categories}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-            authToken={authToken}
-          />
-        )}
+          {activeTab === "categories" && (
+            <CategoriesTab
+              categories={categories}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+              authToken={authToken}
+            />
+          )}
 
-        {activeTab === "variants" && (
-          <VariantsTab
-            variants={variants}
-            products={products
-              .filter((p): p is typeof p & { id: string } => Boolean(p.id))
-              .map((p) => ({ id: p.id, name: p.name }))}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-            authToken={authToken}
-          />
-        )}
+          {activeTab === "variants" && (
+            <VariantsTab
+              variants={variants}
+              products={products
+                .filter((p): p is typeof p & { id: string } => Boolean(p.id))
+                .map((p) => ({ id: p.id, name: p.name }))}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+              authToken={authToken}
+            />
+          )}
 
-        {activeTab === "inventory" && (
-          <InventoryTab
-            inventory={inventory}
-            movements={inventoryMovements}
-            loading={loading}
-            authToken={authToken}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "inventory" && (
+            <InventoryTab
+              inventory={inventory}
+              movements={inventoryMovements}
+              loading={loading}
+              authToken={authToken}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "payments" && (
-          <PaymentsTab
-            payments={payments}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-            onInitiateRefund={() => setActiveTab("orders")}
-          />
-        )}
+          {activeTab === "payments" && (
+            <PaymentsTab
+              payments={payments}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+              onInitiateRefund={() => setActiveTab("orders")}
+            />
+          )}
 
-        {activeTab === "shipments" && (
-          <ShipmentsTab
-            shipments={shipments}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "shipments" && (
+            <ShipmentsTab
+              shipments={shipments}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "returns" && (
-          <ReturnsTab
-            returns={returns}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-            authToken={authToken}
-          />
-        )}
+          {activeTab === "returns" && (
+            <ReturnsTab
+              returns={returns}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+              authToken={authToken}
+            />
+          )}
 
-        {activeTab === "customers" && (
-          <CustomersTab
-            customers={customers}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "customers" && (
+            <CustomersTab
+              customers={customers}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "coupons" && (
-          <CouponsTab
-            coupons={coupons}
-            loading={loading}
-            authToken={authToken}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "coupons" && (
+            <CouponsTab
+              coupons={coupons}
+              loading={loading}
+              authToken={authToken}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "reviews" && (
-          <ReviewsTab
-            reviews={reviews}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-            authToken={authToken}
-          />
-        )}
+          {activeTab === "reviews" && (
+            <ReviewsTab
+              reviews={reviews}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+              authToken={authToken}
+            />
+          )}
 
-        {activeTab === "admin_users" && (
-          <AdminUsersTab
-            adminUsers={adminUsers}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-            authToken={authToken}
-          />
-        )}
+          {activeTab === "admin_users" && (
+            <AdminUsersTab
+              adminUsers={adminUsers}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+              authToken={authToken}
+            />
+          )}
 
-        {activeTab === "audit" && (
-          <AuditLogsTab
-            logs={auditLogs}
-            loading={loading}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "audit" && (
+            <AuditLogsTab
+              logs={auditLogs}
+              loading={loading}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
 
-        {activeTab === "settings" && (
-          <SettingsTab
-            settings={settings}
-            authToken={authToken}
-            onRefresh={() => void loadActiveTabData()}
-          />
-        )}
+          {activeTab === "settings" && (
+            <SettingsTab
+              settings={settings}
+              authToken={authToken}
+              onRefresh={() => void loadActiveTabData()}
+            />
+          )}
+        </Suspense>
       </main>
     </div>
   );

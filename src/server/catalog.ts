@@ -4,10 +4,29 @@ import { getDb } from "@/server/db";
 import { PRODUCTS, getProduct, type Product, type Size } from "@/lib/products";
 import type { Json } from "@/integrations/supabase/types";
 
+interface DbProductRow {
+  slug: string;
+  name: string;
+  category_slug?: string | null;
+  tags?: string[] | Json | null;
+  price?: number | string | null;
+  mrp?: number | string | null;
+  colors?: Json | Array<string | { name?: string; hex?: string }> | null;
+  live_stock?: Record<string, number> | null;
+  stock?: Json | Record<string, number> | null;
+  images?: string[] | null;
+  description?: string | null;
+  fabric?: string | null;
+  fit?: string | null;
+  is_new?: boolean | null;
+  sold?: number | string | null;
+  rank?: number | string | null;
+}
+
 /**
  * Maps database product row to the frontend Product type.
  */
-function mapDbProductToFrontend(row: any): Product {
+function mapDbProductToFrontend(row: DbProductRow): Product {
   const stockObj: Partial<Record<Size, number>> = {};
   const stockSource = row.live_stock || row.stock;
   if (stockSource && typeof stockSource === "object") {
@@ -17,16 +36,18 @@ function mapDbProductToFrontend(row: any): Product {
   }
 
   const colors = Array.isArray(row.colors)
-    ? row.colors.map((c: any) =>
-        typeof c === "string" ? { name: c, hex: "#1C1917" } : { name: c.name || "Default", hex: c.hex || "#1C1917" },
-      )
+    ? row.colors.map((c) => {
+        if (typeof c === "string") return { name: c, hex: "#1C1917" };
+        const obj = (c || {}) as { name?: string; hex?: string };
+        return { name: obj.name || "Default", hex: obj.hex || "#1C1917" };
+      })
     : [{ name: "Standard", hex: "#1C1917" }];
 
   return {
     slug: row.slug,
     name: row.name,
-    category: (row.category_slug as any) || "t-shirts",
-    tags: Array.isArray(row.tags) ? row.tags : ["essentials"],
+    category: (row.category_slug as Product["category"]) || "t-shirts",
+    tags: Array.isArray(row.tags) ? (row.tags as Product["tags"]) : ["essentials"],
     price: Number(row.price) || 0,
     mrp: Number(row.mrp) || Number(row.price) || 0,
     colors,
@@ -67,10 +88,13 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
           ORDER BY p.rank ASC
         `;
         if (rows && rows.length > 0) {
-          return (rows as any[]).map(mapDbProductToFrontend);
+          return (rows as unknown as DbProductRow[]).map(mapDbProductToFrontend);
         }
       } catch (dbErr) {
-        console.error("[Catalog ServerFn] Direct DB error, falling back to Supabase client:", dbErr);
+        console.error(
+          "[Catalog ServerFn] Direct DB error, falling back to Supabase client:",
+          dbErr,
+        );
       }
     }
 
@@ -86,7 +110,7 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
         return PRODUCTS;
       }
 
-      return dbProducts.map(mapDbProductToFrontend);
+      return dbProducts.map((r) => mapDbProductToFrontend(r as unknown as DbProductRow));
     } catch (err) {
       console.warn("[Catalog ServerFn] Unexpected error, using fallback catalog:", err);
       return PRODUCTS;
@@ -103,7 +127,7 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const [row] = await sql`
+        const [row] = await sql<DbProductRow[]>`
           SELECT 
             p.*,
             COALESCE(
@@ -123,7 +147,10 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
           return mapDbProductToFrontend(row);
         }
       } catch (dbErr) {
-        console.error("[Product Detail ServerFn] Direct DB error, falling back to Supabase client:", dbErr);
+        console.error(
+          "[Product Detail ServerFn] Direct DB error, falling back to Supabase client:",
+          dbErr,
+        );
       }
     }
 
@@ -136,7 +163,7 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
         .maybeSingle();
 
       if (!error && row) {
-        return mapDbProductToFrontend(row);
+        return mapDbProductToFrontend(row as unknown as DbProductRow);
       }
       return getProduct(data.slug) || null;
     } catch (err) {
@@ -215,8 +242,8 @@ export const submitProductReviewServerFn = createServerFn({ method: "POST" })
 
       if (error) throw new Error(error.message);
       return { success: true, id: inserted.id };
-    } catch (err: any) {
-      throw new Error(err.message || "Failed to submit review");
+    } catch (err: unknown) {
+      throw new Error(err instanceof Error ? err.message : "Failed to submit review");
     }
   });
 

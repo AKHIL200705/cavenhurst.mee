@@ -32,7 +32,8 @@ function resolveDbUrl(): string {
   }
 
   if (!dbUrl) {
-    dbUrl = "postgresql://postgres.ewlsrypetobkwrwtmmgh:cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
+    dbUrl =
+      "postgresql://postgres.ewlsrypetobkwrwtmmgh:cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
   }
 
   // Normalize IPv6-only direct host to IPv4/IPv6 dual-stack pooler
@@ -43,7 +44,10 @@ function resolveDbUrl(): string {
   }
 
   // Ensure pooler has tenant identifier
-  if (dbUrl.includes("aws-0-ap-southeast-1.pooler.supabase.com") && dbUrl.includes("://postgres:")) {
+  if (
+    dbUrl.includes("aws-0-ap-southeast-1.pooler.supabase.com") &&
+    dbUrl.includes("://postgres:")
+  ) {
     dbUrl = dbUrl.replace("://postgres:", "://postgres.ewlsrypetobkwrwtmmgh:");
   }
 

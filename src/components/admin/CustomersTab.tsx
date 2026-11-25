@@ -19,7 +19,27 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { getAdminCustomerDetailsServerFn } from "@/server/admin";
+import type { Tables } from "@/integrations/supabase/types";
 import { toast } from "sonner";
+
+type CustomerOrderSummary = {
+  id: string;
+  order_number: string | null;
+  total: number;
+  status: string;
+  payment_status: string | null;
+  shipment_status: string | null;
+  awb_number: string | null;
+  created_at: string;
+  items: unknown;
+};
+
+interface CustomerDetailsState {
+  customer: Tables<"customers">;
+  addresses: Tables<"customer_addresses">[];
+  orders: CustomerOrderSummary[];
+  payments: Tables<"payments">[];
+}
 
 export interface AdminCustomerItem {
   id: string;
@@ -51,12 +71,7 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
   const [pageSize, setPageSize] = useState(15);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
-  const [customerDetails, setCustomerDetails] = useState<{
-    customer: any;
-    addresses: any[];
-    orders: any[];
-    payments: any[];
-  } | null>(null);
+  const [customerDetails, setCustomerDetails] = useState<CustomerDetailsState | null>(null);
 
   // Filter customers based on search query and status dropdown
   const filtered = useMemo(() => {
@@ -165,9 +180,12 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Customer Directory & Management</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+            Customer Directory & Management
+          </h2>
           <p className="text-xs text-muted-foreground font-sans">
-            Authoritative customer identities, mobile verification status, lifetime expenditures, and order history.
+            Authoritative customer identities, mobile verification status, lifetime expenditures,
+            and order history.
           </p>
         </div>
 
@@ -466,18 +484,31 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                 {/* Profile Overview */}
                 <div className="grid gap-3 sm:grid-cols-3 rounded-lg border border-border bg-muted/20 p-4">
                   <div>
-                    <span className="text-[10px] text-muted-foreground uppercase font-mono">Email Address</span>
-                    <p className="font-semibold text-foreground">{customerDetails.customer.email || "—"}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-muted-foreground uppercase font-mono">Contact Phone</span>
-                    <p className="font-semibold text-foreground font-mono">
-                      {customerDetails.customer.phone ? `+91 ${customerDetails.customer.phone.replace(/\D/g, "").slice(-10)}` : "—"}
+                    <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                      Email Address
+                    </span>
+                    <p className="font-semibold text-foreground">
+                      {customerDetails.customer.email || "—"}
                     </p>
                   </div>
                   <div>
-                    <span className="text-[10px] text-muted-foreground uppercase font-mono">Auth UID / Sub</span>
-                    <p className="font-mono text-foreground truncate" title={customerDetails.customer.auth_provider_uid || ""}>
+                    <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                      Contact Phone
+                    </span>
+                    <p className="font-semibold text-foreground font-mono">
+                      {customerDetails.customer.phone
+                        ? `+91 ${customerDetails.customer.phone.replace(/\D/g, "").slice(-10)}`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-muted-foreground uppercase font-mono">
+                      Auth UID / Sub
+                    </span>
+                    <p
+                      className="font-mono text-foreground truncate"
+                      title={customerDetails.customer.auth_provider_uid || ""}
+                    >
                       {customerDetails.customer.auth_provider_uid || "—"}
                     </p>
                   </div>
@@ -486,7 +517,8 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                 {/* Addresses */}
                 <div>
                   <h4 className="font-bold flex items-center gap-1.5 text-sm mb-3">
-                    <MapPin className="h-4 w-4 text-primary" /> Saved Address Book ({customerDetails.addresses.length})
+                    <MapPin className="h-4 w-4 text-primary" /> Saved Address Book (
+                    {customerDetails.addresses.length})
                   </h4>
                   {customerDetails.addresses.length === 0 ? (
                     <p className="text-muted-foreground italic bg-muted/10 p-3 rounded-lg border border-border">
@@ -494,8 +526,11 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                     </p>
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2">
-                      {customerDetails.addresses.map((addr: any) => (
-                        <div key={addr.id} className="rounded-lg border border-border bg-card p-3 space-y-1">
+                      {customerDetails.addresses.map((addr) => (
+                        <div
+                          key={addr.id}
+                          className="rounded-lg border border-border bg-card p-3 space-y-1"
+                        >
                           <div className="flex items-center justify-between">
                             <span className="font-bold text-foreground">{addr.full_name}</span>
                             {addr.is_default && (
@@ -506,7 +541,9 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                           </div>
                           <p className="text-muted-foreground font-mono">{addr.phone}</p>
                           <p className="text-muted-foreground">{addr.address_line1}</p>
-                          {addr.address_line2 && <p className="text-muted-foreground">{addr.address_line2}</p>}
+                          {addr.address_line2 && (
+                            <p className="text-muted-foreground">{addr.address_line2}</p>
+                          )}
                           <p className="text-muted-foreground">
                             {addr.city}, {addr.state} - {addr.postal_code}
                           </p>
@@ -519,7 +556,8 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                 {/* Orders History */}
                 <div>
                   <h4 className="font-bold flex items-center gap-1.5 text-sm mb-3">
-                    <Package className="h-4 w-4 text-primary" /> Order History ({customerDetails.orders.length})
+                    <Package className="h-4 w-4 text-primary" /> Order History (
+                    {customerDetails.orders.length})
                   </h4>
                   {customerDetails.orders.length === 0 ? (
                     <p className="text-muted-foreground italic bg-muted/10 p-3 rounded-lg border border-border">
@@ -527,8 +565,11 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                     </p>
                   ) : (
                     <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-                      {customerDetails.orders.map((ord: any) => (
-                        <div key={ord.id} className="flex items-center justify-between p-3 bg-card hover:bg-accent/10 transition">
+                      {customerDetails.orders.map((ord) => (
+                        <div
+                          key={ord.id}
+                          className="flex items-center justify-between p-3 bg-card hover:bg-accent/10 transition"
+                        >
                           <div>
                             <span className="font-mono font-bold text-foreground">
                               #{ord.order_number || ord.id.slice(0, 8)}
@@ -558,7 +599,8 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                 {/* Payments */}
                 <div>
                   <h4 className="font-bold flex items-center gap-1.5 text-sm mb-3">
-                    <CreditCard className="h-4 w-4 text-primary" /> Payment Transactions ({customerDetails.payments.length})
+                    <CreditCard className="h-4 w-4 text-primary" /> Payment Transactions (
+                    {customerDetails.payments.length})
                   </h4>
                   {customerDetails.payments.length === 0 ? (
                     <p className="text-muted-foreground italic bg-muted/10 p-3 rounded-lg border border-border">
@@ -566,11 +608,14 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
                     </p>
                   ) : (
                     <div className="divide-y divide-border rounded-lg border border-border overflow-hidden">
-                      {customerDetails.payments.map((pmt: any) => (
+                      {customerDetails.payments.map((pmt) => (
                         <div key={pmt.id} className="flex items-center justify-between p-3 bg-card">
                           <div>
                             <span className="font-mono font-bold text-foreground">
-                              {pmt.payment_gateway.toUpperCase()} • {pmt.transaction_id || pmt.id.slice(0, 8)}
+                              {(pmt.gateway || pmt.payment_method || "razorpay").toUpperCase()} •{" "}
+                              {pmt.razorpay_payment_id ||
+                                pmt.razorpay_order_id ||
+                                pmt.id.slice(0, 8)}
                             </span>
                           </div>
                           <div className="flex items-center gap-3">

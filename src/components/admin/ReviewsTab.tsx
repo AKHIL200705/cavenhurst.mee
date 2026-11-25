@@ -33,7 +33,10 @@ export function ReviewsTab({ reviews, loading, onRefresh, authToken }: ReviewsTa
     return true;
   });
 
-  const handleStatusChange = async (reviewId: string, status: "approved" | "pending" | "rejected") => {
+  const handleStatusChange = async (
+    reviewId: string,
+    status: "approved" | "pending" | "rejected",
+  ) => {
     try {
       await updateAdminReviewStatusServerFn({
         data: { authToken, reviewId, status },
@@ -62,7 +65,9 @@ export function ReviewsTab({ reviews, loading, onRefresh, authToken }: ReviewsTa
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Product Reviews & Ratings Moderation</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+            Product Reviews & Ratings Moderation
+          </h2>
           <p className="text-xs text-muted-foreground font-sans">
             Moderate verified customer testimonials, star ratings, and community feedback.
           </p>
@@ -147,8 +152,8 @@ export function ReviewsTab({ reviews, loading, onRefresh, authToken }: ReviewsTa
                         r.status === "approved"
                           ? "bg-emerald-500/10 text-emerald-500"
                           : r.status === "rejected"
-                          ? "bg-sale/20 text-sale"
-                          : "bg-secondary text-foreground"
+                            ? "bg-sale/20 text-sale"
+                            : "bg-secondary text-foreground"
                       }`}
                     >
                       {r.status}

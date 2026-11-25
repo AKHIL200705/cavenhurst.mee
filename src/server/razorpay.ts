@@ -1,9 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import {
-  commitOrderInventory,
-  releaseOrderInventoryReservations,
-} from "./inventory";
+import { commitOrderInventory, releaseOrderInventoryReservations } from "./inventory";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface CreateRazorpayOrderInput {

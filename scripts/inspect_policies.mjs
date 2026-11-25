@@ -1,7 +1,7 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const sql = postgres(match[1], { ssl: { rejectUnauthorized: false } });
 
@@ -12,7 +12,7 @@ async function inspectPolicies() {
     WHERE tablename IN ('admin_users', 'customers', 'profiles', 'orders', 'user_roles')
     ORDER BY tablename, policyname;
   `;
-  console.log('Policies:');
+  console.log("Policies:");
   for (const p of policies) {
     console.log(`[${p.tablename}] ${p.policyname} (${p.cmd}) -> qual: ${p.qual}`);
   }

@@ -140,10 +140,7 @@ function generateOrderNumber(): string {
  * Queries current active prices, inventory stock and validates coupons against real database records.
  * Never trusts client prices or fake static product data!
  */
-async function calculateOrderTotals(
-  cart: CheckoutCartItemInput[],
-  couponCode: string | null,
-) {
+async function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: string | null) {
   let subtotal = 0;
   const itemsWithDetails: Array<{
     productId?: string | undefined;
@@ -174,7 +171,7 @@ async function calculateOrderTotals(
     const stockInfo = await getVariantAvailableStock(dbProd.id, item.size, item.color);
     const available = stockInfo.variantId
       ? stockInfo.available
-      : ((dbProd.stock || {}) as Record<string, number>)[item.size] ?? 0;
+      : (((dbProd.stock || {}) as Record<string, number>)[item.size] ?? 0);
 
     if (available < item.qty) {
       throw new Error(
@@ -784,10 +781,31 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
       );
     }
 
-    let ordersList: any[] = [];
+    interface AdminOrderListRow {
+      id: string;
+      order_number: string | null;
+      customer_name: string | null;
+      customer_email: string | null;
+      customer_phone: string | null;
+      total: number;
+      status: string;
+      payment_method?: string | null;
+      payment_status: string | null;
+      shipment_status: string | null;
+      razorpay_order_id: string | null;
+      razorpay_payment_id: string | null;
+      awb_number: string | null;
+      courier_partner: string | null;
+      created_at: string;
+    }
+
+    let ordersList: AdminOrderListRow[] = [];
     const { data: orders, error } = await query.limit(50);
     if (error) {
-      console.warn("[Admin Orders] Error fetching orders, attempting fallback query:", error.message);
+      console.warn(
+        "[Admin Orders] Error fetching orders, attempting fallback query:",
+        error.message,
+      );
       const fallbackQuery = supabaseAdmin
         .from("orders")
         .select(
@@ -799,12 +817,15 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
         console.error("[Admin Orders] Fallback query failed:", fallbackError);
         throw new Error("Failed to load orders");
       }
-      ordersList = (fallbackOrders || []).map((o: any) => ({
-        ...o,
-        payment_method: o.payment_method || "online",
-      }));
+      ordersList = (fallbackOrders || []).map((o) => {
+        const rec = o as unknown as AdminOrderListRow;
+        return {
+          ...rec,
+          payment_method: rec.payment_method || "online",
+        };
+      });
     } else {
-      ordersList = orders || [];
+      ordersList = (orders || []) as unknown as AdminOrderListRow[];
     }
 
     return ordersList;

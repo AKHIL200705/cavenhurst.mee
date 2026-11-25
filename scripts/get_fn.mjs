@@ -1,7 +1,7 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const sql = postgres(match[1], { ssl: { rejectUnauthorized: false } });
 

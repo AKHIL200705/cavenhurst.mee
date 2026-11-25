@@ -1,7 +1,7 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const sql = postgres(match[1], { ssl: { rejectUnauthorized: false } });
 
@@ -24,7 +24,10 @@ async function run() {
       FROM information_schema.routines
       WHERE routine_schema = 'public' AND routine_name LIKE '%profile%' OR routine_name LIKE '%user%';
     `;
-    console.log("Profile / user routines:", functions.map(f => f.routine_name));
+    console.log(
+      "Profile / user routines:",
+      functions.map((f) => f.routine_name),
+    );
   } catch (err) {
     console.error("Error:", err);
   } finally {

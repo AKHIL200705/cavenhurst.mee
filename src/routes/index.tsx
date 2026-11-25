@@ -58,6 +58,8 @@ function Home() {
           alt="Model wearing the CAVENHURST Urban Motion hoodie"
           width={1600}
           height={1008}
+          fetchPriority="high"
+          decoding="async"
           className="absolute inset-0 h-full w-full object-cover object-[70%_center]"
         />
         <div className="absolute inset-0 bg-hero-gradient" />
@@ -121,6 +123,7 @@ function Home() {
                 src={c.img}
                 alt={c.title}
                 loading="lazy"
+                decoding="async"
                 className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
               />
               <div className="absolute inset-0 bg-fade-gradient" />
@@ -158,6 +161,7 @@ function Home() {
           src={fabric}
           alt=""
           loading="lazy"
+          decoding="async"
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="relative mx-auto grid max-w-7xl items-center gap-8 px-4 py-20 md:grid-cols-2">
@@ -165,7 +169,9 @@ function Home() {
             <WingMark className="h-32 w-auto text-silver drop-shadow-2xl" />
           </div>
           <div className="md:border-l md:border-border md:pl-10">
-            <p className="font-heading text-xs font-bold uppercase tracking-brand text-electric">THE ESSENTIALS EDIT</p>
+            <p className="font-heading text-xs font-bold uppercase tracking-brand text-electric">
+              THE ESSENTIALS EDIT
+            </p>
             <h2 className="mt-3 font-heading text-4xl sm:text-6xl font-bold uppercase leading-none tracking-tight">
               Made to move
               <br />
@@ -191,10 +197,13 @@ function Home() {
             src={hero}
             alt="CAVENHURST campaign"
             loading="lazy"
+            decoding="async"
             className="aspect-[16/10] w-full rounded-xl object-cover"
           />
           <div>
-            <p className="font-heading text-xs font-bold uppercase tracking-brand text-electric">OUR STORY</p>
+            <p className="font-heading text-xs font-bold uppercase tracking-brand text-electric">
+              OUR STORY
+            </p>
             <h2 className="mt-3 font-heading text-3xl sm:text-5xl font-bold uppercase tracking-tight text-paper-foreground">
               A Unisex Clothing Brand Rooted in Simplicity
             </h2>

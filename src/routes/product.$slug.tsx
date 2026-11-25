@@ -1,5 +1,16 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
-import { ChevronRight, Heart, Minus, Plus, Truck, Star, Rotate3d, ZoomIn, ZoomOut, Sparkles } from "lucide-react";
+import {
+  ChevronRight,
+  Heart,
+  Minus,
+  Plus,
+  Truck,
+  Star,
+  Rotate3d,
+  ZoomIn,
+  ZoomOut,
+  Sparkles,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -23,8 +34,19 @@ import {
 } from "@/server/catalog";
 import { useAuth } from "@/lib/auth";
 
+export interface ProductReviewItem {
+  id: string;
+  customer_name: string;
+  rating: number;
+  title?: string | null;
+  review_text: string;
+  created_at?: string | null;
+}
+
 export const Route = createFileRoute("/product/$slug")({
-  loader: async ({ params }): Promise<{ product: Product; reviews: any[]; related: Product[] }> => {
+  loader: async ({
+    params,
+  }): Promise<{ product: Product; reviews: ProductReviewItem[]; related: Product[] }> => {
     let p: Product | null = null;
     try {
       p = await getProductBySlugServerFn({ data: { slug: params.slug } });
@@ -33,9 +55,11 @@ export const Route = createFileRoute("/product/$slug")({
     }
     if (!p) throw notFound();
 
-    let reviews: any[] = [];
+    let reviews: ProductReviewItem[] = [];
     try {
-      reviews = await getProductReviewsServerFn({ data: { productSlug: params.slug } });
+      reviews = (await getProductReviewsServerFn({
+        data: { productSlug: params.slug },
+      })) as ProductReviewItem[];
     } catch {
       reviews = [];
     }
@@ -174,8 +198,8 @@ function ProductPage() {
       setReviewText("");
       setReviewTitle("");
       setShowReviewForm(false);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to submit review");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to submit review");
     } finally {
       setSubmittingReview(false);
     }
@@ -272,7 +296,11 @@ function ProductPage() {
               }}
               className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/55 px-3 py-1.5 text-[11px] text-white/90 backdrop-blur-md hover:bg-black/75 transition shadow-md"
             >
-              {zoomActive ? <ZoomOut className="h-3.5 w-3.5 text-silver" /> : <ZoomIn className="h-3.5 w-3.5 text-silver" />}
+              {zoomActive ? (
+                <ZoomOut className="h-3.5 w-3.5 text-silver" />
+              ) : (
+                <ZoomIn className="h-3.5 w-3.5 text-silver" />
+              )}
               <span>{zoomActive ? "Reset Zoom" : "2x Zoom"}</span>
             </button>
 
@@ -317,6 +345,7 @@ function ProductPage() {
                   src={g}
                   alt={`${p.name} thumbnail ${i + 1}`}
                   loading="lazy"
+                  decoding="async"
                   className={cn("h-full w-full object-cover", i % 2 && "scale-x-[-1]")}
                 />
                 <span className="absolute bottom-1 right-1 rounded bg-black/60 px-1 font-mono text-[9px] text-white">
@@ -329,13 +358,21 @@ function ProductPage() {
 
         <div className="font-sans">
           <p className="font-heading text-xs uppercase tracking-brand text-electric">CAVENHURST</p>
-          <h1 className="mt-2 font-heading text-3xl sm:text-5xl lg:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">{p.name}</h1>
+          <h1 className="mt-2 font-heading text-3xl sm:text-5xl lg:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">
+            {p.name}
+          </h1>
           <div className="mt-4 flex flex-wrap items-baseline gap-3">
-            <span className="text-2xl sm:text-3xl font-black tracking-tight text-foreground">{formatINR(p.price)}</span>
+            <span className="text-2xl sm:text-3xl font-black tracking-tight text-foreground">
+              {formatINR(p.price)}
+            </span>
             {off > 0 && (
               <>
-                <span className="text-base font-medium text-muted-foreground line-through">{formatINR(p.mrp)}</span>
-                <span className="rounded bg-sale px-2.5 py-0.5 font-heading text-xs font-bold uppercase tracking-wider text-destructive-foreground">{off}% OFF</span>
+                <span className="text-base font-medium text-muted-foreground line-through">
+                  {formatINR(p.mrp)}
+                </span>
+                <span className="rounded bg-sale px-2.5 py-0.5 font-heading text-xs font-bold uppercase tracking-wider text-destructive-foreground">
+                  {off}% OFF
+                </span>
               </>
             )}
           </div>
@@ -371,9 +408,13 @@ function ProductPage() {
                 Size{size && <span className="text-foreground font-extrabold">: {size}</span>}
               </span>
               <Dialog>
-                <DialogTrigger className="underline text-silver hover:text-foreground">Size guide</DialogTrigger>
+                <DialogTrigger className="underline text-silver hover:text-foreground">
+                  Size guide
+                </DialogTrigger>
                 <DialogContent className="bg-background">
-                  <DialogTitle className="font-heading text-2xl font-bold uppercase tracking-tight">Size guide (inches)</DialogTitle>
+                  <DialogTitle className="font-heading text-2xl font-bold uppercase tracking-tight">
+                    Size guide (inches)
+                  </DialogTitle>
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-silver">
@@ -529,8 +570,11 @@ function ProductPage() {
                   <p className="text-xs">No reviews yet. Be the first to review this piece.</p>
                 ) : (
                   <div className="space-y-3">
-                    {reviewsList.map((r: any) => (
-                      <div key={r.id} className="rounded-lg border border-border/50 bg-card/40 p-3 space-y-1">
+                    {reviewsList.map((r: ProductReviewItem) => (
+                      <div
+                        key={r.id}
+                        className="rounded-lg border border-border/50 bg-card/40 p-3 space-y-1"
+                      >
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-semibold text-foreground">{r.customer_name}</span>
                           <div className="flex items-center text-gold">
@@ -539,7 +583,9 @@ function ProductPage() {
                             ))}
                           </div>
                         </div>
-                        {r.title && <p className="text-xs font-medium text-foreground">{r.title}</p>}
+                        {r.title && (
+                          <p className="text-xs font-medium text-foreground">{r.title}</p>
+                        )}
                         <p className="text-xs text-muted-foreground">{r.review_text}</p>
                       </div>
                     ))}
@@ -555,7 +601,10 @@ function ProductPage() {
                     + Write a Review
                   </button>
                 ) : (
-                  <form onSubmit={handleReviewSubmit} className="mt-3 space-y-3 rounded-lg border border-border bg-card/60 p-3">
+                  <form
+                    onSubmit={handleReviewSubmit}
+                    className="mt-3 space-y-3 rounded-lg border border-border bg-card/60 p-3"
+                  >
                     <div className="text-xs font-bold text-foreground">Write Your Review</div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs">Rating:</span>

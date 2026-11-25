@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { ShieldAlert, ShieldCheck, Lock, Mail, ArrowRight, RefreshCw, UserCheck } from "lucide-react";
+import {
+  ShieldAlert,
+  ShieldCheck,
+  Lock,
+  Mail,
+  ArrowRight,
+  RefreshCw,
+  UserCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
@@ -170,7 +178,8 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
               <UserCheck className="h-4 w-4" /> Detected Active Administrator
             </div>
             <p className="text-xs text-muted-foreground">
-              Logged in as <strong className="text-foreground">{user?.email || "Akhil Sai Abbireddy"}</strong>
+              Logged in as{" "}
+              <strong className="text-foreground">{user?.email || "Akhil Sai Abbireddy"}</strong>
             </p>
             <button
               type="button"

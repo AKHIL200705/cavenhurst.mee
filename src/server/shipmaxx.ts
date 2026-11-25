@@ -385,7 +385,7 @@ export async function createShipMaxxShipment(
       });
 
       try {
-        await (supabaseAdmin as any).from("shipment_tracking_events").insert({
+        await supabaseAdmin.from("shipment_tracking_events").insert({
           shipment_id: createdShipment?.id || null,
           order_id: params.orderId,
           awb_number: awbNumber,
@@ -644,10 +644,7 @@ export async function processShipMaxxWebhook(
     orderUpdatePayload.return_requested_at = new Date().toISOString();
   }
 
-  await supabaseAdmin
-    .from("orders")
-    .update(orderUpdatePayload)
-    .eq("awb_number", payload.awb);
+  await supabaseAdmin.from("orders").update(orderUpdatePayload).eq("awb_number", payload.awb);
 
   // Insert tracking checkpoint into legacy shipping_tracking
   await supabaseAdmin.from("shipping_tracking").insert({
@@ -663,7 +660,7 @@ export async function processShipMaxxWebhook(
 
   // Canonical insert into shipment_tracking_events
   try {
-    await (supabaseAdmin as any).from("shipment_tracking_events").insert({
+    await supabaseAdmin.from("shipment_tracking_events").insert({
       order_id: matchedOrder?.id || null,
       awb_number: payload.awb,
       status: payload.status,

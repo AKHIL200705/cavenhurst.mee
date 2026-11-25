@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { Session } from "@supabase/supabase-js";
 import { getDb } from "@/server/db";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import {
@@ -251,7 +252,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
     if (!synced) {
       // Seamless Supabase Admin REST client fallback
       try {
-        const { data: existingProfile } = await (supabaseAdmin as any)
+        const { data: existingProfile } = await supabaseAdmin
           .from("profiles")
           .select("id")
           .eq("email", emailLower)
@@ -261,7 +262,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
           authUserId = existingProfile.id;
         }
 
-        await (supabaseAdmin as any).from("profiles").upsert({
+        await supabaseAdmin.from("profiles").upsert({
           id: authUserId,
           email: emailLower,
           full_name: googleUser.name || "Customer",
@@ -271,7 +272,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
           updated_at: new Date().toISOString(),
         });
 
-        await (supabaseAdmin as any).from("customers").upsert({
+        await supabaseAdmin.from("customers").upsert({
           id: authUserId,
           auth_provider_uid: googleUser.sub,
           full_name: googleUser.name || "Customer",
@@ -283,7 +284,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
         });
 
         if (isAdmin) {
-          await (supabaseAdmin as any).from("admin_users").upsert({
+          await supabaseAdmin.from("admin_users").upsert({
             auth_user_id: authUserId,
             email: emailLower,
             full_name: googleUser.name || "Admin",
@@ -427,32 +428,63 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
       throw new Error("Please enter your registered 10-digit mobile number.");
     }
 
+    interface AuthUserSqlRow {
+      id: string;
+      email?: string | null;
+      raw_user_meta_data?: {
+        full_name?: string | null;
+        phone?: string | null;
+        mobile_number?: string | null;
+      } | null;
+    }
+    interface ProfileSqlRow {
+      full_name?: string | null;
+      phone?: string | null;
+      mobile_number?: string | null;
+    }
+    interface CustomerSqlRow {
+      full_name?: string | null;
+      phone?: string | null;
+    }
+
     const sql = getDb();
-    let authUser: any = null;
+    let authUser: AuthUserSqlRow | null = null;
     let registeredMobile = "";
     let userName = "Customer";
 
     if (sql) {
-      const [u] = await sql<any[]>`
+      const [u] = await sql<AuthUserSqlRow[]>`
         SELECT id, email, raw_user_meta_data FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
       `;
-      authUser = u;
+      authUser = u ?? null;
 
       if (authUser) {
-        const [prof] = await sql<any[]>`
+        const [prof] = await sql<ProfileSqlRow[]>`
           SELECT full_name, phone, mobile_number FROM public.profiles WHERE id = ${authUser.id} LIMIT 1
         `;
-        const [cust] = await sql<any[]>`
+        const [cust] = await sql<CustomerSqlRow[]>`
           SELECT full_name, phone FROM public.customers WHERE id = ${authUser.id}::uuid OR email = ${cleanEmail} LIMIT 1
         `;
 
-        userName = prof?.full_name || cust?.full_name || authUser.raw_user_meta_data?.full_name || "Customer";
-        const rawPhone = prof?.mobile_number || prof?.phone || cust?.phone || authUser.raw_user_meta_data?.phone || authUser.raw_user_meta_data?.mobile_number || "";
+        userName =
+          prof?.full_name ||
+          cust?.full_name ||
+          authUser.raw_user_meta_data?.full_name ||
+          "Customer";
+        const rawPhone =
+          prof?.mobile_number ||
+          prof?.phone ||
+          cust?.phone ||
+          authUser.raw_user_meta_data?.phone ||
+          authUser.raw_user_meta_data?.mobile_number ||
+          "";
         registeredMobile = rawPhone.replace(/\D/g, "").slice(-10);
 
         // If user already had a registered mobile number, enforce exact match
         if (registeredMobile && registeredMobile !== cleanMobile) {
-          throw new Error("The mobile number and email address do not match our registered records.");
+          throw new Error(
+            "The mobile number and email address do not match our registered records.",
+          );
         }
 
         // If user had no registered phone yet (e.g. legacy account), link it now
@@ -474,7 +506,7 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
     // Authenticate password with Supabase (with direct database cryptographic fallback)
     let authenticated = false;
     let authUserId = authUser?.id || "";
-    let supabaseSession: any = null;
+    let supabaseSession: Session | null = null;
 
     try {
       const { data: signInRes, error: signInErr } = await supabaseAdmin.auth.signInWithPassword({
@@ -494,7 +526,7 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
     // Direct Database Authentication Fallback (using pgcrypto crypt on auth.users)
     if (!authenticated && sql && authUser?.id) {
       try {
-        const [verified] = await sql<any[]>`
+        const [verified] = await sql<{ id: string; password_matches: boolean }[]>`
           SELECT id, (encrypted_password = crypt(${password}, encrypted_password)) AS password_matches
           FROM auth.users
           WHERE id = ${authUser.id}
@@ -557,7 +589,7 @@ export const sendForgotPasswordOtpServerFn = createServerFn({ method: "POST" })
 
     const sql = getDb();
     if (sql) {
-      const [u] = await sql<any[]>`
+      const [u] = await sql<{ id: string; email: string }[]>`
         SELECT id, email FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
       `;
       if (!u) {
@@ -565,12 +597,14 @@ export const sendForgotPasswordOtpServerFn = createServerFn({ method: "POST" })
       }
 
       if (cleanMobile) {
-        const [prof] = await sql<any[]>`
+        const [prof] = await sql<{ phone?: string | null; mobile_number?: string | null }[]>`
           SELECT phone, mobile_number FROM public.profiles WHERE id = ${u.id} LIMIT 1
         `;
         const raw = (prof?.mobile_number || prof?.phone || "").replace(/\D/g, "").slice(-10);
         if (raw && raw !== cleanMobile) {
-          throw new Error("The mobile number and email address do not match our registered records.");
+          throw new Error(
+            "The mobile number and email address do not match our registered records.",
+          );
         }
       }
     }
@@ -595,7 +629,9 @@ export const sendForgotPasswordOtpServerFn = createServerFn({ method: "POST" })
 
     if (!emailRes.success) {
       await deleteOtpRecord(cleanEmail, "forgot_password");
-      throw new Error(emailRes.error || "We couldn't send your verification code. Please try again.");
+      throw new Error(
+        emailRes.error || "We couldn't send your verification code. Please try again.",
+      );
     }
 
     return {
@@ -647,7 +683,7 @@ export const resetPasswordWithOtpServerFn = createServerFn({ method: "POST" })
     let userId = "";
 
     if (sql) {
-      const [u] = await sql<any[]>`
+      const [u] = await sql<{ id: string }[]>`
         SELECT id FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
       `;
       if (u) userId = u.id;
@@ -694,8 +730,11 @@ export const resetPasswordWithOtpServerFn = createServerFn({ method: "POST" })
       } else {
         console.warn("[Supabase Auth Admin Update Warning]:", updateErr.message);
       }
-    } catch (apiErr: any) {
-      console.warn("[Supabase Auth Admin API Notice]:", apiErr?.message);
+    } catch (apiErr: unknown) {
+      console.warn(
+        "[Supabase Auth Admin API Notice]:",
+        apiErr instanceof Error ? apiErr.message : String(apiErr),
+      );
     }
 
     if (!updated) {

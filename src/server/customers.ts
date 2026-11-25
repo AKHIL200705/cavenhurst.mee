@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
-import { getAuthenticatedCustomerId } from "./auth-helpers";
+import { getAuthenticatedCustomerId, isWhitelistedAdminEmail } from "./auth-helpers";
 
 /**
  * Server Function: Get customer addresses
@@ -55,7 +55,9 @@ export const getCustomerOrdersServerFn = createServerFn({ method: "POST" })
 
     const { data: orders, error } = await supabaseAdmin
       .from("orders")
-      .select("id,order_number,total,status,payment_status,shipment_status,awb_number,created_at,items")
+      .select(
+        "id,order_number,total,status,payment_status,shipment_status,awb_number,created_at,items",
+      )
       .or(orClauses.join(","))
       .order("created_at", { ascending: false });
 
@@ -284,7 +286,9 @@ export const checkProfileCompletionServerFn = createServerFn({ method: "POST" })
       (profile?.["phone"] as string | null) ||
       null;
     const cleanMobile = rawMobile ? rawMobile.replace(/\D/g, "").slice(-10) : null;
-    const hasValidName = Boolean(fullName && fullName.length >= 2 && fullName.toLowerCase() !== "customer");
+    const hasValidName = Boolean(
+      fullName && fullName.length >= 2 && fullName.toLowerCase() !== "customer",
+    );
     const hasValidMobile = Boolean(cleanMobile && cleanMobile.length === 10);
     const isCompleted = Boolean(profile?.["profile_completed"] || (hasValidName && hasValidMobile));
 
@@ -295,7 +299,7 @@ export const checkProfileCompletionServerFn = createServerFn({ method: "POST" })
       fullName,
       mobileNumber: cleanMobile,
       profileCompleted: isCompleted,
-      isAdmin: Boolean((auth as any).isAdmin),
+      isAdmin: isWhitelistedAdminEmail(auth.email),
     };
   });
 
@@ -327,7 +331,9 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
     const normalizedPhone = cleanDigits.length > 10 ? cleanDigits.slice(-10) : cleanDigits;
 
     if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
-      throw new Error("Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
+      throw new Error(
+        "Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
+      );
     }
 
     const sql = getDb();
@@ -375,8 +381,12 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
             updated_at = now();
         `;
         profileSaved = true;
-      } catch (err: any) {
-        if (err?.code === "23505" || err?.message?.includes("idx_profiles_mobile_number_unique")) {
+      } catch (err: unknown) {
+        const pgErr = err as { code?: string; message?: string };
+        if (
+          pgErr?.code === "23505" ||
+          pgErr?.message?.includes("idx_profiles_mobile_number_unique")
+        ) {
           throw new Error(
             "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
           );
@@ -386,17 +396,15 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
     }
 
     if (!profileSaved) {
-      const { error: upsertErr } = await (supabaseAdmin as any)
-        .from("profiles")
-        .upsert({
-          id: authUuid || auth.id,
-          email: cleanEmail,
-          full_name: trimmedName,
-          mobile_number: normalizedPhone,
-          phone: normalizedPhone,
-          profile_completed: true,
-          updated_at: new Date().toISOString(),
-        });
+      const { error: upsertErr } = await supabaseAdmin.from("profiles").upsert({
+        id: authUuid || auth.id,
+        email: cleanEmail,
+        full_name: trimmedName,
+        mobile_number: normalizedPhone,
+        phone: normalizedPhone,
+        profile_completed: true,
+        updated_at: new Date().toISOString(),
+      });
 
       if (upsertErr) {
         if (upsertErr.code === "23505" || upsertErr.message.includes("unique")) {
@@ -410,19 +418,17 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
 
     // 3. Mirror into public.customers for seamless order and address book synchronization
     try {
-      await supabaseAdmin
-        .from("customers")
-        .upsert(
-          {
-            auth_provider_uid: auth.id,
-            full_name: trimmedName,
-            email: cleanEmail,
-            phone: normalizedPhone,
-            account_status: "active",
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "auth_provider_uid" },
-        );
+      await supabaseAdmin.from("customers").upsert(
+        {
+          auth_provider_uid: auth.id,
+          full_name: trimmedName,
+          email: cleanEmail,
+          phone: normalizedPhone,
+          account_status: "active",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "auth_provider_uid" },
+      );
     } catch (custErr) {
       console.warn("[completeCustomerProfile] customers sync notice:", custErr);
     }
@@ -498,11 +504,14 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
 
         if (profile) {
           const fn = (profile["full_name"] as string | null) ?? null;
-          const mob = (profile["mobile_number"] as string | null) ?? (profile["phone"] as string | null) ?? null;
+          const mob =
+            (profile["mobile_number"] as string | null) ??
+            (profile["phone"] as string | null) ??
+            null;
           const cleanMob = mob ? mob.replace(/\D/g, "").slice(-10) : null;
           const isDone = Boolean(
             profile["profile_completed"] ||
-              (fn && fn.length >= 2 && fn !== "Customer" && cleanMob && cleanMob.length === 10),
+            (fn && fn.length >= 2 && fn !== "Customer" && cleanMob && cleanMob.length === 10),
           );
 
           return {
@@ -517,7 +526,8 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
         }
 
         const customerUuid =
-          auth.customerUuid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.customerUuid)
+          auth.customerUuid &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.customerUuid)
             ? auth.customerUuid
             : null;
 
@@ -533,7 +543,9 @@ export const getCustomerProfileServerFn = createServerFn({ method: "POST" })
           const cfn = (cust["full_name"] as string | null) ?? null;
           const cmob = (cust["phone"] as string | null) ?? null;
           const cleanCmob = cmob ? cmob.replace(/\D/g, "").slice(-10) : null;
-          const isDone = Boolean(cfn && cfn.length >= 2 && cfn !== "Customer" && cleanCmob && cleanCmob.length === 10);
+          const isDone = Boolean(
+            cfn && cfn.length >= 2 && cfn !== "Customer" && cleanCmob && cleanCmob.length === 10,
+          );
 
           return {
             id: cust["id"] as string,
@@ -589,7 +601,9 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
     const cleanPhone = rawPhone ? rawPhone.replace(/\D/g, "").slice(-10) : null;
 
     if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
-      throw new Error("Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.");
+      throw new Error(
+        "Please enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9.",
+      );
     }
 
     // Check duplicate mobile if changing phone
@@ -602,7 +616,9 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
         LIMIT 1
       `;
       if (dup && dup.length > 0) {
-        throw new Error("This mobile number is already registered with another CAVENHURST account.");
+        throw new Error(
+          "This mobile number is already registered with another CAVENHURST account.",
+        );
       }
     }
 
@@ -639,7 +655,8 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
     // 2. Update public.customers
     try {
       const customerUuid =
-        auth.customerUuid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.customerUuid)
+        auth.customerUuid &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(auth.customerUuid)
           ? auth.customerUuid
           : null;
 

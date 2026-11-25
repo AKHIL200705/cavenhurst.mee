@@ -151,8 +151,9 @@ async function handleAuthApiRoute(request: Request, url: URL): Promise<Response 
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ success: false, error: err?.message || "Failed to send verification code" }), {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to send verification code";
+      return new Response(JSON.stringify({ success: false, error: msg }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -167,8 +168,12 @@ async function handleAuthApiRoute(request: Request, url: URL): Promise<Response 
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ success: false, error: err?.message || "Invalid registration key. Please request a new verification code." }), {
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "Invalid registration key. Please request a new verification code.";
+      return new Response(JSON.stringify({ success: false, error: msg }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });
@@ -183,8 +188,9 @@ async function handleAuthApiRoute(request: Request, url: URL): Promise<Response 
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ success: false, error: err?.message || "Failed to resend verification code" }), {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to resend verification code";
+      return new Response(JSON.stringify({ success: false, error: msg }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       });

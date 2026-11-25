@@ -5,7 +5,9 @@ import { meta } from "@/components/site/InfoPage";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 
 export const Route = createFileRoute("/collections/$slug")({
-  loader: async ({ params }): Promise<{ slug: string; title: string; tagline: string; products: Product[] }> => {
+  loader: async ({
+    params,
+  }): Promise<{ slug: string; title: string; tagline: string; products: Product[] }> => {
     const c = COLLECTIONS[params.slug as CollectionSlug];
     if (!c) throw notFound();
 

@@ -1,7 +1,7 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 if (!match) {
   console.error("No DATABASE_URL found");
@@ -35,7 +35,7 @@ async function run() {
         tableStats.push({
           table: name,
           rows: parseInt(countRes[0].count, 10),
-          rls: rlsRes[0]?.relrowsecurity ? 'ENABLED' : 'DISABLED',
+          rls: rlsRes[0]?.relrowsecurity ? "ENABLED" : "DISABLED",
         });
       } catch (err) {
         tableStats.push({
@@ -55,9 +55,10 @@ async function run() {
     `;
     console.log(`\nFound ${authUsers.length} users in auth.users:`);
     for (const u of authUsers) {
-      console.log(`- ID: ${u.id}, Email: ${u.email}, Phone: ${u.phone}, Created: ${u.created_at}, LastSignIn: ${u.last_sign_in_at}`);
+      console.log(
+        `- ID: ${u.id}, Email: ${u.email}, Phone: ${u.phone}, Created: ${u.created_at}, LastSignIn: ${u.last_sign_in_at}`,
+      );
     }
-
   } catch (err) {
     console.error("Audit error:", err);
   } finally {

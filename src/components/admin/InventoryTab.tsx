@@ -87,7 +87,9 @@ export function InventoryTab({
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Live Warehouse Stock Matrix</h2>
+            <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+              Live Warehouse Stock Matrix
+            </h2>
             <p className="text-xs text-muted-foreground font-sans">
               Click any size figure to adjust stock levels with mandatory inventory movement
               tracking.
@@ -184,7 +186,9 @@ export function InventoryTab({
                 <span className="font-heading text-xs uppercase tracking-wider text-silver">
                   INVENTORY ADJUSTMENT
                 </span>
-                <h3 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">{selectedProduct.name}</h3>
+                <h3 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+                  {selectedProduct.name}
+                </h3>
                 <p className="text-xs text-muted-foreground">Adjusting Size {selectedSize}</p>
               </div>
               <button
@@ -248,7 +252,9 @@ export function InventoryTab({
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <History className="h-4 w-4 text-silver" />
-          <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">Recent Inventory Movements</h3>
+          <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
+            Recent Inventory Movements
+          </h3>
         </div>
 
         <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">

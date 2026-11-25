@@ -1,6 +1,14 @@
 import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowRight, Loader2, CheckCircle2, ShieldCheck, Phone, User, AlertCircle } from "lucide-react";
+import {
+  ArrowRight,
+  Loader2,
+  CheckCircle2,
+  ShieldCheck,
+  Phone,
+  User,
+  AlertCircle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WingMark } from "@/components/site/Logo";
 import { meta } from "@/components/site/InfoPage";
@@ -38,19 +46,13 @@ export function CompleteProfilePage() {
   // Pre-fill existing metadata if available
   useEffect(() => {
     if (user) {
-      const metaName =
-        user.user_metadata?.["full_name"] ||
-        user.user_metadata?.["name"] ||
-        "";
+      const metaName = user.user_metadata?.["full_name"] || user.user_metadata?.["name"] || "";
       if (typeof metaName === "string" && metaName && metaName.toLowerCase() !== "customer") {
         setFullName((prev) => (prev ? prev : metaName));
       }
 
       const metaPhone =
-        user.user_metadata?.["mobile_number"] ||
-        user.user_metadata?.["phone"] ||
-        user.phone ||
-        "";
+        user.user_metadata?.["mobile_number"] || user.user_metadata?.["phone"] || user.phone || "";
       if (metaPhone) {
         const clean = String(metaPhone).replace(/\D/g, "").slice(-10);
         if (clean.length === 10) {
@@ -124,7 +126,8 @@ export function CompleteProfilePage() {
         }, 600);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to update profile. Please try again.";
+      const msg =
+        err instanceof Error ? err.message : "Failed to update profile. Please try again.";
       setErrorMessage(msg);
       toast.error(msg);
     } finally {
@@ -211,7 +214,8 @@ export function CompleteProfilePage() {
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                Used strictly for delivery coordination and order dispatch notifications via SMS/WhatsApp.
+                Used strictly for delivery coordination and order dispatch notifications via
+                SMS/WhatsApp.
               </p>
             </div>
 
@@ -242,7 +246,8 @@ export function CompleteProfilePage() {
                 </>
               ) : (
                 <>
-                  CONTINUE <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  CONTINUE{" "}
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </>
               )}
             </Button>

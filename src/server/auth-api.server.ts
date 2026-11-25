@@ -8,11 +8,7 @@ import {
   deleteRegistrationSession,
   sendEmailJsOtp,
 } from "./otp";
-import {
-  isWhitelistedAdminEmail,
-  signSessionToken,
-  formatAuthUser,
-} from "./auth-helpers";
+import { isWhitelistedAdminEmail, signSessionToken, formatAuthUser } from "./auth-helpers";
 
 export interface SendRegistrationOtpData {
   fullName: string;
@@ -51,7 +47,9 @@ export async function executeSendRegistrationOtp(data: SendRegistrationOtpData) 
   }
 
   if (cleanPhone.length !== 10 || !/^[6-9]\d{9}$/.test(cleanPhone)) {
-    throw new Error("Please enter a valid 10-digit Indian mobile number (starting with 6, 7, 8, or 9).");
+    throw new Error(
+      "Please enter a valid 10-digit Indian mobile number (starting with 6, 7, 8, or 9).",
+    );
   }
 
   if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
@@ -69,14 +67,14 @@ export async function executeSendRegistrationOtp(data: SendRegistrationOtpData) 
   // Duplicate account verification
   const sql = getDb();
   if (sql) {
-    const [existingEmail] = await sql<any[]>`
+    const [existingEmail] = await sql<{ id: string }[]>`
       SELECT id FROM auth.users WHERE lower(email) = ${cleanEmail} LIMIT 1
     `;
     if (existingEmail) {
       throw new Error("An account with this email address already exists. Please log in.");
     }
 
-    const [existingPhone] = await sql<any[]>`
+    const [existingPhone] = await sql<{ id: string }[]>`
       SELECT id FROM public.profiles 
       WHERE right(regexp_replace(COALESCE(phone, mobile_number, ''), '\D', 'g'), 10) = ${cleanPhone}
       LIMIT 1
@@ -149,7 +147,9 @@ export async function executeVerifyRegistrationOtp(data: VerifyRegistrationOtpDa
   });
 
   if (!verifyRes.success || !verifyRes.record) {
-    throw new Error(verifyRes.error || "Invalid registration key. Please request a new verification code.");
+    throw new Error(
+      verifyRes.error || "Invalid registration key. Please request a new verification code.",
+    );
   }
 
   const { email: verifiedEmail, fullName, phone, password } = verifyRes.record;
@@ -322,7 +322,9 @@ export async function executeResendRegistrationOtp(data: ResendRegistrationOtpDa
   });
 
   if (!resendRes.success || !resendRes.email) {
-    throw new Error(resendRes.error || "Registration session has expired. Please start registration again.");
+    throw new Error(
+      resendRes.error || "Registration session has expired. Please start registration again.",
+    );
   }
 
   const emailRes = await sendEmailJsOtp({
@@ -351,42 +353,58 @@ export async function executeResendRegistrationOtp(data: ResendRegistrationOtpDa
 // REST API DISPATCHERS (POST /api/auth/send-otp, verify-otp, resend-otp, register)
 // -----------------------------------------------------------------------------
 
-export async function processSendOtpApi(body: Record<string, any>) {
-  const b = body as any;
+function strField(obj: Record<string, unknown>, ...keys: string[]): string {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === "string") return v;
+  }
+  return "";
+}
+
+export async function processSendOtpApi(body: Record<string, unknown>) {
   return await executeSendRegistrationOtp({
-    fullName: b.fullName || b.full_name || b.name || "",
-    phone: b.phone || b.mobile || b.mobileNumber || b.mobile_number || "",
-    email: b.email || b.to_email || "",
-    password: b.password || "",
-    confirmPassword: b.confirmPassword || b.confirm_password,
+    fullName: strField(body, "fullName", "full_name", "name"),
+    phone: strField(body, "phone", "mobile", "mobileNumber", "mobile_number"),
+    email: strField(body, "email", "to_email"),
+    password: strField(body, "password"),
+    confirmPassword:
+      typeof body["confirmPassword"] === "string"
+        ? body["confirmPassword"]
+        : typeof body["confirm_password"] === "string"
+          ? body["confirm_password"]
+          : undefined,
   });
 }
 
-export async function processVerifyOtpApi(body: Record<string, any>) {
-  const b = body as any;
+export async function processVerifyOtpApi(body: Record<string, unknown>) {
   return await executeVerifyRegistrationOtp({
     registrationKey:
-      b.registrationKey ||
-      b.registration_key ||
-      b.registrationId ||
-      b.registration_id ||
-      b.regKey ||
-      b.reg_key,
-    email: b.email || b.to_email,
-    otp: b.otp || b.code || b.passcode || "",
+      strField(
+        body,
+        "registrationKey",
+        "registration_key",
+        "registrationId",
+        "registration_id",
+        "regKey",
+        "reg_key",
+      ) || undefined,
+    email: strField(body, "email", "to_email") || undefined,
+    otp: strField(body, "otp", "code", "passcode"),
   });
 }
 
-export async function processResendOtpApi(body: Record<string, any>) {
-  const b = body as any;
+export async function processResendOtpApi(body: Record<string, unknown>) {
   return await executeResendRegistrationOtp({
     registrationKey:
-      b.registrationKey ||
-      b.registration_key ||
-      b.registrationId ||
-      b.registration_id ||
-      b.regKey ||
-      b.reg_key,
-    email: b.email || b.to_email,
+      strField(
+        body,
+        "registrationKey",
+        "registration_key",
+        "registrationId",
+        "registration_id",
+        "regKey",
+        "reg_key",
+      ) || undefined,
+    email: strField(body, "email", "to_email") || undefined,
   });
 }

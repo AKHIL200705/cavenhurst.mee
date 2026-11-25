@@ -1,14 +1,14 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const dbUrlMatch = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const supabaseUrlMatch = env.match(/VITE_SUPABASE_URL="?([^\r\n"]+)"?/);
 const supabaseKeyMatch = env.match(/VITE_SUPABASE_PUBLISHABLE_KEY="?([^\r\n"]+)"?/);
 
-const dbUrl = dbUrlMatch ? dbUrlMatch[1] : '';
-const supabaseUrl = supabaseUrlMatch ? supabaseUrlMatch[1] : '';
-const supabaseKey = supabaseKeyMatch ? supabaseKeyMatch[1] : '';
+const dbUrl = dbUrlMatch ? dbUrlMatch[1] : "";
+const supabaseUrl = supabaseUrlMatch ? supabaseUrlMatch[1] : "";
+const supabaseKey = supabaseKeyMatch ? supabaseKeyMatch[1] : "";
 
 async function probe() {
   console.log("=== SUPABASE LIVE CONNECTIVITY PROBE ===");
@@ -19,16 +19,19 @@ async function probe() {
   console.log("\n[1/3] Testing PostgreSQL Database Connection...");
   try {
     const sql = postgres(dbUrl, { ssl: { rejectUnauthorized: false }, connect_timeout: 5 });
-    const [timeRes] = await sql`SELECT NOW() as live_db_time, current_database() as db_name, version() as pg_version`;
+    const [timeRes] =
+      await sql`SELECT NOW() as live_db_time, current_database() as db_name, version() as pg_version`;
     console.log("  ✔ PostgreSQL Status: CONNECTED");
     console.log("  ✔ Live Database Time:", timeRes.live_db_time);
     console.log("  ✔ Database Name:", timeRes.db_name);
-    console.log("  ✔ Engine Version:", timeRes.pg_version.split(',')[0]);
+    console.log("  ✔ Engine Version:", timeRes.pg_version.split(",")[0]);
 
     const [{ count: productCount }] = await sql`SELECT COUNT(*) FROM public.products`;
     const [{ count: orderCount }] = await sql`SELECT COUNT(*) FROM public.orders`;
     const [{ count: customerCount }] = await sql`SELECT COUNT(*) FROM public.customers`;
-    console.log(`  ✔ Table Access Verified: ${productCount} products, ${orderCount} orders, ${customerCount} customers.`);
+    console.log(
+      `  ✔ Table Access Verified: ${productCount} products, ${orderCount} orders, ${customerCount} customers.`,
+    );
     await sql.end();
   } catch (err) {
     console.error("  ✖ PostgreSQL Connection Failed:", err.message);
@@ -37,16 +40,19 @@ async function probe() {
   // 2. Test Supabase REST API
   console.log("\n[2/3] Testing Supabase REST API (via Publishable Key)...");
   try {
-    const res = await fetch(`${supabaseUrl}/rest/v1/products?select=name,price,category_slug&limit=3`, {
-      headers: {
-        'apikey': supabaseKey,
-        'Authorization': `Bearer ${supabaseKey}`
-      }
-    });
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/products?select=name,price,category_slug&limit=3`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
     console.log(`  ✔ REST API Status: HTTP ${res.status} ${res.statusText}`);
     const data = await res.json();
     console.log(`  ✔ Successfully retrieved ${data.length} sample products via REST:`);
-    data.forEach(p => console.log(`     - ${p.name} (₹${p.price}) in [${p.category_slug}]`));
+    data.forEach((p) => console.log(`     - ${p.name} (₹${p.price}) in [${p.category_slug}]`));
   } catch (err) {
     console.error("  ✖ REST API Failed:", err.message);
   }
@@ -56,12 +62,15 @@ async function probe() {
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/settings`, {
       headers: {
-        'apikey': supabaseKey
-      }
+        apikey: supabaseKey,
+      },
     });
     console.log(`  ✔ Auth Service Status: HTTP ${res.status} ${res.statusText}`);
     const settings = await res.json();
-    console.log("  ✔ Auth Service Online. External providers enabled:", Object.keys(settings.external || {}));
+    console.log(
+      "  ✔ Auth Service Online. External providers enabled:",
+      Object.keys(settings.external || {}),
+    );
   } catch (err) {
     console.error("  ✖ Auth Service Failed:", err.message);
   }

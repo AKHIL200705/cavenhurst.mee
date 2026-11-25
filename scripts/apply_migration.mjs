@@ -1,24 +1,27 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const dbUrl = match ? match[1] : process.env.DATABASE_URL;
 
-console.log('Connecting to PostgreSQL database...');
+console.log("Connecting to PostgreSQL database...");
 const sql = postgres(dbUrl, { ssl: { rejectUnauthorized: false } });
 
 async function run() {
   try {
-    console.log('Reading migration SQL...');
-    const migrationSql = fs.readFileSync('supabase/migrations/20261116000001_full_production_schema.sql', 'utf8');
+    console.log("Reading migration SQL...");
+    const migrationSql = fs.readFileSync(
+      "supabase/migrations/20261116000001_full_production_schema.sql",
+      "utf8",
+    );
 
-    console.log('Applying migration...');
+    console.log("Applying migration...");
     await sql.unsafe(migrationSql);
-    console.log('Migration executed successfully!');
+    console.log("Migration executed successfully!");
 
     // 1. Sync admin users
-    console.log('Syncing admin users...');
+    console.log("Syncing admin users...");
     await sql`
       INSERT INTO public.admin_users (email, full_name, role, permissions, is_active)
       VALUES 
@@ -32,12 +35,12 @@ async function run() {
     `;
 
     // 2. Sync existing customer profiles into customers & customer_auth_providers
-    console.log('Syncing customers from customer_profiles...');
+    console.log("Syncing customers from customer_profiles...");
     const profiles = await sql`SELECT * FROM public.customer_profiles`;
     for (const p of profiles) {
       const [cust] = await sql`
         INSERT INTO public.customers (auth_provider_uid, full_name, phone, profile_image, account_status)
-        VALUES (${p.id}, ${p.full_name || 'Customer'}, ${p.phone || null}, ${p.avatar_url || null}, 'active')
+        VALUES (${p.id}, ${p.full_name || "Customer"}, ${p.phone || null}, ${p.avatar_url || null}, 'active')
         ON CONFLICT (auth_provider_uid) DO UPDATE SET
           full_name = COALESCE(EXCLUDED.full_name, customers.full_name),
           phone = COALESCE(EXCLUDED.phone, customers.phone),
@@ -56,7 +59,7 @@ async function run() {
     }
 
     // 3. Populate product_variants and product_images from existing products
-    console.log('Populating product variants & images for existing products...');
+    console.log("Populating product variants & images for existing products...");
     const products = await sql`SELECT * FROM public.products`;
     for (const prod of products) {
       // Images
@@ -78,14 +81,17 @@ async function run() {
 
       // Stock & Variants
       // prod.stock is e.g. {"S": 10, "M": 15, "L": 12, "XL": 8}
-      const stockObj = prod.stock || { "M": 10, "L": 10 };
-      const colors = Array.isArray(prod.colors) && prod.colors.length > 0 ? prod.colors : [{ name: 'Default', hex: '#1C1917' }];
+      const stockObj = prod.stock || { M: 10, L: 10 };
+      const colors =
+        Array.isArray(prod.colors) && prod.colors.length > 0
+          ? prod.colors
+          : [{ name: "Default", hex: "#1C1917" }];
 
       for (const [size, qty] of Object.entries(stockObj)) {
         for (const col of colors) {
-          const colorName = typeof col === 'string' ? col : col.name || 'Default';
-          const colorHex = typeof col === 'string' ? null : col.hex || null;
-          const sku = `${prod.slug}-${size}-${colorName}`.toLowerCase().replace(/[^a-z0-9-]/g, '');
+          const colorName = typeof col === "string" ? col : col.name || "Default";
+          const colorHex = typeof col === "string" ? null : col.hex || null;
+          const sku = `${prod.slug}-${size}-${colorName}`.toLowerCase().replace(/[^a-z0-9-]/g, "");
 
           const [variant] = await sql`
             INSERT INTO public.product_variants (product_id, sku, size, color, color_hex, stock_quantity, is_available)
@@ -111,7 +117,7 @@ async function run() {
     }
 
     // 4. Seed Site Settings
-    console.log('Seeding site settings...');
+    console.log("Seeding site settings...");
     await sql`
       INSERT INTO public.site_settings (key, value, description)
       VALUES 
@@ -124,7 +130,7 @@ async function run() {
     `;
 
     // 5. Seed Banners
-    console.log('Seeding initial banners...');
+    console.log("Seeding initial banners...");
     const bannerCount = await sql`SELECT count(*) FROM public.banners`;
     if (parseInt(bannerCount[0].count) === 0) {
       await sql`
@@ -136,7 +142,7 @@ async function run() {
     }
 
     // 6. Verify all 30+ tables
-    console.log('\n--- VERIFYING ALL TABLES IN DATABASE ---');
+    console.log("\n--- VERIFYING ALL TABLES IN DATABASE ---");
     const tableList = await sql`
       SELECT table_name 
       FROM information_schema.tables 
@@ -144,7 +150,7 @@ async function run() {
       ORDER BY table_name;
     `;
     console.log(`Total public tables: ${tableList.length}`);
-    console.log(tableList.map(t => t.table_name));
+    console.log(tableList.map((t) => t.table_name));
 
     // 7. Verify counts
     const counts = {};
@@ -153,14 +159,13 @@ async function run() {
         const c = await sql.unsafe(`SELECT count(*) FROM public."${t.table_name}"`);
         counts[t.table_name] = parseInt(c[0].count);
       } catch (e) {
-        counts[t.table_name] = 'err';
+        counts[t.table_name] = "err";
       }
     }
-    console.log('\nRow counts across tables:');
+    console.log("\nRow counts across tables:");
     console.log(JSON.stringify(counts, null, 2));
-
   } catch (err) {
-    console.error('Error applying migration:', err);
+    console.error("Error applying migration:", err);
     process.exit(1);
   } finally {
     await sql.end();

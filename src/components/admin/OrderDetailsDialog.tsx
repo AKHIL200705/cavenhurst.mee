@@ -236,7 +236,9 @@ export function OrderDetailsDialog({
                 {order.order_number || order.id.slice(0, 8)}
               </span>
             </div>
-            <h2 className="mt-1 font-heading text-xl sm:text-2xl font-bold uppercase tracking-tight text-foreground">Order Fulfillment & Payment Docket</h2>
+            <h2 className="mt-1 font-heading text-xl sm:text-2xl font-bold uppercase tracking-tight text-foreground">
+              Order Fulfillment & Payment Docket
+            </h2>
             <p className="text-xs text-muted-foreground">
               Placed on {new Date(order.created_at).toLocaleString()}
             </p>
@@ -438,7 +440,8 @@ export function OrderDetailsDialog({
         <div className="space-y-3 rounded-xl border border-border bg-background/40 p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-brand text-silver">
-              <History className="h-4 w-4 text-electric" /> Order Lifecycle & Audit Trail ({history.length})
+              <History className="h-4 w-4 text-electric" /> Order Lifecycle & Audit Trail (
+              {history.length})
             </div>
             {order.awb_number && tracking.length > 0 && (
               <span className="text-[11px] font-mono text-muted-foreground">
@@ -470,7 +473,9 @@ export function OrderDetailsDialog({
                         </span>
                       )}
                     </div>
-                    {h.comment && <p className="text-muted-foreground leading-relaxed">{h.comment}</p>}
+                    {h.comment && (
+                      <p className="text-muted-foreground leading-relaxed">{h.comment}</p>
+                    )}
                   </div>
                 </div>
               ))}
@@ -485,7 +490,10 @@ export function OrderDetailsDialog({
               </div>
               <div className="grid gap-2 sm:grid-cols-2">
                 {tracking.map((t, idx) => (
-                  <div key={t.id || idx} className="rounded-lg border border-border/70 bg-card/60 p-2 text-[11px] space-y-0.5">
+                  <div
+                    key={t.id || idx}
+                    className="rounded-lg border border-border/70 bg-card/60 p-2 text-[11px] space-y-0.5"
+                  >
                     <div className="flex items-center justify-between font-mono font-bold text-foreground">
                       <span>{t.status}</span>
                       <span className="text-muted-foreground text-[10px]">
@@ -493,7 +501,9 @@ export function OrderDetailsDialog({
                       </span>
                     </div>
                     {t.location && <p className="text-muted-foreground">{t.location}</p>}
-                    {t.details && <p className="text-muted-foreground italic text-[10px]">{t.details}</p>}
+                    {t.details && (
+                      <p className="text-muted-foreground italic text-[10px]">{t.details}</p>
+                    )}
                   </div>
                 ))}
               </div>

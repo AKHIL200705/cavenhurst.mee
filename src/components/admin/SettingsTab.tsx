@@ -80,7 +80,9 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Store Logistics & Dispatch Hub Settings</h2>
+        <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+          Store Logistics & Dispatch Hub Settings
+        </h2>
         <p className="text-xs text-muted-foreground font-sans">
           Origin coordinates used by ShipMaxx360 to compute live distance-based courier rates and
           schedule automated courier pickups.

@@ -1394,10 +1394,12 @@ export type Database = {
           id: string;
           email: string | null;
           phone: string | null;
+          mobile_number: string | null;
           full_name: string | null;
           avatar_url: string | null;
           auth_provider: string | null;
           account_status: string;
+          profile_completed: boolean | null;
           created_at: string;
           updated_at: string;
         };
@@ -1405,10 +1407,12 @@ export type Database = {
           id: string;
           email?: string | null;
           phone?: string | null;
+          mobile_number?: string | null;
           full_name?: string | null;
           avatar_url?: string | null;
           auth_provider?: string | null;
           account_status?: string;
+          profile_completed?: boolean | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -1416,10 +1420,12 @@ export type Database = {
           id?: string | null;
           email?: string | null;
           phone?: string | null;
+          mobile_number?: string | null;
           full_name?: string | null;
           avatar_url?: string | null;
           auth_provider?: string | null;
           account_status?: string | null;
+          profile_completed?: boolean | null;
           created_at?: string | null;
           updated_at?: string | null;
         };
@@ -2007,17 +2013,70 @@ export type Database = {
         };
         Relationships: [];
       };
+      payment_refunds: {
+        Row: {
+          id: string;
+          order_id: string | null;
+          payment_id: string | null;
+          razorpay_payment_id: string | null;
+          razorpay_refund_id: string | null;
+          amount: number;
+          amount_paise: number | null;
+          currency: string | null;
+          reason: string | null;
+          status: string | null;
+          admin_user_id: string | null;
+          raw_response: Json | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          order_id?: string | null;
+          payment_id?: string | null;
+          razorpay_payment_id?: string | null;
+          razorpay_refund_id?: string | null;
+          amount: number;
+          amount_paise?: number | null;
+          currency?: string | null;
+          reason?: string | null;
+          status?: string | null;
+          admin_user_id?: string | null;
+          raw_response?: Json | null;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          order_id?: string | null;
+          payment_id?: string | null;
+          razorpay_payment_id?: string | null;
+          razorpay_refund_id?: string | null;
+          amount?: number;
+          amount_paise?: number | null;
+          currency?: string | null;
+          reason?: string | null;
+          status?: string | null;
+          admin_user_id?: string | null;
+          raw_response?: Json | null;
+          created_at?: string | null;
+        };
+        Relationships: [];
+      };
     };
-    Views: {};
-    Functions: {};
-    Enums: {};
-    CompositeTypes: {};
+    Views: Record<string, never>;
+    Functions: Record<string, never>;
+    Enums: Record<string, never>;
+    CompositeTypes: Record<string, never>;
   };
 };
 
 type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">;
 type DefaultSchema = DatabaseWithoutInternals["public"];
 
-export type Tables<TableName extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])> = (DefaultSchema["Tables"] & DefaultSchema["Views"])[TableName] extends { Row: infer R } ? R : never;
-export type TablesInsert<TableName extends keyof DefaultSchema["Tables"]> = DefaultSchema["Tables"][TableName] extends { Insert: infer I } ? I : never;
-export type TablesUpdate<TableName extends keyof DefaultSchema["Tables"]> = DefaultSchema["Tables"][TableName] extends { Update: infer U } ? U : never;
+export type Tables<TableName extends keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])> =
+  (DefaultSchema["Tables"] & DefaultSchema["Views"])[TableName] extends { Row: infer R }
+    ? R
+    : never;
+export type TablesInsert<TableName extends keyof DefaultSchema["Tables"]> =
+  DefaultSchema["Tables"][TableName] extends { Insert: infer I } ? I : never;
+export type TablesUpdate<TableName extends keyof DefaultSchema["Tables"]> =
+  DefaultSchema["Tables"][TableName] extends { Update: infer U } ? U : never;

@@ -11,7 +11,7 @@ export interface CartItemData {
   id?: string;
   name?: string;
   price?: number;
-  image?: string | null;
+  image?: string | null | undefined;
   maxStock?: number;
 }
 
@@ -116,7 +116,8 @@ async function getOrCreateWishlist(customerUuid?: string, authUid?: string): Pro
 async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
   const { data: items, error } = await supabaseAdmin
     .from("cart_items")
-    .select(`
+    .select(
+      `
       id,
       product_id,
       variant_id,
@@ -133,7 +134,8 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
         stock,
         images
       )
-    `)
+    `,
+    )
     .eq("cart_id", cartId)
     .order("added_at", { ascending: true });
 
@@ -142,21 +144,40 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
     return [];
   }
 
-  return items.map((row: any) => {
+  interface CartItemJoinRow {
+    id: string;
+    product_id: string | null;
+    product_slug: string | null;
+    size: string | null;
+    color: string | null;
+    quantity: number;
+    unit_price: number | null;
+    products: {
+      id: string;
+      slug: string;
+      name: string;
+      price: number;
+      stock: Record<string, number> | null;
+      images: string[] | null;
+    } | null;
+  }
+
+  return (items as unknown as CartItemJoinRow[]).map((row) => {
     const prod = row.products;
     const stockObj = (prod?.stock || {}) as Record<string, number>;
-    const maxStock = stockObj[row.size] ?? 0;
+    const sizeKey = row.size || "M";
+    const maxStock = stockObj[sizeKey] ?? 0;
     const qty = Math.max(1, Math.min(row.quantity, maxStock > 0 ? maxStock : row.quantity));
 
     return {
       id: row.id,
-      slug: row.product_slug || prod?.slug,
+      slug: row.product_slug || prod?.slug || "",
       size: (row.size as Size) || "M",
       color: row.color || "Default",
       qty,
       name: prod?.name || "Apparel Item",
       price: row.unit_price || prod?.price || 0,
-      image: prod?.images && prod.images.length > 0 ? prod.images[0] : null,
+      image: prod?.images?.[0] ?? null,
       maxStock,
     };
   });
@@ -168,17 +189,24 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
 async function getWishlistFromDb(wishlistId: string): Promise<string[]> {
   const { data: items, error } = await supabaseAdmin
     .from("wishlist_items")
-    .select(`
+    .select(
+      `
       product_id,
       products ( slug )
-    `)
+    `,
+    )
     .eq("wishlist_id", wishlistId);
 
   if (error || !items) {
     return [];
   }
 
-  return items.map((row: any) => row.products?.slug).filter(Boolean);
+  interface WishlistJoinRow {
+    products: { slug?: string | null } | null;
+  }
+  return (items as unknown as WishlistJoinRow[])
+    .map((row) => row.products?.slug)
+    .filter((s): s is string => Boolean(s));
 }
 
 /**

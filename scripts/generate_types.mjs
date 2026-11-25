@@ -1,36 +1,36 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const dbUrl = match ? match[1] : process.env.DATABASE_URL;
 
 const sql = postgres(dbUrl, { ssl: { rejectUnauthorized: false } });
 
 function mapPgTypeToTs(udt, dataType, isArray) {
-  if (isArray || dataType === 'ARRAY') return 'string[]';
+  if (isArray || dataType === "ARRAY") return "string[]";
   switch (udt) {
-    case 'uuid':
-    case 'text':
-    case 'varchar':
-    case 'timestamptz':
-    case 'timestamp':
-    case 'date':
-      return 'string';
-    case 'int2':
-    case 'int4':
-    case 'int8':
-    case 'numeric':
-    case 'float4':
-    case 'float8':
-      return 'number';
-    case 'bool':
-      return 'boolean';
-    case 'json':
-    case 'jsonb':
-      return 'Json';
+    case "uuid":
+    case "text":
+    case "varchar":
+    case "timestamptz":
+    case "timestamp":
+    case "date":
+      return "string";
+    case "int2":
+    case "int4":
+    case "int8":
+    case "numeric":
+    case "float4":
+    case "float8":
+      return "number";
+    case "bool":
+      return "boolean";
+    case "json":
+    case "jsonb":
+      return "Json";
     default:
-      return 'any';
+      return "any";
   }
 }
 
@@ -69,8 +69,8 @@ async function run() {
       // Row
       out += `        Row: {\n`;
       for (const col of cols) {
-        const tsType = mapPgTypeToTs(col.udt_name, col.data_type, col.data_type === 'ARRAY');
-        const nullable = col.is_nullable === 'YES' ? ' | null' : '';
+        const tsType = mapPgTypeToTs(col.udt_name, col.data_type, col.data_type === "ARRAY");
+        const nullable = col.is_nullable === "YES" ? " | null" : "";
         out += `          ${col.column_name}: ${tsType}${nullable};\n`;
       }
       out += `        };\n`;
@@ -78,9 +78,9 @@ async function run() {
       // Insert
       out += `        Insert: {\n`;
       for (const col of cols) {
-        const tsType = mapPgTypeToTs(col.udt_name, col.data_type, col.data_type === 'ARRAY');
-        const optional = col.is_nullable === 'YES' || col.column_default !== null ? '?:' : ':';
-        const nullable = col.is_nullable === 'YES' ? ' | null' : '';
+        const tsType = mapPgTypeToTs(col.udt_name, col.data_type, col.data_type === "ARRAY");
+        const optional = col.is_nullable === "YES" || col.column_default !== null ? "?:" : ":";
+        const nullable = col.is_nullable === "YES" ? " | null" : "";
         out += `          ${col.column_name}${optional} ${tsType}${nullable};\n`;
       }
       out += `        };\n`;
@@ -88,7 +88,7 @@ async function run() {
       // Update
       out += `        Update: {\n`;
       for (const col of cols) {
-        const tsType = mapPgTypeToTs(col.udt_name, col.data_type, col.data_type === 'ARRAY');
+        const tsType = mapPgTypeToTs(col.udt_name, col.data_type, col.data_type === "ARRAY");
         out += `          ${col.column_name}?: ${tsType} | null;\n`;
       }
       out += `        };\n`;
@@ -103,10 +103,14 @@ async function run() {
     out += `export type TablesInsert<TableName extends keyof DefaultSchema["Tables"]> = DefaultSchema["Tables"][TableName] extends { Insert: infer I } ? I : never;\n`;
     out += `export type TablesUpdate<TableName extends keyof DefaultSchema["Tables"]> = DefaultSchema["Tables"][TableName] extends { Update: infer U } ? U : never;\n`;
 
-    fs.writeFileSync('src/integrations/supabase/types.ts', out, 'utf8');
-    console.log('Successfully generated src/integrations/supabase/types.ts for all', tables.length, 'tables!');
+    fs.writeFileSync("src/integrations/supabase/types.ts", out, "utf8");
+    console.log(
+      "Successfully generated src/integrations/supabase/types.ts for all",
+      tables.length,
+      "tables!",
+    );
   } catch (err) {
-    console.error('Error generating types:', err);
+    console.error("Error generating types:", err);
   } finally {
     await sql.end();
   }

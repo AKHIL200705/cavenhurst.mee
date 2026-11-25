@@ -113,6 +113,7 @@ export function ProductCard({ p, layout = "grid" }: { p: Product; layout?: "grid
             key={color}
             alt={`${p.name} in ${color}`}
             loading="lazy"
+            decoding="async"
             width={800}
             height={1000}
             className="product-image h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-105"

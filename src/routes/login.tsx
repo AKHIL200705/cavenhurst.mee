@@ -118,9 +118,10 @@ function Login() {
 
   const { setGoogleSession, refreshProfile } = useAuth();
   const search = useSearch({ strict: false });
-  const returnTo = typeof (search as Record<string, unknown>)?.["returnTo"] === "string"
-    ? ((search as Record<string, unknown>)["returnTo"] as string)
-    : undefined;
+  const returnTo =
+    typeof (search as Record<string, unknown>)?.["returnTo"] === "string"
+      ? ((search as Record<string, unknown>)["returnTo"] as string)
+      : undefined;
   const navigate = useNavigate();
   const otpInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -340,7 +341,10 @@ function Login() {
         setTimeout(() => otpInputRefs.current[0]?.focus(), 100);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "We couldn't send your verification code. Please try again.";
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "We couldn't send your verification code. Please try again.";
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -395,7 +399,8 @@ function Login() {
         await handlePostLoginRedirect(Boolean(res.isAdmin));
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Verification failed. Please check your code.";
+      const msg =
+        err instanceof Error ? err.message : "Verification failed. Please check your code.";
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -440,7 +445,10 @@ function Login() {
         otpInputRefs.current[0]?.focus();
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "We couldn't send your verification code. Please try again.";
+      const msg =
+        err instanceof Error
+          ? err.message
+          : "We couldn't send your verification code. Please try again.";
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -490,7 +498,8 @@ function Login() {
         await handlePostLoginRedirect(Boolean(res.isAdmin));
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Sign in failed. Please verify your details.";
+      const msg =
+        err instanceof Error ? err.message : "Sign in failed. Please verify your details.";
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -580,11 +589,7 @@ function Login() {
   };
 
   // Handle digit box input changes
-  const handleOtpChange = (
-    index: number,
-    value: string,
-    isForgot: boolean = false,
-  ) => {
+  const handleOtpChange = (index: number, value: string, isForgot: boolean = false) => {
     const cleanDigit = value.replace(/\D/g, "").slice(-1);
     const stateSetter = isForgot ? setForgotOtp : setOtpDigits;
 
@@ -612,10 +617,7 @@ function Login() {
     }
   };
 
-  const handleOtpPaste = (
-    e: React.ClipboardEvent<HTMLInputElement>,
-    isForgot: boolean = false,
-  ) => {
+  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>, isForgot: boolean = false) => {
     e.preventDefault();
     const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
     if (!pasted) return;
@@ -738,7 +740,9 @@ function Login() {
                     <input
                       type="tel"
                       value={forgotPhone}
-                      onChange={(e) => setForgotPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                      onChange={(e) =>
+                        setForgotPhone(e.target.value.replace(/\D/g, "").slice(0, 10))
+                      }
                       placeholder="Registered 10-Digit Mobile"
                       className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
                     />
@@ -765,7 +769,8 @@ function Login() {
               ) : (
                 <form onSubmit={handleCompletePasswordReset} className="space-y-3.5">
                   <div className="rounded-xl border border-border bg-background/40 p-3 text-center text-xs text-muted-foreground">
-                    Code sent to <span className="font-semibold text-foreground">{forgotEmail}</span>
+                    Code sent to{" "}
+                    <span className="font-semibold text-foreground">{forgotEmail}</span>
                   </div>
 
                   {/* 6 Digit Input Boxes */}
@@ -805,7 +810,11 @@ function Login() {
                       onClick={() => setShowForgotNewPassword(!showForgotNewPassword)}
                       className="text-muted-foreground hover:text-foreground"
                     >
-                      {showForgotNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {showForgotNewPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
 
@@ -886,7 +895,12 @@ function Login() {
                 <div className="flex items-center justify-between text-xs text-muted-foreground pt-1">
                   <span>
                     Expires in:{" "}
-                    <span className={cn("font-mono font-bold", otpTimerSec < 60 ? "text-red-400" : "text-foreground")}>
+                    <span
+                      className={cn(
+                        "font-mono font-bold",
+                        otpTimerSec < 60 ? "text-red-400" : "text-foreground",
+                      )}
+                    >
                       {formatTimer(otpTimerSec)}
                     </span>
                   </span>
@@ -1037,7 +1051,11 @@ function Login() {
                   onClick={() => setShowRegConfirmPassword(!showRegConfirmPassword)}
                   className="text-muted-foreground hover:text-foreground"
                 >
-                  {showRegConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showRegConfirmPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
                 </button>
               </div>
 

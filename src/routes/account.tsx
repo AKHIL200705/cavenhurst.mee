@@ -261,7 +261,9 @@ function Account() {
           isDefault: addressForm.isDefault,
         },
       });
-      toast.success(editingAddressId ? "Address updated successfully" : "Address added to address book");
+      toast.success(
+        editingAddressId ? "Address updated successfully" : "Address added to address book",
+      );
       resetForm();
       await loadData();
     } catch (err) {
@@ -341,7 +343,9 @@ function Account() {
   if (!user)
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 font-sans">
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">My Account</h1>
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">
+          My Account
+        </h1>
         <p className="mt-3 text-muted-foreground">
           Sign in to see your saved bag, wishlist and orders on any device.
         </p>
@@ -359,7 +363,9 @@ function Account() {
     <div className="mx-auto max-w-5xl space-y-12 px-4 py-16">
       <div className="flex flex-wrap items-end justify-between gap-4 font-sans">
         <div>
-          <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">My Account</h1>
+          <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">
+            My Account
+          </h1>
           <p className="mt-2 font-medium text-silver">{name}</p>
         </div>
         <div className="flex items-center gap-3">
@@ -387,7 +393,9 @@ function Account() {
       <section className="rounded-2xl border border-border bg-card p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">ACCOUNT DETAILS</h2>
+            <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">
+              ACCOUNT DETAILS
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Your registered email, name, and contact information.
             </p>
@@ -442,7 +450,11 @@ function Account() {
                 disabled={savingProfile}
                 className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-xs font-bold text-primary-foreground disabled:opacity-50"
               >
-                {savingProfile ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                {savingProfile ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Check className="h-3.5 w-3.5" />
+                )}
                 Save Changes
               </button>
               <button
@@ -462,18 +474,25 @@ function Account() {
             </div>
             <div className="rounded-xl border border-border/60 bg-background/50 p-3">
               <span className="text-xs text-muted-foreground">Email Address</span>
-              <p className="mt-1 font-semibold">{profileData.email || user.email || "No email registered"}</p>
+              <p className="mt-1 font-semibold">
+                {profileData.email || user.email || "No email registered"}
+              </p>
             </div>
             <div className="rounded-xl border border-border/60 bg-background/50 p-3">
               <span className="text-xs text-muted-foreground">Phone Number</span>
-              <p className="mt-1 font-semibold">{profileData.phone || user.phone || "Not provided"}</p>
+              <p className="mt-1 font-semibold">
+                {profileData.phone || user.phone || "Not provided"}
+              </p>
             </div>
           </div>
         )}
 
         {!profileData.email && !user.email && (
           <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex items-center justify-between gap-3">
-            <span>Please add your email address so you can receive order confirmations and invoice receipts.</span>
+            <span>
+              Please add your email address so you can receive order confirmations and invoice
+              receipts.
+            </span>
             {!isEditingProfile && (
               <button
                 onClick={() => setIsEditingProfile(true)}
@@ -489,7 +508,9 @@ function Account() {
       {/* SAVED BAG */}
       <section>
         <div className="mb-4 flex justify-between">
-          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">SAVED BAG ({cart.length})</h2>
+          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">
+            SAVED BAG ({cart.length})
+          </h2>
           <Link to="/cart" className="text-sm underline">
             Open bag
           </Link>
@@ -537,7 +558,9 @@ function Account() {
       {/* WISHLIST */}
       <section>
         <div className="mb-4 flex justify-between">
-          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">WISHLIST ({wishlist.length})</h2>
+          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">
+            WISHLIST ({wishlist.length})
+          </h2>
           <Link to="/wishlist" className="text-sm underline">
             View all
           </Link>
@@ -569,7 +592,9 @@ function Account() {
       {/* SAVED ADDRESSES */}
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">SAVED ADDRESSES ({addresses.length})</h2>
+          <h2 className="font-heading text-base font-bold uppercase tracking-wider text-foreground">
+            SAVED ADDRESSES ({addresses.length})
+          </h2>
           {!showAddressForm && (
             <button
               onClick={() => {
@@ -613,7 +638,9 @@ function Account() {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-muted-foreground">Mobile Phone *</label>
+                <label className="text-xs font-semibold text-muted-foreground">
+                  Mobile Phone *
+                </label>
                 <input
                   required
                   type="tel"
@@ -714,12 +741,16 @@ function Account() {
 
         {addresses.length === 0 && !showAddressForm ? (
           <p className="text-sm text-muted-foreground">
-            No saved delivery addresses yet. Addresses added here or used during checkout will be saved securely.
+            No saved delivery addresses yet. Addresses added here or used during checkout will be
+            saved securely.
           </p>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {addresses.map((a) => (
-              <div key={a.id} className="rounded-xl border border-border bg-card p-4 text-xs space-y-2 relative">
+              <div
+                key={a.id}
+                className="rounded-xl border border-border bg-card p-4 text-xs space-y-2 relative"
+              >
                 <div className="flex items-center justify-between font-semibold text-foreground">
                   <span>{a.full_name}</span>
                   {a.is_default && (
@@ -767,7 +798,9 @@ function Account() {
 
       {/* ORDER HISTORY */}
       <section>
-        <h2 className="mb-4 font-heading text-base font-bold uppercase tracking-wider text-foreground">ORDER HISTORY</h2>
+        <h2 className="mb-4 font-heading text-base font-bold uppercase tracking-wider text-foreground">
+          ORDER HISTORY
+        </h2>
         {orders === null ? (
           <p className="text-muted-foreground">Loading…</p>
         ) : orders.length === 0 ? (

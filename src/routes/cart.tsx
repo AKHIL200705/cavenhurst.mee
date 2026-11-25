@@ -19,7 +19,9 @@ function Cart() {
   if (cart.length === 0)
     return (
       <div className="py-28 text-center font-sans">
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">Your bag is empty</h1>
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">
+          Your bag is empty
+        </h1>
         <Link
           to="/shop"
           className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
@@ -32,10 +34,13 @@ function Cart() {
   return (
     <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-[1fr_380px] font-sans">
       <div>
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">Shopping Bag</h1>
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">
+          Shopping Bag
+        </h1>
         {remaining > 0 && (
           <p className="mt-3 text-xs sm:text-sm text-silver font-medium">
-            Add <span className="font-bold text-foreground">{formatINR(remaining)}</span> more for free shipping.
+            Add <span className="font-bold text-foreground">{formatINR(remaining)}</span> more for
+            free shipping.
           </p>
         )}
         <ul className="mt-8 divide-y divide-border">
@@ -45,7 +50,7 @@ function Cart() {
             if (!itemName) return null;
             const itemPrice = c.price ?? p?.price ?? 0;
             const itemImage = c.image || (p ? imageFor(p, c.color) : "");
-            const maxStock = c.maxStock ?? (p?.stock?.[c.size] ?? 10);
+            const maxStock = c.maxStock ?? p?.stock?.[c.size] ?? 10;
 
             return (
               <li
@@ -84,8 +89,7 @@ function Cart() {
                       <button
                         aria-label="Increase"
                         onClick={() => {
-                          if (c.qty >= maxStock)
-                            toast.error("No more stock in this size");
+                          if (c.qty >= maxStock) toast.error("No more stock in this size");
                           setQty(i, c.qty + 1);
                         }}
                         className="p-2"
@@ -108,7 +112,9 @@ function Cart() {
         </ul>
       </div>
       <aside className="h-fit rounded-xl border border-border bg-card p-6 lg:sticky lg:top-24">
-        <h2 className="mb-4 font-heading text-base font-bold uppercase tracking-wider text-foreground">ORDER SUMMARY</h2>
+        <h2 className="mb-4 font-heading text-base font-bold uppercase tracking-wider text-foreground">
+          ORDER SUMMARY
+        </h2>
         <form
           className="mb-5 flex gap-2"
           onSubmit={(e) => {
@@ -126,7 +132,9 @@ function Cart() {
             placeholder="Coupon code"
             className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none"
           />
-          <button className="rounded-md bg-secondary px-4 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 transition-colors">Apply</button>
+          <button className="rounded-md bg-secondary px-4 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 transition-colors">
+            Apply
+          </button>
         </form>
         {coupon && (
           <button

@@ -1,7 +1,7 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const sql = postgres(match[1], { ssl: { rejectUnauthorized: false } });
 
@@ -16,7 +16,7 @@ async function createBackup() {
 
   const backupData = {
     timestamp: new Date().toISOString(),
-    tables: {}
+    tables: {},
   };
 
   for (const t of tables) {
@@ -25,9 +25,9 @@ async function createBackup() {
     console.log(`Backed up ${t.table_name}: ${rows.length} rows`);
   }
 
-  const backupPath = `supabase/backups/backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-  fs.mkdirSync('supabase/backups', { recursive: true });
-  fs.writeFileSync(backupPath, JSON.stringify(backupData, null, 2), 'utf8');
+  const backupPath = `supabase/backups/backup_${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  fs.mkdirSync("supabase/backups", { recursive: true });
+  fs.writeFileSync(backupPath, JSON.stringify(backupData, null, 2), "utf8");
   console.log(`\nBackup successfully written to ${backupPath}`);
 
   await sql.end();

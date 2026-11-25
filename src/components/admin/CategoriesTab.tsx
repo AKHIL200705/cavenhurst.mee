@@ -85,7 +85,9 @@ export function CategoriesTab({ categories, loading, onRefresh, authToken }: Cat
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">Product Categories</h2>
+          <h2 className="font-heading text-lg sm:text-xl font-bold uppercase tracking-tight text-foreground">
+            Product Categories
+          </h2>
           <p className="text-xs text-muted-foreground font-sans">
             Manage storefront classification taxonomies, slugs, and navigation categories.
           </p>
@@ -180,7 +182,11 @@ export function CategoriesTab({ categories, loading, onRefresh, authToken }: Cat
               <h3 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
                 {editingId ? "Edit Category" : "Add New Category"}
               </h3>
-              <button type="button" onClick={resetForm} className="text-muted-foreground hover:text-foreground">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -196,7 +202,12 @@ export function CategoriesTab({ categories, loading, onRefresh, authToken }: Cat
                   setForm({
                     ...form,
                     name,
-                    slug: editingId ? form.slug : name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+                    slug: editingId
+                      ? form.slug
+                      : name
+                          .toLowerCase()
+                          .replace(/[^a-z0-9]+/g, "-")
+                          .replace(/^-|-$/g, ""),
                   });
                 }}
               />

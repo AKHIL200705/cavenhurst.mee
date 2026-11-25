@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { formatINR } from "@/lib/pricing";
 import {
   TrendingUp,
@@ -15,15 +15,8 @@ import {
   ArrowUpRight,
   ShieldAlert,
 } from "lucide-react";
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
+
+const SalesRevenueChart = lazy(() => import("./SalesRevenueChart"));
 
 export interface OverviewData {
   totalOrders: number;
@@ -91,8 +84,12 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
     timeframe === "daily"
       ? data.dailySales
       : timeframe === "weekly"
-        ? (data.weeklySales && data.weeklySales.length > 0 ? data.weeklySales : data.dailySales)
-        : (data.monthlySales && data.monthlySales.length > 0 ? data.monthlySales : data.dailySales);
+        ? data.weeklySales && data.weeklySales.length > 0
+          ? data.weeklySales
+          : data.dailySales
+        : data.monthlySales && data.monthlySales.length > 0
+          ? data.monthlySales
+          : data.dailySales;
 
   const chartData = rawSeries.map((d) => ({
     ...d,
@@ -101,13 +98,9 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
 
   const totalRevenueCombined = data.totalPaidRevenue + data.totalCodRevenue;
   const onlineRevenuePct =
-    totalRevenueCombined > 0
-      ? Math.round((data.totalPaidRevenue / totalRevenueCombined) * 100)
-      : 0;
+    totalRevenueCombined > 0 ? Math.round((data.totalPaidRevenue / totalRevenueCombined) * 100) : 0;
   const codRevenuePct =
-    totalRevenueCombined > 0
-      ? Math.round((data.totalCodRevenue / totalRevenueCombined) * 100)
-      : 0;
+    totalRevenueCombined > 0 ? Math.round((data.totalCodRevenue / totalRevenueCombined) * 100) : 0;
 
   return (
     <div className="space-y-8">
@@ -364,63 +357,9 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
             </div>
           </div>
 
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="metricGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop
-                      offset="5%"
-                      stopColor={metric === "revenue" ? "#10B981" : "#F59E0B"}
-                      stopOpacity={0.4}
-                    />
-                    <stop
-                      offset="95%"
-                      stopColor={metric === "revenue" ? "#10B981" : "#F59E0B"}
-                      stopOpacity={0.0}
-                    />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                <XAxis dataKey="displayDate" stroke="#888" fontSize={11} tickLine={false} />
-                <YAxis
-                  stroke="#888"
-                  fontSize={11}
-                  tickLine={false}
-                  tickFormatter={(v) => (metric === "revenue" ? `₹${v}` : `${v}`)}
-                />
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const p = payload[0]!.payload as {
-                        date: string;
-                        revenue: number;
-                        orders: number;
-                      };
-                      return (
-                        <div className="rounded-lg border border-border bg-popover p-3 text-xs shadow-xl">
-                          <p className="font-semibold text-foreground">{p.date}</p>
-                          <p className="mt-1 text-emerald-400 font-mono font-bold">
-                            Settled Revenue: {formatINR(p.revenue)}
-                          </p>
-                          <p className="text-amber-400 font-mono">{p.orders} orders</p>
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey={metric}
-                  stroke={metric === "revenue" ? "#10B981" : "#F59E0B"}
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#metricGrad)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <Suspense fallback={<div className="h-72 w-full animate-pulse rounded-lg bg-muted/20" />}>
+            <SalesRevenueChart chartData={chartData} metric={metric} />
+          </Suspense>
         </div>
 
         {/* Low Stock Warning Card */}
@@ -428,7 +367,9 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
           <div>
             <div className="flex items-center gap-2 text-amber-500 mb-2">
               <AlertTriangle className="h-5 w-5" />
-              <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">Low-Stock Watchlist</h2>
+              <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
+                Low-Stock Watchlist
+              </h2>
             </div>
             <p className="text-xs text-muted-foreground mb-4">
               Variants with remaining stock of 5 or fewer units require warehouse replenishment.
@@ -525,7 +466,9 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
               <div className="rounded-lg border border-border/60 bg-background/50 p-4">
                 <div className="flex items-center gap-2">
                   <div className="h-2.5 w-2.5 rounded-full bg-amber-500" />
-                  <span className="text-xs font-semibold text-foreground">Cash on Delivery (COD)</span>
+                  <span className="text-xs font-semibold text-foreground">
+                    Cash on Delivery (COD)
+                  </span>
                 </div>
                 <p className="mt-2 font-mono text-xl font-bold text-amber-400">
                   {formatINR(data.totalCodRevenue)}
@@ -558,7 +501,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
             </button>
           </div>
 
-          {(!data.topSellingProducts || data.topSellingProducts.length === 0) ? (
+          {!data.topSellingProducts || data.topSellingProducts.length === 0 ? (
             <div className="py-8 text-center text-xs text-muted-foreground italic">
               No sales recorded yet across customer orders.
             </div>
@@ -595,7 +538,9 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
         {/* Recent Orders */}
         <div className="rounded-xl border border-border bg-card p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">Recent Orders</h2>
+            <h2 className="font-heading text-base sm:text-lg font-bold uppercase tracking-tight text-foreground">
+              Recent Orders
+            </h2>
             <button
               onClick={() => onNavigateTab("orders")}
               className="text-xs font-semibold text-primary hover:underline"
@@ -603,7 +548,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
               View all orders
             </button>
           </div>
-          {(!data.recentOrders || data.recentOrders.length === 0) ? (
+          {!data.recentOrders || data.recentOrders.length === 0 ? (
             <p className="text-xs text-muted-foreground py-6 text-center italic">
               No recent orders found.
             </p>
@@ -655,7 +600,7 @@ export function OverviewTab({ data, onNavigateTab }: OverviewTabProps) {
               View all customers
             </button>
           </div>
-          {(!data.recentRegistrations || data.recentRegistrations.length === 0) ? (
+          {!data.recentRegistrations || data.recentRegistrations.length === 0 ? (
             <p className="text-xs text-muted-foreground py-6 text-center italic">
               No recent registrations found.
             </p>

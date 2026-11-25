@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac, timingSafeEqual, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
+import {
+  createHmac,
+  timingSafeEqual,
+  randomBytes,
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+} from "node:crypto";
 
 // ==============================================================================
 // 1. PRICING & ORDER TOTALS TESTS
@@ -434,9 +441,7 @@ test("Shopping Cart: Guest merge and inventory clamping", () => {
     "urban-hoodie:XL": 3,
   };
 
-  const dbCart = [
-    { slug: "classic-tee", size: "M", color: "Navy", qty: 2 },
-  ];
+  const dbCart = [{ slug: "classic-tee", size: "M", color: "Navy", qty: 2 }];
 
   const guestCart = [
     { slug: "classic-tee", size: "M", color: "Navy", qty: 4 }, // 2 + 4 = 6, clamped to 5
@@ -530,7 +535,10 @@ function verifyRazorpayCapturedState(paymentEntity) {
 
 test("Razorpay: Strict captured verification (fail-closed)", () => {
   assert.equal(verifyRazorpayCapturedState({ status: "captured", amount: 249900 }).verified, true);
-  assert.equal(verifyRazorpayCapturedState({ status: "authorized", amount: 249900 }).verified, false);
+  assert.equal(
+    verifyRazorpayCapturedState({ status: "authorized", amount: 249900 }).verified,
+    false,
+  );
   assert.equal(verifyRazorpayCapturedState({ status: "created", amount: 249900 }).verified, false);
   assert.equal(verifyRazorpayCapturedState({ status: "failed", amount: 249900 }).verified, false);
 });
@@ -691,7 +699,16 @@ test("Reviews: Content moderation and public visibility rules", () => {
 test("Admin Roles: Privilege verification by role", () => {
   const ADMIN_PERMISSIONS = {
     super_admin: ["all"],
-    admin: ["orders", "products", "customers", "inventory", "reviews", "returns", "coupons", "settings"],
+    admin: [
+      "orders",
+      "products",
+      "customers",
+      "inventory",
+      "reviews",
+      "returns",
+      "coupons",
+      "settings",
+    ],
     fulfillment_manager: ["orders", "shipments", "inventory", "returns"],
     support_agent: ["orders", "customers", "reviews"],
   };
@@ -918,8 +935,16 @@ test("Mobile Validation: 10-digit Indian mobile number constraints", () => {
 
   // Invalid variations
   assert.equal(normalizeAndValidateIndianMobile("").valid, false);
-  assert.equal(normalizeAndValidateIndianMobile("1234567890").valid, false, "Must start with 6, 7, 8, 9");
-  assert.equal(normalizeAndValidateIndianMobile("5234567890").valid, false, "Starts with 5, invalid in India");
+  assert.equal(
+    normalizeAndValidateIndianMobile("1234567890").valid,
+    false,
+    "Must start with 6, 7, 8, 9",
+  );
+  assert.equal(
+    normalizeAndValidateIndianMobile("5234567890").valid,
+    false,
+    "Starts with 5, invalid in India",
+  );
   assert.equal(normalizeAndValidateIndianMobile("98765").valid, false, "Too short");
   assert.equal(normalizeAndValidateIndianMobile("abcdefghij").valid, false, "Non-digits");
 });
@@ -974,78 +999,190 @@ function evaluateGateRedirect({
 test("Centralized Routing Gate: Anonymous vs Incomplete vs Complete profile rules", () => {
   // 1. Anonymous visitor
   assert.equal(
-    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: null,
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/",
+      welcomeShown: false,
+    }),
     false,
     "Anonymous can browse home freely",
   );
   assert.equal(
-    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/shop", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: null,
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/shop",
+      welcomeShown: false,
+    }),
     false,
     "Anonymous can browse shop freely",
   );
   assert.equal(
-    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/product/oversized-tee", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: null,
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/product/oversized-tee",
+      welcomeShown: false,
+    }),
     false,
     "Anonymous can browse product details freely",
   );
   assert.equal(
-    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/checkout", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: null,
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/checkout",
+      welcomeShown: false,
+    }),
     true,
     "Anonymous redirected away from checkout to login",
   );
   assert.equal(
-    evaluateGateRedirect({ user: null, ready: true, welcomeReady: true, welcomeSeen: false, path: "/account", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: null,
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/account",
+      welcomeShown: false,
+    }),
     true,
     "Anonymous redirected away from account to login",
   );
 
   // 2. First-time signed-in user (welcome not seen)
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: false, path: "/shop", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/shop",
+      welcomeShown: false,
+    }),
     true,
     "New user must be routed to /welcome first",
   );
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: false, path: "/welcome", welcomeShown: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: false,
+      path: "/welcome",
+      welcomeShown: false,
+    }),
     false,
     "Renders /welcome for new user",
   );
 
   // 3. Authenticated user with incomplete profile (welcomeSeen = true, profileCompleted = false)
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/shop", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/shop",
+      welcomeShown: false,
+      profileCompleted: false,
+      profileChecking: false,
+    }),
     false,
     "Incomplete user can still browse public product catalog",
   );
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/checkout", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/checkout",
+      welcomeShown: false,
+      profileCompleted: false,
+      profileChecking: false,
+    }),
     true,
     "Incomplete user blocked from checkout -> redirected to /complete-profile",
   );
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/account", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/account",
+      welcomeShown: false,
+      profileCompleted: false,
+      profileChecking: false,
+    }),
     true,
     "Incomplete user blocked from account dashboard -> redirected to /complete-profile",
   );
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/complete-profile", welcomeShown: false, profileCompleted: false, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/complete-profile",
+      welcomeShown: false,
+      profileCompleted: false,
+      profileChecking: false,
+    }),
     false,
     "Allowed to render /complete-profile page",
   );
 
   // 4. Authenticated user with completed profile
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/checkout", welcomeShown: false, profileCompleted: true, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/checkout",
+      welcomeShown: false,
+      profileCompleted: true,
+      profileChecking: false,
+    }),
     false,
     "Complete user allowed into checkout",
   );
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/account", welcomeShown: false, profileCompleted: true, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/account",
+      welcomeShown: false,
+      profileCompleted: true,
+      profileChecking: false,
+    }),
     false,
     "Complete user allowed into account dashboard",
   );
   assert.equal(
-    evaluateGateRedirect({ user: { id: "u1" }, ready: true, welcomeReady: true, welcomeSeen: true, path: "/complete-profile", welcomeShown: false, profileCompleted: true, profileChecking: false }),
+    evaluateGateRedirect({
+      user: { id: "u1" },
+      ready: true,
+      welcomeReady: true,
+      welcomeSeen: true,
+      path: "/complete-profile",
+      welcomeShown: false,
+      profileCompleted: true,
+      profileChecking: false,
+    }),
     true,
     "Complete user should not stay on /complete-profile -> redirected to store",
   );
@@ -1172,7 +1309,11 @@ test("OTP: Salted cryptographic HMAC-SHA256 hashing and verification", () => {
   assert.equal(hash.length, 64, "SHA-256 hex string must be 64 characters");
   assert.equal(hashOtp(otp, email), hash, "Identical OTP and email must yield identical hash");
   assert.notEqual(hashOtp("584921", email), hash, "Different OTP must yield different hash");
-  assert.notEqual(hashOtp(otp, "other@cavenhurst.com"), hash, "Different email must yield different hash");
+  assert.notEqual(
+    hashOtp(otp, "other@cavenhurst.com"),
+    hash,
+    "Different email must yield different hash",
+  );
 });
 
 test("OTP: Expiry and resend cooldown calculation", () => {
@@ -1185,7 +1326,10 @@ test("OTP: Expiry and resend cooldown calculation", () => {
 
   const elapsedSec = Math.floor((Date.now() - lastSentAt) / 1000);
   const remainingCooldownSec = Math.max(0, 60 - elapsedSec);
-  assert.ok(remainingCooldownSec > 0 && remainingCooldownSec <= 30, "Cooldown should have ~30s remaining");
+  assert.ok(
+    remainingCooldownSec > 0 && remainingCooldownSec <= 30,
+    "Cooldown should have ~30s remaining",
+  );
 
   // After 61 seconds
   const oldSentAt = now - 61 * 1000;
@@ -1205,12 +1349,48 @@ test("Registration: Mobile +91 and email matching constraints", () => {
     return null;
   }
 
-  assert.equal(validateRegistrationInputs("Akhil Sai", "+91 9876543210", "akhil@gmail.com", "Secret123", "Secret123"), null);
-  assert.equal(validateRegistrationInputs("A", "9876543210", "akhil@gmail.com", "Secret123", "Secret123"), "Invalid name");
-  assert.equal(validateRegistrationInputs("Akhil Sai", "1234567890", "akhil@gmail.com", "Secret123", "Secret123"), "Invalid phone");
-  assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "bad-email", "Secret123", "Secret123"), "Invalid email");
-  assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "akhil@gmail.com", "123", "123"), "Password too short");
-  assert.equal(validateRegistrationInputs("Akhil Sai", "9876543210", "akhil@gmail.com", "Secret123", "Mismatch123"), "Passwords do not match");
+  assert.equal(
+    validateRegistrationInputs(
+      "Akhil Sai",
+      "+91 9876543210",
+      "akhil@gmail.com",
+      "Secret123",
+      "Secret123",
+    ),
+    null,
+  );
+  assert.equal(
+    validateRegistrationInputs("A", "9876543210", "akhil@gmail.com", "Secret123", "Secret123"),
+    "Invalid name",
+  );
+  assert.equal(
+    validateRegistrationInputs(
+      "Akhil Sai",
+      "1234567890",
+      "akhil@gmail.com",
+      "Secret123",
+      "Secret123",
+    ),
+    "Invalid phone",
+  );
+  assert.equal(
+    validateRegistrationInputs("Akhil Sai", "9876543210", "bad-email", "Secret123", "Secret123"),
+    "Invalid email",
+  );
+  assert.equal(
+    validateRegistrationInputs("Akhil Sai", "9876543210", "akhil@gmail.com", "123", "123"),
+    "Password too short",
+  );
+  assert.equal(
+    validateRegistrationInputs(
+      "Akhil Sai",
+      "9876543210",
+      "akhil@gmail.com",
+      "Secret123",
+      "Mismatch123",
+    ),
+    "Passwords do not match",
+  );
 });
 
 test("Diagnostics: Email masking and non-disclosure of sensitive OTP data", () => {
@@ -1219,9 +1399,7 @@ test("Diagnostics: Email masking and non-disclosure of sensitive OTP data", () =
     const [localPart, domain] = email.split("@");
     if (!localPart || !domain) return "***";
     const maskedLocal =
-      localPart.length <= 2
-        ? localPart[0] + "***"
-        : localPart[0] + "***" + localPart.slice(-1);
+      localPart.length <= 2 ? localPart[0] + "***" : localPart[0] + "***" + localPart.slice(-1);
     return `${maskedLocal}@${domain}`;
   }
 
@@ -1323,14 +1501,20 @@ test("Password Security: AES-256-GCM authenticated encryption and zero plaintext
     const [ivHex, tagHex, dataHex] = payload.split(":");
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivHex, "hex"));
     decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-    const decrypted = Buffer.concat([decipher.update(Buffer.from(dataHex, "hex")), decipher.final()]);
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(dataHex, "hex")),
+      decipher.final(),
+    ]);
     return decrypted.toString("utf8");
   }
 
   const rawPassword = "SuperSecretPassword123!#";
   const encrypted = encryptPassword(rawPassword);
 
-  assert.ok(!encrypted.includes(rawPassword), "Plaintext password must never appear in encrypted payload");
+  assert.ok(
+    !encrypted.includes(rawPassword),
+    "Plaintext password must never appear in encrypted payload",
+  );
   const parts = encrypted.split(":");
   assert.equal(parts.length, 3, "Payload must consist of iv:authTag:ciphertext");
   assert.equal(parts[0].length, 24, "12-byte IV in hex must be 24 characters");
@@ -1342,7 +1526,11 @@ test("Password Security: AES-256-GCM authenticated encryption and zero plaintext
 
   // Tamper detection
   const tampered = encrypted.slice(0, -2) + (encrypted.slice(-2) === "aa" ? "bb" : "aa");
-  assert.throws(() => decryptPassword(tampered), /Unsupported state or unable to authenticate data/, "Tampered ciphertext must fail GCM authentication");
+  assert.throws(
+    () => decryptPassword(tampered),
+    /Unsupported state or unable to authenticate data/,
+    "Tampered ciphertext must fail GCM authentication",
+  );
 });
 
 test("Upstash Redis: Registration session key schema and dual-link indexing", () => {
@@ -1355,7 +1543,10 @@ test("Upstash Redis: Registration session key schema and dual-link indexing", ()
   const cooldownKey = `cavenhurst:cooldown:registration:${cleanEmail}`;
   const resendCountKey = `cavenhurst:resend_count:registration:${cleanEmail}`;
 
-  assert.equal(regSessionKey, "cavenhurst:reg:reg_a1b2c3d4e5f6789012345678901234567890123456789012");
+  assert.equal(
+    regSessionKey,
+    "cavenhurst:reg:reg_a1b2c3d4e5f6789012345678901234567890123456789012",
+  );
   assert.equal(emailLinkKey, "cavenhurst:otp:registration:customer@cavenhurst.com");
   assert.equal(cooldownKey, "cavenhurst:cooldown:registration:customer@cavenhurst.com");
   assert.equal(resendCountKey, "cavenhurst:resend_count:registration:customer@cavenhurst.com");
@@ -1364,7 +1555,9 @@ test("Upstash Redis: Registration session key schema and dual-link indexing", ()
 test("Registration Session: Verification, attempt limits, expiration, and key invalidation", () => {
   const salt = "cavenhurst_default_secret_salt_32b";
   function hashOtp(otp, email) {
-    return createHmac("sha256", salt).update(`${email.toLowerCase().trim()}:${otp.trim()}`).digest("hex");
+    return createHmac("sha256", salt)
+      .update(`${email.toLowerCase().trim()}:${otp.trim()}`)
+      .digest("hex");
   }
 
   const email = "customer@cavenhurst.com";
@@ -1391,7 +1584,10 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   function verify(key, enteredOtp) {
     const record = store.get(`cavenhurst:reg:${key}`);
     if (!record) {
-      return { success: false, error: "Invalid registration key. Please request a new verification code." };
+      return {
+        success: false,
+        error: "Invalid registration key. Please request a new verification code.",
+      };
     }
     if (Date.now() > record.expiresAt) {
       store.delete(`cavenhurst:reg:${key}`);
@@ -1399,20 +1595,29 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
     }
     if (record.attempts >= 5) {
       store.delete(`cavenhurst:reg:${key}`);
-      return { success: false, error: "Too many incorrect attempts. For security, please start registration again." };
+      return {
+        success: false,
+        error: "Too many incorrect attempts. For security, please start registration again.",
+      };
     }
     const enteredHash = hashOtp(enteredOtp, record.email);
     if (enteredHash !== record.otpHash) {
       record.attempts += 1;
       const remaining = Math.max(0, 5 - record.attempts);
-      return { success: false, error: `Incorrect verification code. ${remaining} attempts remaining.` };
+      return {
+        success: false,
+        error: `Incorrect verification code. ${remaining} attempts remaining.`,
+      };
     }
     store.delete(`cavenhurst:reg:${key}`);
     return { success: true };
   }
 
   // 1. Invalid or missing key
-  assert.equal(verify("reg_non_existent", validOtp).error, "Invalid registration key. Please request a new verification code.");
+  assert.equal(
+    verify("reg_non_existent", validOtp).error,
+    "Invalid registration key. Please request a new verification code.",
+  );
 
   // 2. Incorrect OTP decrements attempts
   createSession();
@@ -1426,7 +1631,11 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   }
   const lockedRes = verify(regKey, validOtp);
   assert.match(lockedRes.error, /Too many incorrect attempts/);
-  assert.equal(store.has(`cavenhurst:reg:${regKey}`), false, "Key must be deleted after 5 failed attempts");
+  assert.equal(
+    store.has(`cavenhurst:reg:${regKey}`),
+    false,
+    "Key must be deleted after 5 failed attempts",
+  );
 
   // 4. Expired OTP
   createSession(-1000); // Expired 1 second ago
@@ -1438,7 +1647,11 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   createSession();
   const successRes = verify(regKey, validOtp);
   assert.equal(successRes.success, true);
-  assert.equal(store.has(`cavenhurst:reg:${regKey}`), false, "Key must be purged upon successful verification");
+  assert.equal(
+    store.has(`cavenhurst:reg:${regKey}`),
+    false,
+    "Key must be purged upon successful verification",
+  );
   // Second attempt with same key must now fail with Invalid registration key
   const reuseRes = verify(regKey, validOtp);
   assert.equal(reuseRes.error, "Invalid registration key. Please request a new verification code.");
@@ -1449,13 +1662,20 @@ test("REST API Contracts: /api/auth/send-otp, verify-otp, resend-otp alignment",
   function mapSendOtpPayload(body) {
     return {
       fullName: body.fullName || body.full_name || body.name || "",
-      phone: (body.phone || body.mobile || body.mobileNumber || body.mobile_number || "").replace(/\D/g, "").slice(-10),
+      phone: (body.phone || body.mobile || body.mobileNumber || body.mobile_number || "")
+        .replace(/\D/g, "")
+        .slice(-10),
       email: (body.email || body.to_email || "").toLowerCase().trim(),
       password: body.password || "",
     };
   }
 
-  const p1 = mapSendOtpPayload({ full_name: "Akhil Sai", mobile_number: "+91 9876543210", to_email: "AKHIL@GMAIL.COM", password: "Pass" });
+  const p1 = mapSendOtpPayload({
+    full_name: "Akhil Sai",
+    mobile_number: "+91 9876543210",
+    to_email: "AKHIL@GMAIL.COM",
+    password: "Pass",
+  });
   assert.equal(p1.fullName, "Akhil Sai");
   assert.equal(p1.phone, "9876543210");
   assert.equal(p1.email, "akhil@gmail.com");
@@ -1463,7 +1683,8 @@ test("REST API Contracts: /api/auth/send-otp, verify-otp, resend-otp alignment",
   // Verify expected field mapping for verify-otp across aliases
   function mapVerifyOtpPayload(body) {
     return {
-      registrationKey: body.registrationKey || body.registration_key || body.registrationId || body.regKey || "",
+      registrationKey:
+        body.registrationKey || body.registration_key || body.registrationId || body.regKey || "",
       email: (body.email || body.to_email || "").toLowerCase().trim(),
       otp: (body.otp || body.code || body.passcode || "").trim(),
     };
@@ -1481,10 +1702,3 @@ test("REST API Contracts: /api/auth/send-otp, verify-otp, resend-otp alignment",
   assert.equal(v3.registrationKey, "reg_789");
   assert.equal(v3.otp, "999888");
 });
-
-
-
-
-
-
-

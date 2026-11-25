@@ -7,9 +7,17 @@ import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
 import { releaseOrderInventoryReservations } from "./inventory";
 import { verifyGoogleSessionOrToken, signSessionToken } from "./auth-helpers";
-import type { Json, Database } from "@/integrations/supabase/types";
+import type { Json, Database, Tables } from "@/integrations/supabase/types";
 
 type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];
+
+interface InventoryProductRow {
+  id?: string;
+  slug: string;
+  name: string;
+  stock: Json;
+  colors: Json;
+}
 
 export interface AdminAuthResult {
   userId: string;
@@ -20,10 +28,7 @@ export interface AdminAuthParams {
   authToken?: string | undefined;
 }
 
-const WHITELISTED_ADMIN_EMAILS = [
-  "akhilsaiabbireddy2007@gmail.com",
-  "cavenhurst@gmail.com",
-];
+const WHITELISTED_ADMIN_EMAILS = ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"];
 
 function isWhitelistedAdminEmail(email?: string | null): boolean {
   if (!email) return false;
@@ -263,15 +268,18 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
             SELECT id, total, status, payment_method, payment_status, shipment_status, created_at
             FROM orders
           `.catch(async (err) => {
-            console.warn("[Admin Overview] Orders direct query notice, falling back to legacy schema:", err?.message);
-            const legacy = await sql<any[]>`
+            console.warn(
+              "[Admin Overview] Orders direct query notice, falling back to legacy schema:",
+              err?.message,
+            );
+            const legacy = await sql<Omit<DbOrderOverviewRow, "payment_method">[]>`
               SELECT id, total, status, payment_status, shipment_status, created_at
               FROM orders
             `.catch(() => []);
             return legacy.map((r) => ({
               ...r,
-              payment_method: r.payment_method || "online",
-            })) as DbOrderOverviewRow[];
+              payment_method: (r as { payment_method?: string | null }).payment_method || "online",
+            }));
           }),
           sql<DbRefundRow[]>`SELECT amount FROM refunds`
             .catch(() => sql<DbRefundRow[]>`SELECT amount FROM payment_refunds`)
@@ -280,7 +288,9 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           sql<DbCountRow[]>`SELECT count(*)::int as count FROM profiles`
             .catch(() => sql<DbCountRow[]>`SELECT count(*)::int as count FROM customers`)
             .catch(() => [{ count: 0 }]),
-          sql<DbCountRow[]>`SELECT count(*)::int as count FROM products`.catch(() => [{ count: 0 }]),
+          sql<DbCountRow[]>`SELECT count(*)::int as count FROM products`.catch(() => [
+            { count: 0 },
+          ]),
           sql<DbRecentOrderRow[]>`
             SELECT id, order_number, customer_name, customer_email, total, status, payment_status, created_at
             FROM orders
@@ -293,8 +303,9 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
             ORDER BY created_at DESC
             LIMIT 5
           `
-            .catch(() =>
-              sql<DbRecentCustomerRow[]>`
+            .catch(
+              () =>
+                sql<DbRecentCustomerRow[]>`
                 SELECT id, full_name, email, phone, created_at
                 FROM customers
                 ORDER BY created_at DESC
@@ -454,7 +465,10 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
         }
 
         // Monthly Sales (Last 12 months)
-        const monthlySalesMap = new Map<string, { date: string; revenue: number; orders: number }>();
+        const monthlySalesMap = new Map<
+          string,
+          { date: string; revenue: number; orders: number }
+        >();
         for (let i = 11; i >= 0; i--) {
           const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
           const key = d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
@@ -542,7 +556,10 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           })),
         };
       } catch (dbErr) {
-        console.error("[Admin Overview] Direct DB error, falling back to Supabase REST client:", dbErr);
+        console.error(
+          "[Admin Overview] Direct DB error, falling back to Supabase REST client:",
+          dbErr,
+        );
       }
     }
 
@@ -552,19 +569,24 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       .select("id, total, status, payment_method, payment_status, shipment_status, created_at");
 
     if (ordersError) {
-      console.warn("[Admin Overview] Orders query notice, attempting resilient fallback:", ordersError.message);
+      console.warn(
+        "[Admin Overview] Orders query notice, attempting resilient fallback:",
+        ordersError.message,
+      );
       const { data: fallbackOrders, error: fallbackError } = await supabaseAdmin
         .from("orders")
         .select("id, total, status, payment_status, shipment_status, created_at");
 
       if (fallbackError) {
         console.error("[Admin Overview] Orders fallback query error:", fallbackError);
-        throw new Error(`Failed to load overview data: ${fallbackError.message || "Orders query failed"}`);
+        throw new Error(
+          `Failed to load overview data: ${fallbackError.message || "Orders query failed"}`,
+        );
       }
 
-      allOrders = (fallbackOrders || []).map((o: any) => ({
+      allOrders = (fallbackOrders || []).map((o) => ({
         ...o,
-        payment_method: o.payment_method || "online",
+        payment_method: (o as { payment_method?: string | null }).payment_method || "online",
       })) as DbOrderOverviewRow[];
     } else {
       allOrders = (orders as unknown as DbOrderOverviewRow[]) || [];
@@ -581,9 +603,9 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
     if (allRefunds && allRefunds.length > 0) {
       totalRefunded = allRefunds.reduce((sum, r) => sum + (r.amount || 0), 0);
     } else {
-      const { data: payRefunds } = await (supabaseAdmin as any).from("payment_refunds").select("amount");
+      const { data: payRefunds } = await supabaseAdmin.from("payment_refunds").select("amount");
       if (payRefunds && payRefunds.length > 0) {
-        totalRefunded = payRefunds.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+        totalRefunded = payRefunds.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
       }
     }
 
@@ -651,7 +673,9 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
       supabaseAdmin
         .from("orders")
-        .select("id, order_number, customer_name, customer_email, total, status, payment_status, created_at")
+        .select(
+          "id, order_number, customer_name, customer_email, total, status, payment_status, created_at",
+        )
         .order("created_at", { ascending: false })
         .limit(5),
       supabaseAdmin
@@ -767,7 +791,7 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
         }
 
         const [ordersList, countRows] = await Promise.all([
-          sql<any[]>`
+          sql<Tables<"orders">[]>`
             SELECT * FROM orders
             WHERE ${statusFilter} AND ${payMethodFilter} AND ${searchFilter}
             ORDER BY created_at DESC
@@ -786,7 +810,10 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
           limit,
         };
       } catch (dbErr) {
-        console.warn("[Admin Orders] Direct DB query notice, falling back to Supabase REST client:", dbErr);
+        console.warn(
+          "[Admin Orders] Direct DB query notice, falling back to Supabase REST client:",
+          dbErr,
+        );
       }
     }
 
@@ -852,18 +879,40 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
     const sql = await getDb();
     if (sql) {
       try {
-        const orderRows = await sql<any[]>`SELECT * FROM orders WHERE id = ${data.orderId} LIMIT 1`;
+        const orderRows = await sql<
+          Tables<"orders">[]
+        >`SELECT * FROM orders WHERE id = ${data.orderId} LIMIT 1`;
         if (orderRows && orderRows.length > 0) {
-          const order = orderRows[0];
+          const order = orderRows[0]!;
           const [items, addressRows, paymentRows, shipmentRows, refunds, history, trackingEvents] =
             await Promise.all([
-              sql<any[]>`SELECT * FROM order_items WHERE order_id = ${order.id}`.catch(() => []),
-              sql<any[]>`SELECT * FROM shipping_addresses WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
-              sql<any[]>`SELECT * FROM payments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
-              sql<any[]>`SELECT * FROM shipments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
-              sql<any[]>`SELECT * FROM refunds WHERE order_id = ${order.id}`.catch(() => []),
-              sql<any[]>`SELECT * FROM order_status_history WHERE order_id = ${order.id} ORDER BY created_at ASC`.catch(() => []),
-              sql<any[]>`SELECT * FROM shipment_tracking_events WHERE order_id = ${order.id} ORDER BY event_time ASC`.catch(() => []),
+              sql<
+                Tables<"order_items">[]
+              >`SELECT * FROM order_items WHERE order_id = ${order.id}`.catch(() => []),
+              sql<
+                Tables<"shipping_addresses">[]
+              >`SELECT * FROM shipping_addresses WHERE order_id = ${order.id} LIMIT 1`.catch(
+                () => [],
+              ),
+              sql<
+                Tables<"payments">[]
+              >`SELECT * FROM payments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
+              sql<
+                Tables<"shipments">[]
+              >`SELECT * FROM shipments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
+              sql<Tables<"refunds">[]>`SELECT * FROM refunds WHERE order_id = ${order.id}`.catch(
+                () => [],
+              ),
+              sql<
+                Tables<"order_status_history">[]
+              >`SELECT * FROM order_status_history WHERE order_id = ${order.id} ORDER BY created_at ASC`.catch(
+                () => [],
+              ),
+              sql<
+                Tables<"shipment_tracking_events">[]
+              >`SELECT * FROM shipment_tracking_events WHERE order_id = ${order.id} ORDER BY event_time ASC`.catch(
+                () => [],
+              ),
             ]);
 
           return {
@@ -878,7 +927,10 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
           };
         }
       } catch (dbErr) {
-        console.warn("[Admin Order Details] Direct DB notice, falling back to Supabase REST client:", dbErr);
+        console.warn(
+          "[Admin Order Details] Direct DB notice, falling back to Supabase REST client:",
+          dbErr,
+        );
       }
     }
 
@@ -904,7 +956,7 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
           .select("*")
           .eq("order_id", order.id)
           .order("created_at", { ascending: true }),
-        (supabaseAdmin as any)
+        supabaseAdmin
           .from("shipment_tracking_events")
           .select("*")
           .eq("order_id", order.id)
@@ -1049,7 +1101,9 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
 
     const { data: currentOrderData, error: fetchErr } = await supabaseAdmin
       .from("orders")
-      .select("id, status, shipment_status, payment_method, payment_status, total, items, order_number")
+      .select(
+        "id, status, shipment_status, payment_method, payment_status, total, items, order_number",
+      )
       .eq("id", data.orderId)
       .maybeSingle();
 
@@ -1063,11 +1117,18 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
       if (fallbackErr || !fallbackOrder) {
         throw new Error("Order not found");
       }
-      currentOrder = { ...fallbackOrder, payment_method: (fallbackOrder as any).payment_method || "online" };
+      currentOrder = {
+        ...fallbackOrder,
+        payment_method:
+          (fallbackOrder as { payment_method?: string | null }).payment_method || "online",
+      };
     }
 
     // Terminal state validation
-    if (["cancelled", "refunded"].includes(currentOrder.status) && currentOrder.status !== data.status) {
+    if (
+      ["cancelled", "refunded"].includes(currentOrder.status) &&
+      currentOrder.status !== data.status
+    ) {
       throw new Error(
         `Order is in terminal state '${currentOrder.status}' and cannot be transitioned to '${data.status}'.`,
       );
@@ -1196,26 +1257,20 @@ export const createAdminShipmentServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const admin = await verifyAdminSession(data.authToken);
 
-    const { data: order, error: orderErr } = await supabaseAdmin
-      .from("orders")
-      .select("*, shipping_addresses(*)")
-      .eq("id", data.orderId)
-      .single();
+    const [{ data: order, error: orderErr }, { data: addressList }, { data: items }] =
+      await Promise.all([
+        supabaseAdmin.from("orders").select("*").eq("id", data.orderId).single(),
+        supabaseAdmin.from("shipping_addresses").select("*").eq("order_id", data.orderId).limit(1),
+        supabaseAdmin.from("order_items").select("*").eq("order_id", data.orderId),
+      ]);
 
     if (orderErr || !order) throw new Error("Order not found");
 
-    const address = Array.isArray(order.shipping_addresses)
-      ? order.shipping_addresses[0]
-      : order.shipping_addresses;
+    const address = addressList && addressList.length > 0 ? addressList[0] : null;
 
     if (!address) {
       throw new Error("No shipping address associated with this order");
     }
-
-    const { data: items } = await supabaseAdmin
-      .from("order_items")
-      .select("*")
-      .eq("order_id", order.id);
 
     const itemsList = (items || []).map((i) => ({
       name: i.name,
@@ -1314,7 +1369,7 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
 
     // 1. Canonical insert into payment_refunds
     try {
-      await (supabaseAdmin as any).from("payment_refunds").insert({
+      await supabaseAdmin.from("payment_refunds").insert({
         order_id: order.id,
         payment_id: paymentRecord?.id || null,
         razorpay_payment_id: order.razorpay_payment_id,
@@ -1347,7 +1402,7 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
     // Calculate total refunds for this order across both tables to distinguish partial vs full refund
     const [previousRefundsRes, previousPaymentRefundsRes] = await Promise.all([
       supabaseAdmin.from("refunds").select("amount").eq("order_id", order.id),
-      (supabaseAdmin as any).from("payment_refunds").select("amount").eq("order_id", order.id),
+      supabaseAdmin.from("payment_refunds").select("amount").eq("order_id", order.id),
     ]);
 
     const refundList: Array<{ amount: number }> =
@@ -1413,7 +1468,7 @@ export const getAdminProductsServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"products">[]>`
           SELECT * FROM products ORDER BY rank ASC
         `;
         if (rows && rows.length > 0) return rows;
@@ -1435,7 +1490,7 @@ export const getAdminProductsServerFn = createServerFn({ method: "POST" })
       console.warn("[Admin Products] Supabase client error:", err);
     }
 
-    return (PRODUCTS as any[]) || [];
+    return (PRODUCTS as unknown as InventoryProductRow[]) || [];
   });
 
 export const saveAdminProductServerFn = createServerFn({ method: "POST" })
@@ -1585,8 +1640,12 @@ export const getAdminInventoryServerFn = createServerFn({ method: "POST" })
     if (sql) {
       try {
         const [prods, movements] = await Promise.all([
-          sql<any[]>`SELECT id, slug, name, stock, colors FROM products ORDER BY name ASC`,
-          sql<any[]>`SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 50`.catch(() => []),
+          sql<
+            InventoryProductRow[]
+          >`SELECT id, slug, name, stock, colors FROM products ORDER BY name ASC`,
+          sql<
+            Tables<"inventory_movements">[]
+          >`SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 50`.catch(() => []),
         ]);
         if (prods && prods.length > 0) {
           return {
@@ -1610,12 +1669,12 @@ export const getAdminInventoryServerFn = createServerFn({ method: "POST" })
       ]);
 
       return {
-        inventory: productsRes.data || (PRODUCTS as any[]) || [],
+        inventory: productsRes.data || (PRODUCTS as unknown as InventoryProductRow[]) || [],
         recentMovements: movementsRes.data || [],
       };
     } catch {
       return {
-        inventory: (PRODUCTS as any[]) || [],
+        inventory: (PRODUCTS as unknown as InventoryProductRow[]) || [],
         recentMovements: [],
       };
     }
@@ -1669,7 +1728,8 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
       .eq("product_id", prod.id)
       .eq("size", data.size);
 
-    const matchedVariant = existingVariants && existingVariants.length > 0 ? existingVariants[0] : null;
+    const matchedVariant =
+      existingVariants && existingVariants.length > 0 ? existingVariants[0] : null;
 
     if (matchedVariant) {
       variantId = matchedVariant.id;
@@ -1749,7 +1809,7 @@ export const getAdminPaymentsServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"payments">[]>`
           SELECT * FROM payments ORDER BY created_at DESC LIMIT 100
         `;
         if (rows) return rows;
@@ -1785,7 +1845,7 @@ export const getAdminShipmentsServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"shipments">[]>`
           SELECT * FROM shipments ORDER BY created_at DESC LIMIT 100
         `;
         if (rows) return rows;
@@ -1896,7 +1956,7 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
               ? matchedProfile.profile_completed
               : Boolean(
                   (c.full_name || matchedProfile?.full_name) &&
-                    mobile.replace(/\D/g, "").slice(-10).length === 10,
+                  mobile.replace(/\D/g, "").slice(-10).length === 10,
                 );
 
           return {
@@ -1926,7 +1986,9 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
                 ? p.profile_completed
                 : Boolean(p.full_name && mobile.replace(/\D/g, "").slice(-10).length === 10);
             const customerOrders = (orders || []).filter(
-              (o) => o.user_id === p.id || (p.email && o.customer_email?.toLowerCase() === p.email.toLowerCase()),
+              (o) =>
+                o.user_id === p.id ||
+                (p.email && o.customer_email?.toLowerCase() === p.email.toLowerCase()),
             );
             list.push({
               id: p.id,
@@ -1963,10 +2025,14 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
         .limit(200),
       supabaseAdmin
         .from("profiles")
-        .select("id, email, phone, mobile_number, profile_completed, full_name, auth_provider, account_status, created_at, updated_at"),
+        .select(
+          "id, email, phone, mobile_number, profile_completed, full_name, auth_provider, account_status, created_at, updated_at",
+        ),
       supabaseAdmin
         .from("orders")
-        .select("id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status, created_at"),
+        .select(
+          "id, user_id, customer_id, customer_email, customer_name, customer_phone, total, status, created_at",
+        ),
     ]);
 
     const orders = ordersRes.data || [];
@@ -1993,7 +2059,7 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
           ? matchedProfile.profile_completed
           : Boolean(
               (c.full_name || matchedProfile?.full_name) &&
-                mobile.replace(/\D/g, "").slice(-10).length === 10,
+              mobile.replace(/\D/g, "").slice(-10).length === 10,
             );
 
       return {
@@ -2023,7 +2089,9 @@ export const getAdminCustomersServerFn = createServerFn({ method: "POST" })
             ? p.profile_completed
             : Boolean(p.full_name && mobile.replace(/\D/g, "").slice(-10).length === 10);
         const customerOrders = orders.filter(
-          (o) => o.user_id === p.id || (p.email && o.customer_email?.toLowerCase() === p.email.toLowerCase()),
+          (o) =>
+            o.user_id === p.id ||
+            (p.email && o.customer_email?.toLowerCase() === p.email.toLowerCase()),
         );
         customerList.push({
           id: p.id,
@@ -2061,7 +2129,8 @@ export const getAdminCustomerDetailsServerFn = createServerFn({ method: "POST" }
     if (!customer) throw new Error("Customer not found");
 
     const orAddrClauses: string[] = [`customer_id.eq.${customer.id}`];
-    if (customer.auth_provider_uid) orAddrClauses.push(`customer_auth_uid.eq.${customer.auth_provider_uid}`);
+    if (customer.auth_provider_uid)
+      orAddrClauses.push(`customer_auth_uid.eq.${customer.auth_provider_uid}`);
 
     const orOrderClauses: string[] = [`customer_id.eq.${customer.id}`];
     if (customer.auth_provider_uid) orOrderClauses.push(`user_id.eq.${customer.auth_provider_uid}`);
@@ -2075,7 +2144,9 @@ export const getAdminCustomerDetailsServerFn = createServerFn({ method: "POST" }
         .order("is_default", { ascending: false }),
       supabaseAdmin
         .from("orders")
-        .select("id, order_number, total, status, payment_status, shipment_status, awb_number, created_at, items")
+        .select(
+          "id, order_number, total, status, payment_status, shipment_status, awb_number, created_at, items",
+        )
         .or(orOrderClauses.join(","))
         .order("created_at", { ascending: false }),
     ]);
@@ -2083,7 +2154,7 @@ export const getAdminCustomerDetailsServerFn = createServerFn({ method: "POST" }
     const orders = ordersRes.data || [];
     const orderIds = orders.map((o) => o.id);
 
-    let payments: any[] = [];
+    let payments: Tables<"payments">[] = [];
     if (orderIds.length > 0) {
       const { data: pmts } = await supabaseAdmin
         .from("payments")
@@ -2113,7 +2184,7 @@ export const getAdminCouponsServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"coupons">[]>`
           SELECT * FROM coupons ORDER BY created_at DESC
         `;
         if (rows) return rows;
@@ -2221,7 +2292,7 @@ export const getAdminAuditLogsServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"admin_audit_logs">[]>`
           SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT ${data.limit || 100}
         `;
         if (rows) return rows;
@@ -2257,7 +2328,7 @@ export const getAdminSettingsServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"shipping_settings">[]>`
           SELECT * FROM shipping_settings WHERE id = 'default' LIMIT 1
         `;
         if (rows && rows.length > 0) return rows[0];
@@ -2339,7 +2410,7 @@ export const getAdminCategoriesServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"product_categories">[]>`
           SELECT * FROM product_categories ORDER BY name ASC
         `;
         if (rows) return rows;
@@ -2420,11 +2491,15 @@ export const getAdminVariantsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
+    type VariantJoinRow = Tables<"product_variants"> & {
+      product_name?: string | null;
+      product_slug?: string | null;
+    };
     const sql = getDb();
     if (sql) {
       try {
         const rows = data.productId
-          ? await sql<any[]>`
+          ? await sql<VariantJoinRow[]>`
               SELECT v.*, p.name as product_name, p.slug as product_slug 
               FROM product_variants v
               LEFT JOIN products p ON p.id = v.product_id
@@ -2432,7 +2507,7 @@ export const getAdminVariantsServerFn = createServerFn({ method: "POST" })
               ORDER BY v.created_at DESC
               LIMIT 300
             `
-          : await sql<any[]>`
+          : await sql<VariantJoinRow[]>`
               SELECT v.*, p.name as product_name, p.slug as product_slug 
               FROM product_variants v
               LEFT JOIN products p ON p.id = v.product_id
@@ -2440,7 +2515,7 @@ export const getAdminVariantsServerFn = createServerFn({ method: "POST" })
               LIMIT 300
             `;
         if (rows) {
-          return rows.map((v: any) => ({
+          return rows.map((v) => ({
             ...v,
             products: v.product_name ? { name: v.product_name, slug: v.product_slug } : null,
           }));
@@ -2568,7 +2643,9 @@ export const updateAdminReturnStatusServerFn = createServerFn({ method: "POST" }
       .select()
       .single();
     if (error) throw new Error(error.message);
-    await recordAdminAuditLog(admin, "return_status_update", "return", data.returnId, { status: data.status });
+    await recordAdminAuditLog(admin, "return_status_update", "return", data.returnId, {
+      status: data.status,
+    });
     return { success: true, returnRecord: updated };
   });
 
@@ -2581,17 +2658,21 @@ export const getAdminReviewsServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     await verifyAdminSession(data.authToken);
 
+    type ReviewJoinRow = Tables<"product_reviews"> & {
+      product_name?: string | null;
+      product_slug?: string | null;
+    };
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<ReviewJoinRow[]>`
           SELECT r.*, p.name as product_name, p.slug as product_slug 
           FROM product_reviews r
           LEFT JOIN products p ON p.id = r.product_id
           ORDER BY r.created_at DESC
         `;
         if (rows) {
-          return rows.map((r: any) => ({
+          return rows.map((r) => ({
             ...r,
             products: r.product_name ? { name: r.product_name, slug: r.product_slug } : null,
           }));
@@ -2634,7 +2715,9 @@ export const updateAdminReviewStatusServerFn = createServerFn({ method: "POST" }
       .select()
       .single();
     if (error) throw new Error(error.message);
-    await recordAdminAuditLog(admin, "review_status_update", "review", data.reviewId, { status: data.status });
+    await recordAdminAuditLog(admin, "review_status_update", "review", data.reviewId, {
+      status: data.status,
+    });
     return { success: true, review: updated };
   });
 
@@ -2660,7 +2743,7 @@ export const getAdminUsersServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql<any[]>`
+        const rows = await sql<Tables<"admin_users">[]>`
           SELECT * FROM admin_users ORDER BY created_at ASC
         `;
         if (rows) return rows;
@@ -2743,7 +2826,9 @@ export const toggleAdminUserStatusServerFn = createServerFn({ method: "POST" })
       .select()
       .single();
     if (error) throw new Error(error.message);
-    await recordAdminAuditLog(admin, "admin_user_toggle", "admin_user", data.id, { is_active: data.isActive });
+    await recordAdminAuditLog(admin, "admin_user_toggle", "admin_user", data.id, {
+      is_active: data.isActive,
+    });
     return { success: true, adminUser: updated };
   });
 
@@ -2814,8 +2899,21 @@ export const getAdminEmailDiagnosticsServerFn = createServerFn({ method: "POST" 
     const sql = getDb();
     if (!sql) return [];
 
+    interface EmailDeliveryDiagnosticRow {
+      id: string;
+      recipient_masked: string;
+      purpose: string;
+      otp_generated: boolean;
+      backend_status: string;
+      emailjs_status: string | null;
+      emailjs_http_status: number | null;
+      error_category: string | null;
+      diagnostic_message: string | null;
+      created_at: string;
+    }
+
     try {
-      const logs = await sql<any[]>`
+      const logs = await sql<EmailDeliveryDiagnosticRow[]>`
         SELECT 
           id,
           recipient_masked,
@@ -2868,4 +2966,3 @@ export const testAdminEmailDeliveryServerFn = createServerFn({ method: "POST" })
         : `Email delivery test failed: ${result.error}`,
     };
   });
-

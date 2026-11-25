@@ -2,6 +2,32 @@ import crypto from "node:crypto";
 import { getDb } from "@/server/db";
 import { getRedis } from "@/server/redis";
 
+interface EmailVerificationOtpRow {
+  id: string;
+  otp_hash: string;
+  metadata?: Record<string, unknown> | null;
+  attempts: number;
+  resend_count: number;
+  last_sent_at: string;
+  expires_at: string;
+  created_at: string;
+}
+
+interface RedisOtpRecord {
+  otpHash: string;
+  attempts?: number;
+  expiresAt?: number;
+  metadata?: Record<string, unknown>;
+}
+
+interface RedisRegLinkRecord {
+  registrationKey?: string;
+}
+
+function parseJsonRecord<T>(raw: unknown): T {
+  return typeof raw === "string" ? (JSON.parse(raw) as T) : (raw as T);
+}
+
 // Environment-backed EmailJS configurations
 function getEmailJsConfig() {
   const serviceId = (process.env["EMAILJS_SERVICE_ID"] || "").replace(/^["']|["']$/g, "").trim();
@@ -20,9 +46,7 @@ export function maskEmail(email: string): string {
   const [localPart, domain] = email.split("@");
   if (!localPart || !domain) return "***";
   const maskedLocal =
-    localPart.length <= 2
-      ? localPart[0] + "***"
-      : localPart[0] + "***" + localPart.slice(-1);
+    localPart.length <= 2 ? localPart[0] + "***" : localPart[0] + "***" + localPart.slice(-1);
   return `${maskedLocal}@${domain}`;
 }
 
@@ -91,7 +115,8 @@ export function generateRegistrationKey(): string {
  * Returns a 32-byte key derived from the session secret for AES-256-GCM authenticated encryption.
  */
 function getEncryptionKey(): Buffer {
-  const secret = process.env["SESSION_SECRET"] || "cavenhurst_registration_secret_encryption_salt_key_32b";
+  const secret =
+    process.env["SESSION_SECRET"] || "cavenhurst_registration_secret_encryption_salt_key_32b";
   return crypto.createHash("sha256").update(secret).digest();
 }
 
@@ -229,7 +254,7 @@ export async function sendEmailJsOtp(params: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Origin": "https://cavenhurst.com",
+        Origin: "https://cavenhurst.com",
         "User-Agent": "CAVENHURST-Server/1.0",
       },
       body: JSON.stringify(payload),
@@ -298,7 +323,8 @@ export async function sendEmailJsOtp(params: {
       httpStatus: 200,
     };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Network error connecting to email service.";
+    const errorMsg =
+      err instanceof Error ? err.message : "Network error connecting to email service.";
     console.error("[EmailJS Fetch Error]:", err);
 
     await logEmailDiagnostic({
@@ -407,7 +433,7 @@ export async function createOrUpdateOtpRecord(params: {
   }
 
   try {
-    const [existing] = await sql<any[]>`
+    const [existing] = await sql<EmailVerificationOtpRow[]>`
       SELECT id, otp_hash, attempts, resend_count, last_sent_at, expires_at, created_at
       FROM public.email_verification_otps
       WHERE lower(email) = ${cleanEmail} AND purpose = ${params.purpose}
@@ -437,7 +463,8 @@ export async function createOrUpdateOtpRecord(params: {
       }
 
       const newResendCount = firstCreatedAt > fifteenMinutesAgo ? existing.resend_count + 1 : 1;
-      const newCreatedAt = firstCreatedAt > fifteenMinutesAgo ? existing.created_at : new Date(now).toISOString();
+      const newCreatedAt =
+        firstCreatedAt > fifteenMinutesAgo ? existing.created_at : new Date(now).toISOString();
 
       await sql`
         UPDATE public.email_verification_otps SET
@@ -522,7 +549,7 @@ export async function verifyOtpRecord(params: {
       const rawData = await redis.get(otpKey);
 
       if (rawData) {
-        const record = typeof rawData === "string" ? JSON.parse(rawData) : (rawData as any);
+        const record = parseJsonRecord<RedisOtpRecord>(rawData);
 
         // Check expiration
         if (record.expiresAt && Date.now() > record.expiresAt) {
@@ -539,7 +566,8 @@ export async function verifyOtpRecord(params: {
           await redis.del(otpKey);
           return {
             success: false,
-            error: "Too many incorrect attempts. For security, please request a new verification code.",
+            error:
+              "Too many incorrect attempts. For security, please request a new verification code.",
           };
         }
 
@@ -582,7 +610,7 @@ export async function verifyOtpRecord(params: {
   }
 
   try {
-    const [record] = await sql<any[]>`
+    const [record] = await sql<EmailVerificationOtpRow[]>`
       SELECT id, otp_hash, metadata, attempts, expires_at
       FROM public.email_verification_otps
       WHERE lower(email) = ${cleanEmail} AND purpose = ${params.purpose}
@@ -698,7 +726,7 @@ export async function createOrUpdateRegistrationSession(params: {
       const existingLink = await redis.get(emailLinkKey);
       if (existingLink) {
         try {
-          const parsed = typeof existingLink === "string" ? JSON.parse(existingLink) : (existingLink as any);
+          const parsed = parseJsonRecord<RedisRegLinkRecord>(existingLink);
           if (parsed?.registrationKey && typeof parsed.registrationKey === "string") {
             await redis.del(`cavenhurst:reg:${parsed.registrationKey}`);
           }
@@ -769,7 +797,10 @@ export async function createOrUpdateRegistrationSession(params: {
         registrationKey,
       };
     } catch (redisErr) {
-      console.warn("[Upstash Redis Reg Session Store Notice - Falling back to Postgres]:", redisErr);
+      console.warn(
+        "[Upstash Redis Reg Session Store Notice - Falling back to Postgres]:",
+        redisErr,
+      );
     }
   }
 
@@ -784,7 +815,7 @@ export async function createOrUpdateRegistrationSession(params: {
     const encryptedPassword = encryptPendingPassword(params.password);
     const otpHashed = hashOtp(params.otp, cleanEmail);
 
-    const [existing] = await sql<any[]>`
+    const [existing] = await sql<EmailVerificationOtpRow[]>`
       SELECT id, resend_count, last_sent_at, created_at
       FROM public.email_verification_otps
       WHERE lower(email) = ${cleanEmail} AND purpose = 'registration'
@@ -804,7 +835,8 @@ export async function createOrUpdateRegistrationSession(params: {
       if (existing.resend_count >= 3) {
         return {
           success: false,
-          error: "Too many verification code requests. Please wait 15 minutes before requesting again.",
+          error:
+            "Too many verification code requests. Please wait 15 minutes before requesting again.",
         };
       }
 
@@ -868,7 +900,7 @@ export async function resendRegistrationSessionOtp(params: {
       if (cleanKey) {
         const raw = await redis.get(`cavenhurst:reg:${cleanKey}`);
         if (raw) {
-          record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+          record = parseJsonRecord<PendingRegistrationRecord>(raw);
         }
       }
 
@@ -876,11 +908,11 @@ export async function resendRegistrationSessionOtp(params: {
       if (!record && cleanEmail) {
         const rawLink = await redis.get(`cavenhurst:otp:registration:${cleanEmail}`);
         if (rawLink) {
-          const parsedLink = typeof rawLink === "string" ? JSON.parse(rawLink) : (rawLink as any);
+          const parsedLink = parseJsonRecord<RedisRegLinkRecord>(rawLink);
           if (parsedLink?.registrationKey) {
             const raw = await redis.get(`cavenhurst:reg:${parsedLink.registrationKey}`);
             if (raw) {
-              record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+              record = parseJsonRecord<PendingRegistrationRecord>(raw);
             }
           }
         }
@@ -917,7 +949,9 @@ export async function resendRegistrationSessionOtp(params: {
         record.expiresAt = now + 5 * 60 * 1000;
 
         // Save back with refreshed 5-minute TTL
-        await redis.set(`cavenhurst:reg:${record.registrationKey}`, JSON.stringify(record), { ex: 300 });
+        await redis.set(`cavenhurst:reg:${record.registrationKey}`, JSON.stringify(record), {
+          ex: 300,
+        });
         await redis.set(
           `cavenhurst:otp:registration:${record.email}`,
           JSON.stringify({
@@ -949,7 +983,7 @@ export async function resendRegistrationSessionOtp(params: {
   const sql = getDb();
   if (sql && (cleanEmail || cleanKey)) {
     try {
-      const [existing] = await sql<any[]>`
+      const [existing] = await sql<EmailVerificationOtpRow[]>`
         SELECT id, metadata, resend_count, last_sent_at, expires_at
         FROM public.email_verification_otps
         WHERE (
@@ -972,15 +1006,16 @@ export async function resendRegistrationSessionOtp(params: {
         if (existing.resend_count >= 3) {
           return {
             success: false,
-            error: "Too many verification code requests. Please wait 15 minutes before requesting again.",
+            error:
+              "Too many verification code requests. Please wait 15 minutes before requesting again.",
           };
         }
 
-        const metadata = existing.metadata || {};
-        const emailToUse = cleanEmail || metadata.email || "";
+        const metadata = (existing.metadata || {}) as Record<string, string>;
+        const emailToUse = cleanEmail || metadata["email"] || "";
         const newOtpHash = hashOtp(params.otp, emailToUse);
-        const regKey = metadata.registrationKey || cleanKey || generateRegistrationKey();
-        metadata.registrationKey = regKey;
+        const regKey = metadata["registrationKey"] || cleanKey || generateRegistrationKey();
+        metadata["registrationKey"] = regKey;
 
         await sql`
           UPDATE public.email_verification_otps SET
@@ -997,7 +1032,7 @@ export async function resendRegistrationSessionOtp(params: {
           success: true,
           registrationKey: regKey,
           email: emailToUse,
-          fullName: metadata.fullName || "Customer",
+          fullName: metadata["fullName"] || "Customer",
         };
       }
     } catch (dbErr) {
@@ -1044,7 +1079,7 @@ export async function verifyRegistrationSession(params: {
       if (cleanKey) {
         const raw = await redis.get(`cavenhurst:reg:${cleanKey}`);
         if (raw) {
-          record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+          record = parseJsonRecord<PendingRegistrationRecord>(raw);
         }
       }
 
@@ -1052,11 +1087,11 @@ export async function verifyRegistrationSession(params: {
       if (!record && cleanEmail) {
         const rawLink = await redis.get(`cavenhurst:otp:registration:${cleanEmail}`);
         if (rawLink) {
-          const parsedLink = typeof rawLink === "string" ? JSON.parse(rawLink) : (rawLink as any);
+          const parsedLink = parseJsonRecord<RedisRegLinkRecord>(rawLink);
           if (parsedLink?.registrationKey) {
             const raw = await redis.get(`cavenhurst:reg:${parsedLink.registrationKey}`);
             if (raw) {
-              record = typeof raw === "string" ? JSON.parse(raw) : (raw as any);
+              record = parseJsonRecord<PendingRegistrationRecord>(raw);
             }
           }
         }
@@ -1097,7 +1132,9 @@ export async function verifyRegistrationSession(params: {
 
           const ttl = await redis.ttl(`cavenhurst:reg:${record.registrationKey}`);
           if (ttl > 0) {
-            await redis.set(`cavenhurst:reg:${record.registrationKey}`, JSON.stringify(record), { ex: ttl });
+            await redis.set(`cavenhurst:reg:${record.registrationKey}`, JSON.stringify(record), {
+              ex: ttl,
+            });
           }
 
           return {
@@ -1148,7 +1185,7 @@ export async function verifyRegistrationSession(params: {
   const sql = getDb();
   if (sql && (cleanEmail || cleanKey)) {
     try {
-      const [pgRecord] = await sql<any[]>`
+      const [pgRecord] = await sql<EmailVerificationOtpRow[]>`
         SELECT id, otp_hash, metadata, attempts, expires_at
         FROM public.email_verification_otps
         WHERE (
@@ -1175,8 +1212,8 @@ export async function verifyRegistrationSession(params: {
           };
         }
 
-        const meta = pgRecord.metadata || {};
-        const emailToVerify = cleanEmail || meta.email || "";
+        const meta = (pgRecord.metadata || {}) as Record<string, string | undefined>;
+        const emailToVerify = cleanEmail || meta["email"] || "";
         const expectedHash = hashOtp(cleanOtp, emailToVerify);
 
         if (pgRecord.otp_hash !== expectedHash) {
@@ -1192,13 +1229,13 @@ export async function verifyRegistrationSession(params: {
 
         let plainPassword = "";
         try {
-          if (meta.encryptedPassword) {
-            plainPassword = decryptPendingPassword(meta.encryptedPassword);
+          if (meta["encryptedPassword"]) {
+            plainPassword = decryptPendingPassword(meta["encryptedPassword"]);
           } else {
-            plainPassword = meta.password || "";
+            plainPassword = meta["password"] || "";
           }
         } catch {
-          plainPassword = meta.password || "";
+          plainPassword = meta["password"] || "";
         }
 
         await sql`DELETE FROM public.email_verification_otps WHERE id = ${pgRecord.id}`;
@@ -1207,8 +1244,8 @@ export async function verifyRegistrationSession(params: {
           success: true,
           record: {
             email: emailToVerify,
-            fullName: meta.fullName || "Customer",
-            phone: meta.phone || "",
+            fullName: meta["fullName"] || "Customer",
+            phone: meta["phone"] || "",
             password: plainPassword,
           },
         };
@@ -1228,7 +1265,10 @@ export async function verifyRegistrationSession(params: {
 /**
  * Removes a registration session if email delivery failed or on explicit rollback.
  */
-export async function deleteRegistrationSession(registrationKey?: string, email?: string): Promise<void> {
+export async function deleteRegistrationSession(
+  registrationKey?: string,
+  email?: string,
+): Promise<void> {
   const cleanKey = (registrationKey || "").trim();
   const cleanEmail = (email || "").toLowerCase().trim();
   const redis = getRedis();

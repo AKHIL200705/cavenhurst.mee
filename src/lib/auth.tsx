@@ -250,13 +250,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         console.warn("[AuthProvider] Profile check notice:", err);
         if (active) {
-          const hasMetaName = Boolean(
-            user.user_metadata?.full_name || user.user_metadata?.name,
-          );
+          const hasMetaName = Boolean(user.user_metadata?.full_name || user.user_metadata?.name);
           const rawPhone =
-            user.user_metadata?.mobile_number ||
-            user.user_metadata?.phone ||
-            user.phone;
+            user.user_metadata?.mobile_number || user.user_metadata?.phone || user.phone;
           const cleanPhone = rawPhone ? String(rawPhone).replace(/\D/g, "").slice(-10) : "";
           const hasMetaPhone = cleanPhone.length === 10;
           setProfileCompleted(hasMetaName && hasMetaPhone);

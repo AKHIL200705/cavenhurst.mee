@@ -52,7 +52,10 @@ export async function getVariantAvailableStock(
         };
       }
     } catch (err) {
-      console.warn("[Inventory Service] Direct DB lookup error, falling back to Supabase client:", err);
+      console.warn(
+        "[Inventory Service] Direct DB lookup error, falling back to Supabase client:",
+        err,
+      );
     }
   }
 
@@ -73,7 +76,9 @@ export async function getVariantAvailableStock(
       .eq("variant_id", variantId)
       .maybeSingle();
 
-    const totalStock = inv ? Number(inv.stock_quantity) || 0 : Number(variants[0]!.stock_quantity) || 0;
+    const totalStock = inv
+      ? Number(inv.stock_quantity) || 0
+      : Number(variants[0]!.stock_quantity) || 0;
     const reserved = inv ? Number(inv.reserved_quantity) || 0 : 0;
     return {
       variantId,
@@ -124,7 +129,9 @@ export async function reserveOrderInventory(
           `;
 
           if (!updated || updated.length === 0) {
-            throw new Error(`Item "${item.name}" (${item.size}) is no longer available in the requested quantity.`);
+            throw new Error(
+              `Item "${item.name}" (${item.size}) is no longer available in the requested quantity.`,
+            );
           }
 
           // Insert reservation record
@@ -277,7 +284,7 @@ export async function commitOrderInventory(
                 ${newStock},
                 'order_sale',
                 ${orderNumber},
-                ${userId || 'system'},
+                ${userId || "system"},
                 NOW()
               )
             `;

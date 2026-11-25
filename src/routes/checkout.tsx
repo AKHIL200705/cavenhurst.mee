@@ -25,6 +25,19 @@ declare global {
   }
 }
 
+interface SavedAddressOption {
+  id: string;
+  full_name: string | null;
+  phone: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  is_default: boolean | null;
+  address_type?: string | null;
+}
+
 export const Route = createFileRoute("/checkout")({
   head: () => meta("Checkout", "Secure checkout for CAVENHURST orders across India."),
   component: Checkout,
@@ -104,9 +117,9 @@ function Checkout() {
     serviceable: null,
   });
 
-  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddressOption[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string>("new");
-  const applyAddressRef = useRef<(addr: any) => void>(() => {});
+  const applyAddressRef = useRef<(addr: SavedAddressOption) => void>(() => {});
 
   const [f, setF] = useState({
     name: "",
@@ -139,8 +152,9 @@ function Checkout() {
       })
         .then((addrs) => {
           if (addrs && addrs.length > 0) {
-            setSavedAddresses(addrs);
-            const defaultAddr = addrs.find((a: any) => a.is_default) || addrs[0];
+            const list = addrs as unknown as SavedAddressOption[];
+            setSavedAddresses(list);
+            const defaultAddr = list.find((a) => a.is_default) || list[0];
             if (defaultAddr) {
               setSelectedAddressId(defaultAddr.id);
               applyAddressRef.current(defaultAddr);
@@ -151,7 +165,7 @@ function Checkout() {
     }
   }, [user, sessionToken]);
 
-  const applyAddress = (addr: any) => {
+  const applyAddress = (addr: SavedAddressOption) => {
     const fullStreet = [addr.address_line1, addr.address_line2].filter(Boolean).join(", ");
     setF((prev) => ({
       ...prev,
@@ -205,8 +219,13 @@ function Checkout() {
   if (cart.length === 0 && !orderSuccess) {
     return (
       <div className="py-28 text-center font-sans">
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">Your bag is empty</h1>
-        <Link to="/shop" className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90">
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">
+          Your bag is empty
+        </h1>
+        <Link
+          to="/shop"
+          className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90"
+        >
           Shop now
         </Link>
       </div>
@@ -220,7 +239,9 @@ function Checkout() {
         <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-500">
           <CheckCircle2 className="h-12 w-12" />
         </div>
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">Order Confirmed</h1>
+        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">
+          Order Confirmed
+        </h1>
         <p className="mt-3 font-heading text-lg sm:text-xl font-bold tracking-wider text-emerald-400">
           #{orderSuccess.orderNumber}
         </p>
@@ -404,7 +425,9 @@ function Checkout() {
     >
       <div className="space-y-8">
         <div>
-          <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">Checkout</h1>
+          <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">
+            Checkout
+          </h1>
           <p className="mt-2 text-xs sm:text-sm text-silver font-medium">
             Official CAVENHURST store · Dispatched via ShipMaxx360 from Andhra Pradesh Hub (521212)
           </p>
@@ -412,7 +435,9 @@ function Checkout() {
 
         {/* Contact Information */}
         <section>
-          <h2 className="mb-4 font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">1. CONTACT INFORMATION</h2>
+          <h2 className="mb-4 font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">
+            1. CONTACT INFORMATION
+          </h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <input
               required
@@ -443,7 +468,9 @@ function Checkout() {
         {/* Shipping Address */}
         <section>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">2. DELIVERY ADDRESS</h2>
+            <h2 className="font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">
+              2. DELIVERY ADDRESS
+            </h2>
             <span className="flex items-center gap-1 text-xs text-silver">
               <Truck className="h-3.5 w-3.5" /> India-wide delivery
             </span>
@@ -455,7 +482,7 @@ function Checkout() {
                 Saved Address Book
               </p>
               <div className="grid gap-2 sm:grid-cols-2 mb-4">
-                {savedAddresses.map((a: any) => {
+                {savedAddresses.map((a) => {
                   const isSel = selectedAddressId === a.id;
                   return (
                     <button
@@ -570,7 +597,9 @@ function Checkout() {
         {/* Payment Method */}
         <section>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">3. PAYMENT OPTION</h2>
+            <h2 className="font-heading text-sm sm:text-base font-bold uppercase tracking-wider text-foreground">
+              3. PAYMENT OPTION
+            </h2>
             <span className="flex items-center gap-1 text-xs text-silver">
               <ShieldCheck className="h-3.5 w-3.5" /> 256-bit SSL encrypted
             </span>
@@ -628,11 +657,7 @@ function Checkout() {
             return (
               <li key={`${c.slug}-${c.size}-${c.color}`} className="flex gap-3 text-sm">
                 {itemImage ? (
-                  <img
-                    src={itemImage}
-                    alt={itemName}
-                    className="h-16 w-12 rounded object-cover"
-                  />
+                  <img src={itemImage} alt={itemName} className="h-16 w-12 rounded object-cover" />
                 ) : (
                   <div className="h-16 w-12 rounded bg-muted flex items-center justify-center text-[10px] text-muted-foreground">
                     CAV

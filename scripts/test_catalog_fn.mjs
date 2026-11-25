@@ -1,4 +1,4 @@
-import { getStoreCatalogServerFn } from '../src/server/catalog.ts';
+import { getStoreCatalogServerFn } from "../src/server/catalog.ts";
 
 // Test catalog server function
 async function test() {

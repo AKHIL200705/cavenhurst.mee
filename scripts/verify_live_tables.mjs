@@ -1,7 +1,7 @@
-import postgres from 'postgres';
-import fs from 'fs';
+import postgres from "postgres";
+import fs from "fs";
 
-const env = fs.readFileSync('.env', 'utf8');
+const env = fs.readFileSync(".env", "utf8");
 const match = env.match(/DATABASE_URL="?([^\r\n"]+)"?/);
 const sql = postgres(match[1], { ssl: { rejectUnauthorized: false } });
 
@@ -17,7 +17,9 @@ async function verifyTables() {
 
   for (const t of tables) {
     try {
-      const [{ count }] = await sql.unsafe(`SELECT COUNT(*) as count FROM public."${t.table_name}"`);
+      const [{ count }] = await sql.unsafe(
+        `SELECT COUNT(*) as count FROM public."${t.table_name}"`,
+      );
       console.log(`- ${t.table_name.padEnd(25)} : ${count} rows`);
     } catch (e) {
       console.log(`- ${t.table_name.padEnd(25)} : error reading (${e.message})`);

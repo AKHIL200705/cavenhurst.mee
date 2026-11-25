@@ -105,7 +105,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return item.maxStock;
     }
     const p = getProduct(item.slug);
-    return (p?.stock?.[item.size] ?? 10);
+    return p?.stock?.[item.size] ?? 10;
   };
 
   const add = (item: CartItem) => {
@@ -140,9 +140,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const max = stockFor(targetItem);
     const finalQty = Math.max(1, Math.min(qty, max > 0 ? max : qty));
 
-    setCart((c) =>
-      c.map((x, j) => (j === i ? { ...x, qty: finalQty } : x)),
-    );
+    setCart((c) => c.map((x, j) => (j === i ? { ...x, qty: finalQty } : x)));
 
     // Persist to Supabase if authenticated
     if (user && sessionToken) {
