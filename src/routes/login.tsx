@@ -724,7 +724,7 @@ function Login() {
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Existing User – Login
+                LOGIN
               </button>
               <button
                 type="button"
@@ -736,7 +736,7 @@ function Login() {
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                New User – Create Account
+                SIGNUP
               </button>
             </div>
           )}
