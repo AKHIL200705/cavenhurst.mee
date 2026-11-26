@@ -191,6 +191,13 @@ export async function sendEmailJsOtp(params: {
   httpStatus?: number;
   errorCategory?: string;
 }> {
+  if (process.env["E2E_DRY_RUN_EMAILJS"] === "true") {
+    return {
+      success: true,
+      httpStatus: 200,
+    };
+  }
+
   const { serviceId, templateId, publicKey, privateKey } = getEmailJsConfig();
   const purpose = params.purpose || "registration";
 
@@ -216,10 +223,17 @@ export async function sendEmailJsOtp(params: {
     };
   }
 
-  const expiryText = `${params.expiryMinutes || 5} minutes`;
+  const expiryMinutes = params.expiryMinutes || 5;
+  const expiryText = `${expiryMinutes} minutes`;
   const displayName = params.toName || "Customer";
+  const purposeLabel =
+    purpose === "forgot_password"
+      ? "password reset"
+      : purpose === "test"
+        ? "diagnostic test"
+        : "account verification";
 
-  // Comprehensive template params covering all possible EmailJS template variables
+  // Comprehensive template params covering common EmailJS template variables without self-spoofing reply_to
   const templateParams = {
     to_email: params.toEmail,
     email: params.toEmail,
@@ -229,16 +243,20 @@ export async function sendEmailJsOtp(params: {
     client_email: params.toEmail,
     customer_email: params.toEmail,
     to: params.toEmail,
-    reply_to: params.toEmail,
+    reply_to: "cavenhurst@gmail.com",
     to_name: displayName,
     name: displayName,
     user_name: displayName,
+    company_name: "CAVENHURST",
+    brand: "CAVENHURST",
     otp: params.otp,
+    otp_code: params.otp,
     code: params.otp,
     passcode: params.otp,
     verification_code: params.otp,
     expiry: expiryText,
-    expiry_minutes: params.expiryMinutes || 5,
+    expiry_minutes: expiryMinutes,
+    message: `Your CAVENHURST ${purposeLabel} OTP is ${params.otp}. It expires in ${expiryText}.`,
   };
 
   const payload = {
@@ -258,6 +276,7 @@ export async function sendEmailJsOtp(params: {
         "User-Agent": "CAVENHURST-Server/1.0",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(12_000),
     });
 
     if (!res.ok) {
@@ -282,9 +301,10 @@ export async function sendEmailJsOtp(params: {
       } else if (res.status === 400 || res.status === 404) {
         category = "INVALID_CONFIG";
         userFriendlyError = `Invalid EmailJS configuration: ${errText || "Service ID or Template ID not found."}`;
-      } else if (res.status === 429) {
+      } else if (res.status === 403 || res.status === 429) {
         category = "RATE_LIMIT";
-        userFriendlyError = "Email sending quota reached for today. Please try again later.";
+        userFriendlyError =
+          "Email sending limit or quota reached in EmailJS. Please verify your EmailJS dashboard quota.";
       }
 
       await logEmailDiagnostic({
@@ -306,6 +326,8 @@ export async function sendEmailJsOtp(params: {
       };
     }
 
+    const okBody = (await res.text().catch(() => "")).trim();
+
     // Success response from EmailJS API (HTTP 200)
     await logEmailDiagnostic({
       recipient: params.toEmail,
@@ -313,14 +335,16 @@ export async function sendEmailJsOtp(params: {
       otpGenerated: true,
       backendStatus: "SUCCESS",
       emailjsStatus: "SUCCESS",
-      emailjsHttpStatus: 200,
+      emailjsHttpStatus: res.status,
       errorCategory: "NONE",
-      diagnosticMessage: "Email accepted by EmailJS API for delivery.",
+      diagnosticMessage: okBody
+        ? `Email accepted by EmailJS API (${res.status}: ${okBody}).`
+        : "Email accepted by EmailJS API for delivery.",
     });
 
     return {
       success: true,
-      httpStatus: 200,
+      httpStatus: res.status,
     };
   } catch (err) {
     const errorMsg =
@@ -346,6 +370,46 @@ export async function sendEmailJsOtp(params: {
 }
 
 /**
+ * Atomically claims the 60s OTP cooldown slot and enforces the 15-minute resend quota in Redis.
+ * Prevents concurrent double-clicks from dispatching duplicate conflicting OTP codes.
+ */
+async function acquireRedisOtpRateSlot(
+  redis: NonNullable<ReturnType<typeof getRedis>>,
+  cooldownKey: string,
+  resendCountKey: string,
+): Promise<
+  | { allowed: true; nextResendCount: number }
+  | { allowed: false; error: string; cooldownSeconds?: number }
+> {
+  const currentResends = Number((await redis.get(resendCountKey)) || 0);
+  if (currentResends >= 3) {
+    const quotaTtl = await redis.ttl(resendCountKey);
+    const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
+    return {
+      allowed: false,
+      error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+    };
+  }
+
+  const lockAcquired = await redis.set(cooldownKey, "1", { ex: 60, nx: true });
+  if (!lockAcquired) {
+    const ttl = await redis.ttl(cooldownKey);
+    const waitSeconds = ttl > 0 ? ttl : 60;
+    return {
+      allowed: false,
+      error: `Please wait ${waitSeconds} seconds before requesting a new code.`,
+      cooldownSeconds: waitSeconds,
+    };
+  }
+
+  const nextResendCount = Number(await redis.incr(resendCountKey));
+  if (nextResendCount === 1) {
+    await redis.expire(resendCountKey, 900);
+  }
+  return { allowed: true, nextResendCount };
+}
+
+/**
  * Stores or updates an OTP request in Upstash Redis (with PostgreSQL fallback).
  * Enforces rate limiting: 60s cooldown, max 3 resends per 15 minutes, 5-minute expiration.
  */
@@ -367,24 +431,14 @@ export async function createOrUpdateOtpRecord(params: {
       const resendCountKey = `cavenhurst:resend_count:${params.purpose}:${cleanEmail}`;
       const otpKey = `cavenhurst:otp:${params.purpose}:${cleanEmail}`;
 
-      // Check 60-second cooldown
-      const inCooldown = await redis.ttl(cooldownKey);
-      if (inCooldown > 0) {
+      const rateSlot = await acquireRedisOtpRateSlot(redis, cooldownKey, resendCountKey);
+      if (!rateSlot.allowed) {
         return {
           success: false,
-          error: `Please wait ${inCooldown} seconds before requesting a new code.`,
-          cooldownSeconds: inCooldown,
-        };
-      }
-
-      // Check 15-minute resend quota (max 3 resends)
-      const currentResends = Number((await redis.get(resendCountKey)) || 0);
-      if (currentResends >= 3) {
-        const quotaTtl = await redis.ttl(resendCountKey);
-        const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
-        return {
-          success: false,
-          error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+          error: rateSlot.error,
+          ...(rateSlot.cooldownSeconds !== undefined
+            ? { cooldownSeconds: rateSlot.cooldownSeconds }
+            : {}),
         };
       }
 
@@ -399,15 +453,6 @@ export async function createOrUpdateOtpRecord(params: {
 
       await redis.set(otpKey, JSON.stringify(record), { ex: 300 });
 
-      // Set 60-second cooldown key
-      await redis.set(cooldownKey, "1", { ex: 60 });
-
-      // Increment resend counter with 15-minute expiration (900 seconds)
-      await redis.incr(resendCountKey);
-      if (currentResends === 0) {
-        await redis.expire(resendCountKey, 900);
-      }
-
       // Dual-sync to PostgreSQL audit table
       const sql = getDb();
       if (sql) {
@@ -415,7 +460,7 @@ export async function createOrUpdateOtpRecord(params: {
           INSERT INTO public.email_verification_otps (
             email, otp_hash, purpose, metadata, attempts, resend_count, last_sent_at, expires_at, created_at
           ) VALUES (
-            ${cleanEmail}, ${otpHashed}, ${params.purpose}, ${sql.json(params.metadata || {})}, 0, ${currentResends + 1}, now(), now() + interval '5 minutes', now()
+            ${cleanEmail}, ${otpHashed}, ${params.purpose}, ${sql.json(params.metadata || {})}, 0, ${rateSlot.nextResendCount}, now(), now() + interval '5 minutes', now()
           )
         `.catch(() => {});
       }
@@ -701,24 +746,14 @@ export async function createOrUpdateRegistrationSession(params: {
 
   if (redis) {
     try {
-      // 1. Check 60-second cooldown
-      const inCooldown = await redis.ttl(cooldownKey);
-      if (inCooldown > 0) {
+      const rateSlot = await acquireRedisOtpRateSlot(redis, cooldownKey, resendCountKey);
+      if (!rateSlot.allowed) {
         return {
           success: false,
-          error: `Please wait ${inCooldown} seconds before requesting a new code.`,
-          cooldownSeconds: inCooldown,
-        };
-      }
-
-      // 2. Check 15-minute resend quota (max 3 resends)
-      const currentResends = Number((await redis.get(resendCountKey)) || 0);
-      if (currentResends >= 3) {
-        const quotaTtl = await redis.ttl(resendCountKey);
-        const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
-        return {
-          success: false,
-          error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+          error: rateSlot.error,
+          ...(rateSlot.cooldownSeconds !== undefined
+            ? { cooldownSeconds: rateSlot.cooldownSeconds }
+            : {}),
         };
       }
 
@@ -766,15 +801,6 @@ export async function createOrUpdateRegistrationSession(params: {
         { ex: 300 },
       );
 
-      // Set 60-second cooldown
-      await redis.set(cooldownKey, "1", { ex: 60 });
-
-      // Increment resend counter with 15-minute expiration
-      await redis.incr(resendCountKey);
-      if (currentResends === 0) {
-        await redis.expire(resendCountKey, 900);
-      }
-
       // Dual-sync to Postgres audit table
       const sql = getDb();
       if (sql) {
@@ -787,7 +813,7 @@ export async function createOrUpdateRegistrationSession(params: {
               fullName: cleanName,
               phone: cleanPhone,
               encryptedPassword,
-            })}, 0, ${currentResends + 1}, now(), now() + interval '5 minutes', now()
+            })}, 0, ${rateSlot.nextResendCount}, now(), now() + interval '5 minutes', now()
           )
         `.catch(() => {});
       }
@@ -922,24 +948,14 @@ export async function resendRegistrationSessionOtp(params: {
         const cooldownKey = `cavenhurst:cooldown:registration:${record.email}`;
         const resendCountKey = `cavenhurst:resend_count:registration:${record.email}`;
 
-        // Check cooldown
-        const inCooldown = await redis.ttl(cooldownKey);
-        if (inCooldown > 0) {
+        const rateSlot = await acquireRedisOtpRateSlot(redis, cooldownKey, resendCountKey);
+        if (!rateSlot.allowed) {
           return {
             success: false,
-            error: `Please wait ${inCooldown} seconds before requesting a new code.`,
-            cooldownSeconds: inCooldown,
-          };
-        }
-
-        // Check 15-minute resend quota
-        const currentResends = Number((await redis.get(resendCountKey)) || 0);
-        if (currentResends >= 3) {
-          const quotaTtl = await redis.ttl(resendCountKey);
-          const waitMins = Math.ceil(Math.max(1, quotaTtl) / 60);
-          return {
-            success: false,
-            error: `Too many verification code requests. Please wait ${waitMins} minute(s) before requesting again.`,
+            error: rateSlot.error,
+            ...(rateSlot.cooldownSeconds !== undefined
+              ? { cooldownSeconds: rateSlot.cooldownSeconds }
+              : {}),
           };
         }
 
@@ -963,9 +979,21 @@ export async function resendRegistrationSessionOtp(params: {
           { ex: 300 },
         );
 
-        // Reset cooldown & increment resend
-        await redis.set(cooldownKey, "1", { ex: 60 });
-        await redis.incr(resendCountKey);
+        const sql = getDb();
+        if (sql) {
+          sql`
+            INSERT INTO public.email_verification_otps (
+              email, otp_hash, purpose, metadata, attempts, resend_count, last_sent_at, expires_at, created_at
+            ) VALUES (
+              ${record.email}, ${newOtpHash}, 'registration', ${sql.json({
+                registrationKey: record.registrationKey,
+                fullName: record.fullName,
+                phone: record.phone,
+                encryptedPassword: record.encryptedPassword,
+              })}, 0, ${rateSlot.nextResendCount}, now(), now() + interval '5 minutes', now()
+            )
+          `.catch(() => {});
+        }
 
         return {
           success: true,

@@ -61,6 +61,7 @@ export default defineConfig({
       ...fileEnv,
       ...(process.env as Record<string, string>),
       RAZORPAY_WEBHOOK_SECRET: webhookSecret,
+      E2E_DRY_RUN_EMAILJS: "true",
     },
   },
 });

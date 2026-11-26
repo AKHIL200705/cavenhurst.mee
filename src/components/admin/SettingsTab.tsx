@@ -1,7 +1,11 @@
-import { useState, useEffect } from "react";
-import { Save, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Save, RefreshCw, Mail, Send, CheckCircle2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
-import { updateAdminSettingsServerFn } from "@/server/admin";
+import {
+  updateAdminSettingsServerFn,
+  getAdminEmailDiagnosticsServerFn,
+  testAdminEmailDeliveryServerFn,
+} from "@/server/admin";
 
 export interface AdminSettingsData {
   pickup_pincode?: string | null | undefined;
@@ -32,6 +36,72 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
   const [packageType, setPackageType] = useState("One packed T-shirt");
   const [codEnabled, setCodEnabled] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  const [testEmail, setTestEmail] = useState("");
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    httpStatus?: number | undefined;
+    errorCategory?: string | undefined;
+  } | null>(null);
+  const [emailDiagnostics, setEmailDiagnostics] = useState<
+    Array<{
+      id: string;
+      recipient_masked: string;
+      purpose: string;
+      emailjs_status: string | null;
+      emailjs_http_status: number | null;
+      error_category: string | null;
+      diagnostic_message: string | null;
+      created_at: string;
+    }>
+  >([]);
+  const [loadingDiagnostics, setLoadingDiagnostics] = useState(false);
+
+  const loadEmailDiagnostics = useCallback(async () => {
+    setLoadingDiagnostics(true);
+    try {
+      const rows = await getAdminEmailDiagnosticsServerFn({ data: { authToken } });
+      setEmailDiagnostics(rows || []);
+    } catch {
+      /* ignore transient fetch failure */
+    } finally {
+      setLoadingDiagnostics(false);
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    void loadEmailDiagnostics();
+  }, [loadEmailDiagnostics]);
+
+  const handleTestEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testEmail.trim()) {
+      toast.error("Enter a test recipient email address.");
+      return;
+    }
+    setTestingEmail(true);
+    setTestResult(null);
+    try {
+      const res = await testAdminEmailDeliveryServerFn({
+        data: { authToken, testEmail: testEmail.trim() },
+      });
+      setTestResult(res);
+      if (res.success) {
+        toast.success(res.message);
+      } else {
+        toast.error(res.message);
+      }
+      await loadEmailDiagnostics();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to run EmailJS delivery test.";
+      setTestResult({ success: false, message });
+      toast.error(message);
+    } finally {
+      setTestingEmail(false);
+    }
+  };
 
   useEffect(() => {
     if (settings) {
@@ -220,6 +290,240 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
           </button>
         </div>
       </form>
+
+      {/* EmailJS OTP Delivery Test & Diagnostics */}
+      <div className="space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-2 font-heading text-base font-bold uppercase tracking-tight text-foreground">
+              <Mail className="h-4 w-4 text-electric" /> EmailJS OTP Delivery Test & Diagnostics
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Verify live EmailJS API acceptance and inspect recent OTP dispatch results. If EmailJS
+              returns HTTP 200 without appearing in your inbox, check Spam/Promotions, your
+              connected Gmail Sent/Inbox for bounces, and EmailJS Dashboard History.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadEmailDiagnostics()}
+            disabled={loadingDiagnostics}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 font-semibold hover:bg-accent"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loadingDiagnostics ? "animate-spin" : ""}`} />{" "}
+            Refresh Logs
+          </button>
+        </div>
+
+        <form onSubmit={handleTestEmail} className="flex flex-col gap-2 sm:flex-row">
+          <input
+            type="email"
+            required
+            value={testEmail}
+            onChange={(e) => setTestEmail(e.target.value)}
+            placeholder="recipient@example.com"
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs outline-none focus:border-electric"
+          />
+          <button
+            type="submit"
+            disabled={testingEmail}
+            className="flex items-center justify-center gap-1.5 rounded-md bg-secondary px-4 py-2 font-bold uppercase tracking-wider text-foreground hover:bg-secondary/80 disabled:opacity-50"
+          >
+            {testingEmail ? (
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            Send Test OTP
+          </button>
+        </form>
+
+        {testResult && (
+          <div
+            className={`flex items-start gap-2 rounded-lg border p-3 ${
+              testResult.success
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {testResult.success ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="font-semibold">{testResult.message}</p>
+              {testResult.errorCategory && testResult.errorCategory !== "NONE" && (
+                <p className="mt-0.5 font-mono text-[10px]">Category: {testResult.errorCategory}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-left">
+            <thead className="border-b border-border bg-muted/40 font-mono text-[11px] text-muted-foreground">
+              <tr>
+                <th className="p-2.5">Timestamp</th>
+                <th className="p-2.5">Recipient</th>
+                <th className="p-2.5">Purpose</th>
+                <th className="p-2.5">HTTP / Status</th>
+                <th className="p-2.5">Details</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border font-mono text-[11px]">
+              {emailDiagnostics.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-4 text-center text-muted-foreground italic">
+                    No EmailJS delivery attempts recorded yet.
+                  </td>
+                </tr>
+              ) : (
+                emailDiagnostics.slice(0, 12).map((row) => (
+                  <tr key={row.id} className="hover:bg-accent/20">
+                    <td className="p-2.5 text-muted-foreground whitespace-nowrap">
+                      {new Date(row.created_at).toLocaleString()}
+                    </td>
+                    <td className="p-2.5">{row.recipient_masked}</td>
+                    <td className="p-2.5 uppercase">{row.purpose}</td>
+                    <td className="p-2.5">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                          row.emailjs_status === "SUCCESS"
+                            ? "bg-emerald-500/15 text-emerald-400"
+                            : "bg-rose-500/15 text-rose-400"
+                        }`}
+                      >
+                        {row.emailjs_http_status || "-"} {row.emailjs_status}
+                      </span>
+                    </td>
+                    <td className="p-2.5 text-muted-foreground max-w-xs truncate">
+                      {row.diagnostic_message || row.error_category || "-"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* EmailJS OTP Delivery Test & Diagnostics */}
+      <div className="space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="flex items-center gap-2 font-heading text-base font-bold uppercase tracking-tight text-foreground">
+              <Mail className="h-4 w-4 text-electric" /> EmailJS OTP Delivery Test & Diagnostics
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Verify live EmailJS API acceptance and inspect recent OTP dispatch results. If EmailJS
+              returns HTTP 200 without appearing in your inbox, check Spam/Promotions, your
+              connected Gmail Sent/Inbox for bounces, and EmailJS Dashboard History.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadEmailDiagnostics()}
+            disabled={loadingDiagnostics}
+            className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 font-semibold hover:bg-accent"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loadingDiagnostics ? "animate-spin" : ""}`} />{" "}
+            Refresh Logs
+          </button>
+        </div>
+
+        <form onSubmit={handleTestEmail} className="flex flex-col gap-2 sm:flex-row">
+          <input
+            type="email"
+            required
+            value={testEmail}
+            onChange={(e) => setTestEmail(e.target.value)}
+            placeholder="recipient@example.com"
+            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs outline-none focus:border-electric"
+          />
+          <button
+            type="submit"
+            disabled={testingEmail}
+            className="flex items-center justify-center gap-1.5 rounded-md bg-secondary px-4 py-2 font-bold uppercase tracking-wider text-foreground hover:bg-secondary/80 disabled:opacity-50"
+          >
+            {testingEmail ? (
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Send className="h-3.5 w-3.5" />
+            )}
+            Send Test OTP
+          </button>
+        </form>
+
+        {testResult && (
+          <div
+            className={`flex items-start gap-2 rounded-lg border p-3 ${
+              testResult.success
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+            }`}
+          >
+            {testResult.success ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            )}
+            <div>
+              <p className="font-semibold">{testResult.message}</p>
+              {testResult.errorCategory && testResult.errorCategory !== "NONE" && (
+                <p className="mt-0.5 font-mono text-[10px]">Category: {testResult.errorCategory}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-left">
+            <thead className="border-b border-border bg-muted/40 font-mono text-[11px] text-muted-foreground">
+              <tr>
+                <th className="p-2.5">Timestamp</th>
+                <th className="p-2.5">Recipient</th>
+                <th className="p-2.5">Purpose</th>
+                <th className="p-2.5">HTTP / Status</th>
+                <th className="p-2.5">Details</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border font-mono text-[11px]">
+              {emailDiagnostics.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-4 text-center text-muted-foreground italic">
+                    No EmailJS delivery attempts recorded yet.
+                  </td>
+                </tr>
+              ) : (
+                emailDiagnostics.slice(0, 12).map((row) => (
+                  <tr key={row.id} className="hover:bg-accent/20">
+                    <td className="p-2.5 text-muted-foreground whitespace-nowrap">
+                      {new Date(row.created_at).toLocaleString()}
+                    </td>
+                    <td className="p-2.5">{row.recipient_masked}</td>
+                    <td className="p-2.5 uppercase">{row.purpose}</td>
+                    <td className="p-2.5">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                          row.emailjs_status === "SUCCESS"
+                            ? "bg-emerald-500/15 text-emerald-400"
+                            : "bg-rose-500/15 text-rose-400"
+                        }`}
+                      >
+                        {row.emailjs_http_status || "-"} {row.emailjs_status}
+                      </span>
+                    </td>
+                    <td className="p-2.5 text-muted-foreground max-w-xs truncate">
+                      {row.diagnostic_message || row.error_category || "-"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
