@@ -173,7 +173,7 @@ test("Razorpay: Cryptographic HMAC-SHA256 signature verification", () => {
 });
 
 test("Razorpay: Webhook HMAC verification and deterministic event ID", () => {
-  const secret = "whsec_test_secret_987";
+  const secret = "rzp_webhook_unit_test_secret";
   const payloadStr = JSON.stringify({
     event: "payment.captured",
     payload: { payment: { entity: { id: "pay_123", amount: 249900 } } },
