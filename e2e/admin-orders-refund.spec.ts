@@ -141,7 +141,7 @@ test.describe("Admin Login -> Order Status & Refund Updates", () => {
     // 1. Unauthenticated access to /admin must show Restricted Access gate
     await page.goto("/admin");
     await expect(page.getByText("RESTRICTED ACCESS")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("heading", { name: /CAVENHURST Admin Portal/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /CAVENHUSRT Admin Portal/i })).toBeVisible();
 
     // 2. Non-admin customer token must not grant admin access
     const nonAdminToken = signE2eSessionToken({
@@ -153,7 +153,7 @@ test.describe("Admin Login -> Order Status & Refund Updates", () => {
     await page.evaluate(
       ({ id, email, phone, tok }) => {
         localStorage.setItem(
-          "cavenhurst_google_session",
+          "cavenhusrt_google_session",
           JSON.stringify({
             user: {
               id,
@@ -179,10 +179,10 @@ test.describe("Admin Login -> Order Status & Refund Updates", () => {
 
     // 3. Sign in with verified admin session token
     const sql = getE2eSql();
-    const [adminRow] = await sql<{ id: string; full_name: string | null }[]>`
-      SELECT id, full_name FROM public.admin_users WHERE lower(email) = ${adminEmail} LIMIT 1
+    const [adminRow] = await sql<{ auth_id: string | null; full_name: string | null }[]>`
+      SELECT COALESCE(auth_user_id, id::text) AS auth_id, full_name FROM public.admin_users WHERE lower(email) = ${adminEmail} LIMIT 1
     `;
-    const adminId = adminRow?.id || "admin_root";
+    const adminId = adminRow?.auth_id || "admin_root";
     const adminName = adminRow?.full_name || "Administrator";
     const adminToken = signE2eSessionToken({
       sub: adminId,
@@ -194,7 +194,7 @@ test.describe("Admin Login -> Order Status & Refund Updates", () => {
     await page.evaluate(
       ({ id, email, name, tok }) => {
         localStorage.setItem(
-          "cavenhurst_google_session",
+          "cavenhusrt_google_session",
           JSON.stringify({
             user: {
               id,
@@ -206,7 +206,7 @@ test.describe("Admin Login -> Order Status & Refund Updates", () => {
             sessionToken: tok,
           }),
         );
-        localStorage.setItem("cavenhurst_admin_token", tok);
+        localStorage.setItem("cavenhusrt_admin_token", tok);
       },
       { id: adminId, email: adminEmail, name: adminName, tok: adminToken },
     );
@@ -214,8 +214,102 @@ test.describe("Admin Login -> Order Status & Refund Updates", () => {
     await page.reload();
     await expect(page.getByText("OPERATIONS CONSOLE")).toBeVisible({ timeout: 20_000 });
 
+    // 3b. Verify redesigned dark navy admin layout, sidebar, strict white/red Stock Status rules & mobile drawer
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    for (const navLabel of [
+      "Dashboard",
+      "Orders",
+      "Products",
+      "Categories",
+      "Variants",
+      "Inventory",
+      "Payments",
+      "Logistics",
+      "Returns",
+      "Customers",
+      "Coupons",
+      "Analytics",
+      "Settings",
+    ]) {
+      await expect(page.getByRole("button", { name: navLabel, exact: true }).first()).toBeVisible();
+    }
+
+    await expect(page.getByText("Total Orders").first()).toBeVisible();
+    await expect(page.getByText("Paid Revenue").first()).toBeVisible();
+    await expect(page.getByText("Catalog Items").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Order Overview" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Stock Status" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Sales & Revenue Analytics" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Low Stock Watchlist" })).toBeVisible();
+
+    const stockSection = page
+      .getByRole("heading", { name: "Stock Status" })
+      .locator("xpath=ancestor::div[contains(@class,'rounded-xl')][1]");
+    const oosLabelBtn = stockSection.getByRole("button", { name: "OUT OF STOCK", exact: true });
+    await expect(oosLabelBtn).toBeVisible();
+
+    const colorChecks = await oosLabelBtn.evaluate((btn) => {
+      const card = btn.parentElement!;
+      const svg = card.querySelector("svg")!;
+      const countSpan = card.querySelector("span.tabular-nums")!;
+      const toRgb = (cssColor: string) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1;
+        canvas.height = 1;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = cssColor;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = ctx.getImageData(0, 0, 1, 1).data;
+        return { r, g, b };
+      };
+      return {
+        svgColor: toRgb(getComputedStyle(svg).color),
+        countColor: toRgb(getComputedStyle(countSpan).color),
+        btnColor: toRgb(getComputedStyle(btn).color),
+        cardBorderColor: toRgb(getComputedStyle(card).borderColor),
+      };
+    });
+    expect(colorChecks.svgColor).toEqual({ r: 255, g: 255, b: 255 });
+    expect(colorChecks.countColor).toEqual({ r: 255, g: 255, b: 255 });
+    expect(colorChecks.btnColor.r).toBeGreaterThan(200);
+    expect(colorChecks.btnColor.g).toBeLessThan(100);
+    expect(colorChecks.btnColor.b).toBeLessThan(100);
+    expect(colorChecks.cardBorderColor.r).toBeLessThan(100);
+
+    await page.getByRole("button", { name: "Weekly", exact: true }).click();
+    await page.getByRole("button", { name: "Monthly", exact: true }).click();
+    await page.getByRole("button", { name: "Daily", exact: true }).click();
+
+    await page.getByRole("button", { name: "Analytics", exact: true }).first().click();
+    await expect(page.getByRole("heading", { name: "Payment Channel Distribution" })).toBeVisible();
+
+    // Mobile responsive layout & drawer toggle check (Dashboard + Analytics)
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+      )
+      .toBe(true);
+    await page.getByRole("button", { name: "Toggle navigation sidebar" }).click();
+    await expect(page.getByRole("button", { name: "Close sidebar" })).toBeVisible();
+    await page
+      .locator("aside:visible")
+      .getByRole("button", { name: "Dashboard", exact: true })
+      .click();
+    await expect(page.getByRole("button", { name: "Close sidebar" })).toBeHidden();
+    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+      )
+      .toBe(true);
+    await page.setViewportSize({ width: 1280, height: 800 });
+
     // 4. Open Orders tab and inspect seeded order
-    await page.getByRole("button", { name: /^Orders$/i }).click();
+    await page
+      .getByRole("button", { name: /^Orders$/i })
+      .first()
+      .click();
     const searchInput = page.getByPlaceholder("Search Order #, Customer, Phone, AWB...");
     await expect(searchInput).toBeVisible({ timeout: 15_000 });
     await searchInput.fill(orderNumber);

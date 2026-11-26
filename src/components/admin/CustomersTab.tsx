@@ -152,7 +152,7 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
     link.setAttribute("href", url);
     link.setAttribute(
       "download",
-      `cavenhurst-customers-${new Date().toISOString().slice(0, 10)}.csv`,
+      `cavenhusrt-customers-${new Date().toISOString().slice(0, 10)}.csv`,
     );
     document.body.appendChild(link);
     link.click();

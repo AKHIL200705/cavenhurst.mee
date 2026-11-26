@@ -9,7 +9,7 @@ export const Route = createFileRoute("/track-order")({
   validateSearch: (search: Record<string, unknown>): { order?: string | undefined } => ({
     order: typeof search["order"] === "string" ? search["order"] : undefined,
   }),
-  head: () => meta("Track Order", "Track your CAVENHURST shipment across India via ShipMaxx360."),
+  head: () => meta("Track Order", "Track your CAVENHUSRT shipment across India via ShipMaxx360."),
   component: Track,
 });
 
@@ -82,7 +82,7 @@ function Track() {
   return (
     <InfoPage eyebrow="SUPPORT & LOGISTICS" title="Track your shipment">
       <p className="text-muted-foreground">
-        Enter your CAVENHURST Order Number (e.g.{" "}
+        Enter your CAVENHUSRT Order Number (e.g.{" "}
         <span className="font-mono text-foreground font-semibold">CVH-20261114-XXXX</span>) or
         ShipMaxx360 AWB Number to view real-time courier updates.
       </p>

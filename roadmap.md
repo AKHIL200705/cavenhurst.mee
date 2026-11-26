@@ -1,4 +1,4 @@
-# CAVENHURST roadmap
+# CAVENHUSRT roadmap
 
 - [x] Smooth page and product transitions; add subtle glass to navigation and login; verify signed-in and mobile views
 - [x] Refine typography without changing store layouts

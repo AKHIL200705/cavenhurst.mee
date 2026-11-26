@@ -16,7 +16,7 @@ export const Route = createFileRoute("/search")({
       return { products: [] };
     }
   },
-  head: () => meta("Search", "Search CAVENHURST premium apparel."),
+  head: () => meta("Search", "Search CAVENHUSRT premium apparel."),
   component: SearchPage,
 });
 

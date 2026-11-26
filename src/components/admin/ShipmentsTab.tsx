@@ -93,11 +93,11 @@ export function ShipmentsTab({ shipments, loading, onRefresh }: ShipmentsTabProp
                       <span
                         className={`inline-block rounded px-2.5 py-0.5 text-[10px] font-bold uppercase ${
                           s.status === "delivered"
-                            ? "bg-emerald-500/20 text-emerald-400"
+                            ? "border border-[#2b4564] bg-[#122741] text-white"
                             : s.status === "shipped" || s.status === "in_transit"
-                              ? "bg-electric/20 text-electric"
+                              ? "border border-[#2b4564] bg-[#0d243f] text-white"
                               : s.status === "rto_initiated"
-                                ? "bg-rose-500/20 text-rose-400"
+                                ? "border border-[#233b56] bg-[#08192e] text-[#cbd5e1]"
                                 : "bg-muted text-muted-foreground"
                         }`}
                       >

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
-import { Plus, Trash2, X } from "lucide-react";
+import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { saveAdminCouponServerFn, deleteAdminCouponServerFn } from "@/server/admin";
 
@@ -108,6 +108,11 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {loading && coupons.length === 0 && (
+          <div className="col-span-full flex items-center justify-center gap-2 rounded-xl border border-border bg-card p-8 text-xs text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin text-electric" /> Loading coupons...
+          </div>
+        )}
         {coupons.map((c) => (
           <div
             key={c.id}
@@ -154,10 +159,10 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
             <div className="flex items-center justify-end gap-2 border-t border-border/50 pt-3 mt-4">
               <button
                 onClick={() => handleDelete(c.id)}
-                className="text-muted-foreground hover:text-rose-400 p-1 text-xs"
+                className="text-muted-foreground hover:text-white p-1 text-xs transition"
                 title="Delete coupon"
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash2 className="h-4 w-4 text-white" />
               </button>
             </div>
           </div>
@@ -223,7 +228,7 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block font-semibold text-silver mb-1">
                     Min Order Value (₹)
@@ -246,6 +251,19 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
                     placeholder="e.g. 500"
                     value={maxDiscount}
                     onChange={(e) => setMaxDiscount(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background p-2 font-mono outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-silver mb-1">
+                    Usage Limit (optional)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="Unlimited"
+                    value={usageLimit}
+                    onChange={(e) => setUsageLimit(e.target.value)}
                     className="w-full rounded-md border border-input bg-background p-2 font-mono outline-none"
                   />
                 </div>

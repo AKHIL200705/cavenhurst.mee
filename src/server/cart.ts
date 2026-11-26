@@ -15,6 +15,8 @@ export interface CartItemData {
   mrp?: number;
   image?: string | null | undefined;
   maxStock?: number;
+  availableColors?: string[] | undefined;
+  sizeStock?: Record<string, number> | undefined;
 }
 
 export interface SyncCartInput {
@@ -25,8 +27,10 @@ export interface SyncCartInput {
 
 export interface UpdateCartInput {
   authToken?: string | undefined;
-  action: "add" | "setQty" | "remove" | "clear";
+  action: "add" | "setQty" | "remove" | "clear" | "updateVariant";
   item?: CartItemData | undefined;
+  prevSize?: Size | undefined;
+  prevColor?: string | undefined;
   index?: number | undefined;
 }
 
@@ -35,13 +39,17 @@ export interface ToggleWishlistInput {
   productSlug: string;
 }
 
+function postgrestLiteral(val: string): string {
+  return `"${val.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 /**
  * Ensures an active cart row exists for the customer in public.carts.
  */
 async function getOrCreateActiveCart(customerUuid?: string, authUid?: string): Promise<string> {
   const orClauses: string[] = [];
-  if (customerUuid) orClauses.push(`customer_id.eq.${customerUuid}`);
-  if (authUid) orClauses.push(`customer_auth_uid.eq.${authUid}`);
+  if (customerUuid) orClauses.push(`customer_id.eq.${postgrestLiteral(customerUuid)}`);
+  if (authUid) orClauses.push(`customer_auth_uid.eq.${postgrestLiteral(authUid)}`);
 
   const { data: existingCart } = await supabaseAdmin
     .from("carts")
@@ -80,8 +88,8 @@ async function getOrCreateActiveCart(customerUuid?: string, authUid?: string): P
  */
 async function getOrCreateWishlist(customerUuid?: string, authUid?: string): Promise<string> {
   const orClauses: string[] = [];
-  if (customerUuid) orClauses.push(`customer_id.eq.${customerUuid}`);
-  if (authUid) orClauses.push(`customer_auth_uid.eq.${authUid}`);
+  if (customerUuid) orClauses.push(`customer_id.eq.${postgrestLiteral(customerUuid)}`);
+  if (authUid) orClauses.push(`customer_auth_uid.eq.${postgrestLiteral(authUid)}`);
 
   const { data: existingWish } = await supabaseAdmin
     .from("wishlists")
@@ -148,6 +156,7 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
         name,
         price,
         stock,
+        colors,
         images
       )
     `,
@@ -174,6 +183,7 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
       name: string;
       price: number;
       stock: unknown;
+      colors: unknown;
       images: string[] | null;
     } | null;
   }
@@ -182,10 +192,17 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
     (items as unknown as CartItemJoinRow[]).map(async (row) => {
       const prod = row.products;
       const sizeKey = row.size || "M";
+      const parsedStock = parseStockMap(prod?.stock);
       const maxStock = prod?.id
         ? await resolveCartItemStock(prod.id, prod.stock, sizeKey, row.color || undefined)
-        : (parseStockMap(prod?.stock)[sizeKey] ?? 0);
+        : (parsedStock[sizeKey] ?? 0);
       const qty = Math.max(1, Math.min(row.quantity, maxStock > 0 ? maxStock : row.quantity));
+      const rawColors = Array.isArray(prod?.colors) ? prod.colors : [];
+      const availableColors = rawColors
+        .map((c) =>
+          typeof c === "object" && c && "name" in c ? String((c as { name: unknown }).name) : "",
+        )
+        .filter(Boolean);
 
       return {
         id: row.id,
@@ -197,6 +214,8 @@ async function getCartItemsFromDb(cartId: string): Promise<CartItemData[]> {
         price: row.unit_price || prod?.price || 0,
         image: prod?.images?.[0] ? resolveProductAsset(prod.images[0]) : null,
         maxStock,
+        availableColors: availableColors.length > 0 ? availableColors : undefined,
+        sizeStock: Object.keys(parsedStock).length > 0 ? parsedStock : undefined,
       };
     }),
   );
@@ -425,6 +444,72 @@ export const updateCartItemServerFn = createServerFn({ method: "POST" })
         .eq("product_slug", data.item.slug)
         .eq("size", data.item.size)
         .eq("color", data.item.color);
+    } else if (data.action === "updateVariant" && data.item) {
+      const item = data.item;
+      const prevSize = data.prevSize || item.size;
+      const prevColor = data.prevColor || item.color;
+
+      const { data: prod } = await supabaseAdmin
+        .from("products")
+        .select("id, slug, price, stock, is_published")
+        .eq("slug", item.slug)
+        .eq("is_published", true)
+        .maybeSingle();
+
+      if (!prod) {
+        throw new Error("Product unavailable.");
+      }
+
+      const available = await resolveCartItemStock(prod.id, prod.stock, item.size, item.color);
+      if (available <= 0) {
+        throw new Error(`Selected variant (${item.color}, ${item.size}) is out of stock.`);
+      }
+
+      const { data: sourceRow } = await supabaseAdmin
+        .from("cart_items")
+        .select("id, quantity")
+        .eq("cart_id", cartId)
+        .eq("product_slug", item.slug)
+        .eq("size", prevSize)
+        .eq("color", prevColor)
+        .maybeSingle();
+
+      const { data: targetRow } = await supabaseAdmin
+        .from("cart_items")
+        .select("id, quantity")
+        .eq("cart_id", cartId)
+        .eq("product_slug", item.slug)
+        .eq("size", item.size)
+        .eq("color", item.color)
+        .maybeSingle();
+
+      const baseQty = sourceRow?.quantity ?? item.qty;
+      if (targetRow && (!sourceRow || targetRow.id !== sourceRow.id)) {
+        const mergedQty = Math.max(1, Math.min(targetRow.quantity + baseQty, available));
+        await supabaseAdmin
+          .from("cart_items")
+          .update({
+            quantity: mergedQty,
+            unit_price: prod.price,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", targetRow.id);
+        if (sourceRow) {
+          await supabaseAdmin.from("cart_items").delete().eq("id", sourceRow.id);
+        }
+      } else if (sourceRow) {
+        const clampedQty = Math.max(1, Math.min(baseQty, available));
+        await supabaseAdmin
+          .from("cart_items")
+          .update({
+            size: item.size,
+            color: item.color,
+            quantity: clampedQty,
+            unit_price: prod.price,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", sourceRow.id);
+      }
     }
 
     const updated = await getCartItemsFromDb(cartId);

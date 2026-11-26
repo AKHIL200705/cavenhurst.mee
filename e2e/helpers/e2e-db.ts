@@ -58,12 +58,21 @@ export async function closeE2eSql(): Promise<void> {
 
 export function getE2eSessionSecret(): string {
   const env = getE2eEnv();
-  return (
-    env["SESSION_SECRET"] ||
-    env["SUPABASE_SERVICE_ROLE_KEY"] ||
-    env["SUPABASE_SECRET_KEY"] ||
-    env["GOOGLE_CLIENT_SECRET"] ||
-    "368069d30cacfa9c1d616cd3c887b86708d39fd35ed882dfaa4d3290a47937c0"
+  const explicit = (env["SESSION_SECRET"] || "").replace(/^["']|["']$/g, "").trim();
+  if (explicit) return explicit;
+
+  const serviceRole = (env["SUPABASE_SERVICE_ROLE_KEY"] || env["SUPABASE_SECRET_KEY"] || "")
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  if (serviceRole) {
+    return crypto
+      .createHmac("sha256", "cavenhusrt-session-signing-v1")
+      .update(serviceRole)
+      .digest("hex");
+  }
+
+  throw new Error(
+    "SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY must be configured in .env for E2E session signing.",
   );
 }
 
@@ -90,9 +99,31 @@ export function signE2eSessionToken(params: {
   return `${data}.${sig}`;
 }
 
-export function solveSixDigitOtpFromHash(email: string, expectedHash: string): string {
+function getE2eOtpServerSecret(): string {
   const env = getE2eEnv();
-  const salt = (env["SESSION_SECRET"] || "cavenhurst_default_secret_salt").slice(0, 32);
+  const explicit = (env["SESSION_SECRET"] || "").replace(/^["']|["']$/g, "").trim();
+  if (explicit) return explicit;
+
+  const serviceRole = (env["SUPABASE_SERVICE_ROLE_KEY"] || env["SUPABASE_SECRET_KEY"] || "")
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  if (serviceRole) {
+    return crypto
+      .createHmac("sha256", "cavenhusrt-otp-secret-v1")
+      .update(serviceRole)
+      .digest("hex");
+  }
+
+  throw new Error(
+    "SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY must be configured in .env for E2E OTP resolution.",
+  );
+}
+
+export function solveSixDigitOtpFromHash(email: string, expectedHash: string): string {
+  const salt = crypto
+    .createHmac("sha256", getE2eOtpServerSecret())
+    .update("cavenhusrt:otp-hmac-v1")
+    .digest("hex");
   const cleanEmail = email.toLowerCase().trim();
 
   for (let code = 100000; code <= 999999; code++) {
@@ -110,7 +141,7 @@ export function solveSixDigitOtpFromHash(email: string, expectedHash: string): s
 
 export function signRazorpayWebhookBody(rawBody: string): string {
   const env = getE2eEnv();
-  const secret = env["RAZORPAY_WEBHOOK_SECRET"] || "cavenhurst_e2e_razorpay_webhook_secret";
+  const secret = env["RAZORPAY_WEBHOOK_SECRET"] || "cavenhusrt_e2e_razorpay_webhook_secret";
   return crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
 }
 
@@ -147,11 +178,11 @@ export async function clearUpstashE2eKeys(email: string, regKey?: string): Promi
 
   const clean = email.toLowerCase().trim();
   const keys = [
-    `cavenhurst:otp:registration:${clean}`,
-    `cavenhurst:cooldown:registration:${clean}`,
-    `cavenhurst:resend_count:registration:${clean}`,
+    `cavenhusrt:otp:registration:${clean}`,
+    `cavenhusrt:cooldown:registration:${clean}`,
+    `cavenhusrt:resend_count:registration:${clean}`,
   ];
-  if (regKey) keys.push(`cavenhurst:reg:${regKey}`);
+  if (regKey) keys.push(`cavenhusrt:reg:${regKey}`);
 
   try {
     await fetch(`${url.replace(/\/+$/, "")}/del/${keys.map(encodeURIComponent).join("/")}`, {

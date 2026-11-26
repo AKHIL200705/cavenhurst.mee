@@ -61,6 +61,7 @@ export function gateNeedsRedirect({
 }: GateState): boolean {
   const signedIn = Boolean(user);
   if (path === "/terms" || path === "/privacy") return false;
+  if (path === "/admin" || path.startsWith("/admin/")) return false;
   if (!ready || (signedIn && !welcomeReady)) return false;
 
   // A welcome the customer has not yet seen must actually be rendered before it is left.

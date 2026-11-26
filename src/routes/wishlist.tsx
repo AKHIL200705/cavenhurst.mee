@@ -14,7 +14,7 @@ export const Route = createFileRoute("/wishlist")({
       return { products: [] };
     }
   },
-  head: () => meta("Wishlist", "Your saved CAVENHURST pieces."),
+  head: () => meta("Wishlist", "Your saved CAVENHUSRT pieces."),
   component: Wishlist,
 });
 

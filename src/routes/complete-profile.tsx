@@ -19,8 +19,8 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/complete-profile")({
   head: () =>
     meta(
-      "Complete Your Profile — CAVENHURST",
-      "Welcome to CAVENHURST. Complete your profile details to unlock your bespoke shopping experience.",
+      "Complete Your Profile — CAVENHUSRT",
+      "Welcome to CAVENHUSRT. Complete your profile details to unlock your bespoke shopping experience.",
     ),
   validateSearch: (search: Record<string, unknown>) => {
     return {
@@ -48,7 +48,7 @@ function CompleteProfilePage() {
     const clean = String(metaPhone).replace(/\D/g, "").slice(-10);
     return clean.length === 10 ? clean : "";
   });
-  const [countryCode, setCountryCode] = useState("+91");
+  const countryCode = "+91";
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [success, setSuccess] = useState(false);
@@ -99,7 +99,7 @@ function CompleteProfilePage() {
 
       if (result.success) {
         setSuccess(true);
-        toast.success("Profile completed successfully. Welcome to CAVENHURST.");
+        toast.success("Profile completed successfully. Welcome to CAVENHUSRT.");
         await refreshProfile();
         const destination = search.returnTo || "/";
         void navigate({ to: destination, replace: true });
@@ -136,7 +136,7 @@ function CompleteProfilePage() {
               COMPLETE YOUR PROFILE
             </h1>
             <p className="mt-2 font-sans text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-sm">
-              Welcome to CAVENHURST. Complete your details to continue.
+              Welcome to CAVENHUSRT. Complete your details to continue.
             </p>
           </div>
 
@@ -236,7 +236,7 @@ function CompleteProfilePage() {
           <div className="mt-6 pt-5 border-t border-border/50 flex flex-col items-center gap-3 text-center">
             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Protected by CAVENHURST 256-bit encryption</span>
+              <span>Protected by CAVENHUSRT 256-bit encryption</span>
             </div>
 
             <button

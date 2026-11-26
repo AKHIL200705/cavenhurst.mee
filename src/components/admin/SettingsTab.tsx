@@ -27,7 +27,7 @@ interface SettingsTabProps {
 
 export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps) {
   const [pickupPincode, setPickupPincode] = useState("521212");
-  const [pickupAddressName, setPickupAddressName] = useState("CAVENHURST Dispatch Hub");
+  const [pickupAddressName, setPickupAddressName] = useState("CAVENHUSRT Dispatch Hub");
   const [pickupAddressLine1, setPickupAddressLine1] = useState("");
   const [pickupAddressCity, setPickupAddressCity] = useState("");
   const [pickupAddressState, setPickupAddressState] = useState("");
@@ -106,7 +106,7 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
   useEffect(() => {
     if (settings) {
       setPickupPincode(settings.pickup_pincode || "521212");
-      setPickupAddressName(settings.pickup_address_name || "CAVENHURST Dispatch Hub");
+      setPickupAddressName(settings.pickup_address_name || "CAVENHUSRT Dispatch Hub");
       setPickupAddressLine1(settings.pickup_address_line1 || "");
       setPickupAddressCity(settings.pickup_address_city || "");
       setPickupAddressState(settings.pickup_address_state || "");
@@ -185,7 +185,7 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
               required
               value={pickupAddressName}
               onChange={(e) => setPickupAddressName(e.target.value)}
-              placeholder="CAVENHURST Dispatch Hub"
+              placeholder="CAVENHUSRT Dispatch Hub"
               className="w-full rounded-md border border-input bg-background p-2 outline-none focus:border-gold"
             />
           </div>
@@ -342,8 +342,8 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
           <div
             className={`flex items-start gap-2 rounded-lg border p-3 ${
               testResult.success
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                ? "border-[#2b4564] bg-[#122741] text-white"
+                : "border-[#233b56] bg-[#08192e] text-[#cbd5e1]"
             }`}
           >
             {testResult.success ? (
@@ -390,8 +390,8 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
                       <span
                         className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
                           row.emailjs_status === "SUCCESS"
-                            ? "bg-emerald-500/15 text-emerald-400"
-                            : "bg-rose-500/15 text-rose-400"
+                            ? "border border-[#2b4564] bg-[#122741] text-white"
+                            : "border border-[#233b56] bg-[#08192e] text-[#9fb2c9]"
                         }`}
                       >
                         {row.emailjs_http_status || "-"} {row.emailjs_status}
@@ -459,8 +459,8 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
           <div
             className={`flex items-start gap-2 rounded-lg border p-3 ${
               testResult.success
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+                ? "border-[#2b4564] bg-[#122741] text-white"
+                : "border-[#233b56] bg-[#08192e] text-[#cbd5e1]"
             }`}
           >
             {testResult.success ? (
@@ -507,8 +507,8 @@ export function SettingsTab({ settings, authToken, onRefresh }: SettingsTabProps
                       <span
                         className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
                           row.emailjs_status === "SUCCESS"
-                            ? "bg-emerald-500/15 text-emerald-400"
-                            : "bg-rose-500/15 text-rose-400"
+                            ? "border border-[#2b4564] bg-[#122741] text-white"
+                            : "border border-[#233b56] bg-[#08192e] text-[#9fb2c9]"
                         }`}
                       >
                         {row.emailjs_http_status || "-"} {row.emailjs_status}

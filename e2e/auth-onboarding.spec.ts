@@ -12,7 +12,7 @@ test.describe("Customer Registration, OTP Verification, Welcome & Profile Comple
   const testEmail = `akhilsaiabbireddy2007+e2e${uniqueSuffix}@gmail.com`;
   const testPhone = `9${String(uniqueSuffix).slice(-9)}`;
   const testName = "E2E Heritage Buyer";
-  const testPass = "Cavenhurst@2026";
+  const testPass = "Cavenhusrt@2026";
   let capturedRegKey: string | undefined;
 
   test.afterAll(async () => {
@@ -43,7 +43,7 @@ test.describe("Customer Registration, OTP Verification, Welcome & Profile Comple
     await expect(completeBtn).toBeVisible({ timeout: 25_000 });
 
     capturedRegKey = await page.evaluate(
-      () => sessionStorage.getItem("cavenhurst_reg_key") || undefined,
+      () => sessionStorage.getItem("cavenhusrt_reg_key") || undefined,
     );
     expect(capturedRegKey).toMatch(/^reg_[a-f0-9]+$/);
 
@@ -68,9 +68,9 @@ test.describe("Customer Registration, OTP Verification, Welcome & Profile Comple
     // 3. First-time authenticated session must route directly to /welcome
     await page.waitForURL(/\/welcome/, { timeout: 25_000 });
     await expect(page.getByRole("heading", { name: /WELCOME/i })).toBeVisible();
-    await expect(page.getByText("TO CAVENHURST", { exact: true })).toBeVisible();
+    await expect(page.getByText("TO CAVENHUSRT", { exact: true })).toBeVisible();
 
-    const exploreBtn = page.getByRole("button", { name: /EXPLORE CAVENHURST/i });
+    const exploreBtn = page.getByRole("button", { name: /EXPLORE CAVENHUSRT/i });
     await exploreBtn.click();
 
     await page.waitForURL((u) => u.pathname === "/", { timeout: 20_000 });

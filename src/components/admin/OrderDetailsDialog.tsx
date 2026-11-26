@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
-import { X, Truck, CreditCard, User, MapPin, RotateCcw, Ban, History, Clock } from "lucide-react";
+import { X, Truck, CreditCard, User, MapPin, RotateCcw, Ban, History } from "lucide-react";
 import { toast } from "sonner";
 import {
   updateAdminOrderStatusServerFn,
@@ -311,19 +311,28 @@ export function OrderDetailsDialog({
                   {order.payment_status}
                 </span>
               </div>
-              {order.razorpay_payment_id && (
+              {(order.razorpay_payment_id || payment?.razorpay_payment_id) && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Razorpay Payment ID:</span>
                   <span className="font-mono text-[11px] select-all">
-                    {order.razorpay_payment_id}
+                    {order.razorpay_payment_id || payment?.razorpay_payment_id}
                   </span>
                 </div>
               )}
-              {order.razorpay_order_id && (
+              {(order.razorpay_order_id || payment?.razorpay_order_id) && (
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Razorpay Order ID:</span>
                   <span className="font-mono text-[11px] select-all">
-                    {order.razorpay_order_id}
+                    {order.razorpay_order_id || payment?.razorpay_order_id}
+                  </span>
+                </div>
+              )}
+              {payment?.status && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Gateway State:</span>
+                  <span className="font-mono text-[11px] uppercase text-silver">
+                    {payment.status}
+                    {payment.currency ? ` (${payment.currency})` : ""}
                   </span>
                 </div>
               )}
@@ -418,8 +427,8 @@ export function OrderDetailsDialog({
 
         {/* Existing Refunds */}
         {refunds && refunds.length > 0 && (
-          <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 space-y-2">
-            <span className="text-xs font-bold uppercase tracking-brand text-rose-400">
+          <div className="rounded-xl border border-[#243d5c] bg-[#081c32] p-4 space-y-2">
+            <span className="text-xs font-bold uppercase tracking-brand text-white">
               Processed Refunds
             </span>
             {refunds.map((r, i) => (
@@ -428,7 +437,7 @@ export function OrderDetailsDialog({
                 className="flex items-center justify-between text-xs text-muted-foreground"
               >
                 <span>Refund ID: {r.razorpay_refund_id || r.id}</span>
-                <span className="font-mono font-bold text-rose-400">
+                <span className="font-mono font-bold text-white">
                   {formatINR(r.amount)} ({r.status})
                 </span>
               </div>
@@ -571,9 +580,9 @@ export function OrderDetailsDialog({
               {order.payment_status === "paid" && order.razorpay_payment_id && (
                 <button
                   onClick={() => setShowRefundForm(!showRefundForm)}
-                  className="flex items-center gap-1.5 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition"
+                  className="flex items-center gap-1.5 rounded-md border border-[#2b4564] bg-[#122741] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#1a3454] transition"
                 >
-                  <RotateCcw className="h-3.5 w-3.5" /> Razorpay Refund
+                  <RotateCcw className="h-3.5 w-3.5 text-white" /> Razorpay Refund
                 </button>
               )}
 
@@ -581,9 +590,9 @@ export function OrderDetailsDialog({
                 <button
                   onClick={handleCancelOrder}
                   disabled={loading}
-                  className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-rose-400 transition"
+                  className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-bold text-muted-foreground hover:text-white transition"
                 >
-                  <Ban className="h-3.5 w-3.5" /> Cancel & Restock
+                  <Ban className="h-3.5 w-3.5 text-white" /> Cancel & Restock
                 </button>
               )}
             </div>
@@ -593,10 +602,10 @@ export function OrderDetailsDialog({
           {showRefundForm && (
             <form
               onSubmit={handleProcessRefund}
-              className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-3"
+              className="rounded-xl border border-[#243d5c] bg-[#081c32] p-4 space-y-3"
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-rose-400 uppercase tracking-brand">
+                <span className="text-xs font-bold text-white uppercase tracking-brand">
                   Execute Official Razorpay API Refund
                 </span>
                 <button
@@ -636,7 +645,7 @@ export function OrderDetailsDialog({
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-md bg-rose-600 py-2 text-xs font-bold text-white hover:bg-rose-500 transition"
+                className="w-full rounded-md bg-white py-2 text-xs font-bold text-[#031323] hover:bg-slate-200 transition"
               >
                 {loading ? "Transmitting to Razorpay Gateway..." : "Confirm & Issue Refund"}
               </button>

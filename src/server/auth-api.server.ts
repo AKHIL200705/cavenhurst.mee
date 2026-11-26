@@ -230,6 +230,32 @@ export async function executeVerifyRegistrationOtp(data: VerifyRegistrationOtpDa
       `;
       if (inserted?.["id"]) {
         userId = inserted["id"] as string;
+        try {
+          await sql`
+            INSERT INTO auth.identities (
+              id,
+              user_id,
+              identity_data,
+              provider,
+              provider_id,
+              last_sign_in_at,
+              created_at,
+              updated_at
+            ) VALUES (
+              gen_random_uuid(),
+              ${userId}::uuid,
+              ${sql.json({ sub: userId, email: verifiedEmail, email_verified: true })},
+              'email',
+              ${userId},
+              now(),
+              now(),
+              now()
+            )
+            ON CONFLICT (provider_id, provider) DO NOTHING
+          `;
+        } catch (idErr) {
+          console.warn("[Postgres Identity Sync Notice]:", idErr);
+        }
       }
     } catch (dbInsertErr) {
       console.error("[Postgres User Creation Error]:", dbInsertErr);

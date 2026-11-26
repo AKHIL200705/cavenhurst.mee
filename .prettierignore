@@ -2,6 +2,9 @@ node_modules
 dist
 .output
 .vinxi
+.nitro
+.agents
+supabase/backups
 pnpm-lock.yaml
 package-lock.json
 bun.lock

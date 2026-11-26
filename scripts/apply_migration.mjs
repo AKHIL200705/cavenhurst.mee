@@ -26,7 +26,7 @@ async function run() {
       INSERT INTO public.admin_users (email, full_name, role, permissions, is_active)
       VALUES 
         ('akhilsaiabbireddy2007@gmail.com', 'Akhil Sai Abbireddy', 'superadmin', '["*"]'::jsonb, true),
-        ('cavenhurst@gmail.com', 'Cavenhurst Management', 'admin', '["*"]'::jsonb, true)
+        ('cavenhurst@gmail.com', 'Cavenhusrt Management', 'admin', '["*"]'::jsonb, true)
       ON CONFLICT (email) DO UPDATE SET 
         full_name = EXCLUDED.full_name,
         role = EXCLUDED.role,
@@ -121,7 +121,7 @@ async function run() {
     await sql`
       INSERT INTO public.site_settings (key, value, description)
       VALUES 
-        ('general', '{"brandName": "CAVENHURST", "tagline": "Timeless Elegance & Heritage Craftsmanship", "contactEmail": "contact@cavenhurst.com", "currency": "INR", "currencySymbol": "₹"}'::jsonb, 'General store settings'),
+        ('general', '{"brandName": "CAVENHUSRT", "tagline": "Timeless Elegance & Heritage Craftsmanship", "contactEmail": "contact@cavenhusrt.com", "currency": "INR", "currencySymbol": "₹"}'::jsonb, 'General store settings'),
         ('shipping', '{"freeShippingThreshold": 4999, "standardShippingFee": 199, "expressShippingFee": 399, "estimatedDays": "3-5 business days"}'::jsonb, 'Shipping calculation settings'),
         ('announcement', '{"enabled": true, "text": "Complimentary Heritage Packaging on all orders above ₹4,999", "link": "/shop"}'::jsonb, 'Header announcement banner')
       ON CONFLICT (key) DO UPDATE SET

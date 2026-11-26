@@ -1,13 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { Suspense, lazy, useEffect, useState, useCallback, useRef } from "react";
 import { meta } from "@/components/site/InfoPage";
+import { Logo } from "@/components/site/Logo";
 import { useAuth } from "@/lib/auth";
+import { useStore } from "@/lib/store";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import {
-  LayoutDashboard,
+  LayoutGrid,
   Package,
-  Tags,
   FolderTree,
   Layers,
   Boxes,
@@ -16,12 +17,19 @@ import {
   RotateCcw,
   Users,
   Ticket,
+  BarChart3,
   MessageSquare,
   ShieldCheck,
   ScrollText,
-  Sliders,
+  Settings,
   LogOut,
   RefreshCw,
+  Menu,
+  Search,
+  User,
+  Heart,
+  ShoppingBag,
+  X,
 } from "lucide-react";
 
 import { AdminAuthGate } from "@/components/admin/AdminAuthGate";
@@ -43,6 +51,9 @@ import type { AdminSettingsData } from "@/components/admin/SettingsTab";
 
 const OverviewTab = lazy(() =>
   import("@/components/admin/OverviewTab").then((m) => ({ default: m.OverviewTab })),
+);
+const AnalyticsTab = lazy(() =>
+  import("@/components/admin/AnalyticsTab").then((m) => ({ default: m.AnalyticsTab })),
 );
 const OrdersTab = lazy(() =>
   import("@/components/admin/OrdersTab").then((m) => ({ default: m.OrdersTab })),
@@ -104,14 +115,14 @@ import {
   getAdminAuditLogsServerFn,
   getAdminSettingsServerFn,
   getSystemErrorLogsServerFn,
-  adminLoginServerFn,
+  verifyCurrentAdminServerFn,
 } from "@/server/admin";
 
 export const Route = createFileRoute("/admin")({
   head: () =>
     meta(
       "Operations & Fulfillment Console",
-      "CAVENHURST Admin Portal — End-to-end e-commerce management system.",
+      "CAVENHUSRT Admin Portal — End-to-end e-commerce management system.",
     ),
   component: AdminDashboard,
 });
@@ -128,15 +139,16 @@ type AdminTab =
   | "returns"
   | "customers"
   | "coupons"
+  | "analytics"
+  | "settings"
   | "reviews"
   | "admin_users"
-  | "settings"
   | "audit";
 
-const NAV_TABS = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "orders", label: "Orders", icon: Package },
-  { id: "products", label: "Products", icon: Tags },
+const PRIMARY_NAV_TABS = [
+  { id: "overview", label: "Dashboard", icon: LayoutGrid },
+  { id: "orders", label: "Orders", icon: ShoppingBag },
+  { id: "products", label: "Products", icon: Package },
   { id: "categories", label: "Categories", icon: FolderTree },
   { id: "variants", label: "Variants", icon: Layers },
   { id: "inventory", label: "Inventory", icon: Boxes },
@@ -145,11 +157,91 @@ const NAV_TABS = [
   { id: "returns", label: "Returns", icon: RotateCcw },
   { id: "customers", label: "Customers", icon: Users },
   { id: "coupons", label: "Coupons", icon: Ticket },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
+  { id: "settings", label: "Settings", icon: Settings },
+] as const;
+
+const SYSTEM_NAV_TABS = [
   { id: "reviews", label: "Reviews", icon: MessageSquare },
   { id: "admin_users", label: "Admin Roles", icon: ShieldCheck },
-  { id: "settings", label: "Settings", icon: Sliders },
   { id: "audit", label: "Audit Logs", icon: ScrollText },
 ] as const;
+
+function AdminTopBar({
+  onToggleSidebar,
+  showSidebarToggle,
+}: {
+  onToggleSidebar?: () => void;
+  showSidebarToggle: boolean;
+}) {
+  const { count, wishlist } = useStore();
+
+  return (
+    <header className="sticky top-0 z-40 border-b border-[#192c43] bg-[#041426]/95 backdrop-blur-md">
+      <div className="grid h-16 grid-cols-[1fr_auto_1fr] items-center px-3 sm:px-6">
+        <div className="flex items-center gap-3">
+          {showSidebarToggle ? (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              aria-label="Toggle navigation sidebar"
+              className="rounded-lg p-1.5 text-white hover:bg-[#0d233d] transition"
+            >
+              <Menu className="h-5 w-5 text-white" />
+            </button>
+          ) : (
+            <Link
+              to="/"
+              aria-label="Back to store"
+              className="text-xs font-medium text-[#cbd5e1] hover:text-white transition"
+            >
+              Storefront
+            </Link>
+          )}
+        </div>
+
+        <Link to="/" aria-label="CAVENHUSRT home" className="justify-self-center">
+          <Logo />
+        </Link>
+
+        <div className="flex items-center justify-end gap-2 sm:gap-5">
+          <Link to="/search" aria-label="Search" className="p-1 text-white hover:opacity-80">
+            <Search className="h-5 w-5 text-white" />
+          </Link>
+          <Link
+            to="/account"
+            aria-label="Account"
+            className="hidden sm:inline-flex p-1 text-white hover:opacity-80"
+          >
+            <User className="h-5 w-5 text-white" />
+          </Link>
+          <Link
+            to="/wishlist"
+            aria-label="Wishlist"
+            className="relative hidden sm:inline-flex p-1 text-white hover:opacity-80"
+          >
+            <Heart className="h-5 w-5 text-white" />
+            {wishlist.length > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-white px-1 text-[10px] font-bold text-[#031323]">
+                {wishlist.length}
+              </span>
+            )}
+          </Link>
+          <Link
+            to="/cart"
+            aria-label="Shopping bag"
+            className="relative inline-flex p-1 text-white hover:opacity-80"
+          >
+            <ShoppingBag className="h-5 w-5 text-white" />
+            <span className="absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-white px-1 text-[10px] font-bold text-[#031323]">
+              {count}
+            </span>
+          </Link>
+        </div>
+      </div>
+    </header>
+  );
+}
 
 function AdminDashboard() {
   const { user, sessionToken, ready, signOut } = useAuth();
@@ -159,6 +251,8 @@ function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [loading, setLoading] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Data states
@@ -192,37 +286,22 @@ function AdminDashboard() {
   const [systemErrorLogs, setSystemErrorLogs] = useState<SystemErrorLogItem[]>([]);
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
 
-  // 1. Check admin authorization
+  // 1. Check admin authorization strictly via server-verified cryptographic token
   const verifyAdmin = useCallback(async () => {
     setAuthChecking(true);
     try {
-      // 0. Check stored admin token
-      if (typeof window !== "undefined") {
-        const adminTok = localStorage.getItem("cavenhurst_admin_token");
-        if (adminTok) {
-          setAuthToken(adminTok);
-        }
-      }
+      const candidateTokens: string[] = [];
 
-      // 1. Check for active direct Google session first
       if (typeof window !== "undefined") {
-        const stored = localStorage.getItem("cavenhurst_google_session");
+        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
+        if (adminTok) candidateTokens.push(adminTok);
+
+        const stored = localStorage.getItem("cavenhusrt_google_session");
         if (stored) {
           try {
             const parsed = JSON.parse(stored);
-            if (parsed?.sessionToken && parsed?.user) {
-              setAuthToken(parsed.sessionToken);
-              if (
-                parsed.user.isAdmin ||
-                (parsed.user.email &&
-                  ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(
-                    parsed.user.email.toLowerCase(),
-                  ))
-              ) {
-                setIsAdmin(true);
-                setAuthChecking(false);
-                return;
-              }
+            if (parsed?.sessionToken && typeof parsed.sessionToken === "string") {
+              candidateTokens.push(parsed.sessionToken);
             }
           } catch {
             /* ignore */
@@ -230,68 +309,36 @@ function AdminDashboard() {
         }
       }
 
-      // 2. Check current useAuth user
-      if (user) {
-        if (sessionToken) setAuthToken(sessionToken);
-        if (
-          user.isAdmin ||
-          (user.email &&
-            ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(
-              user.email.toLowerCase(),
-            ))
-        ) {
-          setIsAdmin(true);
-          setAuthChecking(false);
-          return;
-        }
-      }
+      if (sessionToken) candidateTokens.push(sessionToken);
 
-      // 3. Check Supabase session
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (token) setAuthToken(token);
-
-      if (!session?.user) {
-        setIsAdmin(false);
-        return;
+      if (session?.access_token) {
+        candidateTokens.push(session.access_token);
       }
 
-      const email = session.user.email?.toLowerCase();
-      if (email && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(email)) {
-        setIsAdmin(true);
-        setAuthChecking(false);
-        return;
+      for (const candidate of candidateTokens) {
+        try {
+          const check = await verifyCurrentAdminServerFn({ data: { authToken: candidate } });
+          if (check?.isAdmin) {
+            setAuthToken(candidate);
+            setIsAdmin(true);
+            return;
+          }
+        } catch {
+          // Try next candidate token
+        }
       }
 
-      const { data: adminRow } = await supabase
-        .from("admin_users")
-        .select("id")
-        .or(`email.eq.${email},auth_user_id.eq.${session.user.id}`)
-        .eq("is_active", true)
-        .maybeSingle();
-
-      if (adminRow) {
-        setIsAdmin(true);
-        setAuthChecking(false);
-        return;
-      }
-
-      const { data: roleRow } = await supabase
-        .from("user_roles")
-        .select("role")
-        .or(`user_id.eq.${session.user.id},user_id.eq.${email}`)
-        .eq("role", "admin")
-        .maybeSingle();
-
-      setIsAdmin(Boolean(roleRow));
+      setAuthToken(undefined);
+      setIsAdmin(false);
     } catch {
       setIsAdmin(false);
     } finally {
       setAuthChecking(false);
     }
-  }, [user, sessionToken]);
+  }, [sessionToken]);
 
   useEffect(() => {
     if (ready) {
@@ -307,12 +354,12 @@ function AdminDashboard() {
     try {
       let token = authToken;
       if (!token && typeof window !== "undefined") {
-        const adminTok = localStorage.getItem("cavenhurst_admin_token");
+        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
         if (adminTok) token = adminTok;
       }
       if (!token && typeof window !== "undefined") {
         try {
-          const stored = localStorage.getItem("cavenhurst_google_session");
+          const stored = localStorage.getItem("cavenhusrt_google_session");
           if (stored) {
             const parsed = JSON.parse(stored);
             if (parsed?.sessionToken) token = parsed.sessionToken;
@@ -331,31 +378,22 @@ function AdminDashboard() {
         token = session?.access_token;
       }
 
-      const userEmail = user?.email?.toLowerCase();
-      if (
-        !token &&
-        userEmail &&
-        ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail)
-      ) {
-        try {
-          const authRes = await adminLoginServerFn({ data: { email: userEmail } });
-          if (authRes?.sessionToken) {
-            token = authRes.sessionToken;
-            if (typeof window !== "undefined") {
-              localStorage.setItem("cavenhurst_admin_token", token);
-            }
-          }
-        } catch {
-          /* ignore */
-        }
+      if (!token) {
+        setIsAdmin(false);
+        return;
       }
 
       setAuthToken(token);
 
       switch (activeTab) {
-        case "overview": {
-          const res = await getAdminOverviewServerFn({ data: { authToken: token } });
+        case "overview":
+        case "analytics": {
+          const [res, variantRes] = await Promise.all([
+            getAdminOverviewServerFn({ data: { authToken: token } }),
+            getAdminVariantsServerFn({ data: { authToken: token } }).catch(() => []),
+          ]);
           setOverviewData(res);
+          setVariants((variantRes as unknown as AdminVariantItem[]) || []);
           break;
         }
         case "orders": {
@@ -448,38 +486,18 @@ function AdminDashboard() {
     } catch (err) {
       console.error("[Admin Data Fetch Error]", err);
       const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
-      const userEmail = user?.email?.toLowerCase();
-      if (
-        msg.includes("Forbidden") &&
-        userEmail &&
-        ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail)
-      ) {
-        try {
-          const fresh = await adminLoginServerFn({ data: { email: userEmail } });
-          if (fresh.sessionToken) {
-            localStorage.setItem("cavenhurst_admin_token", fresh.sessionToken);
-            setAuthToken(fresh.sessionToken);
-            toast.info("Refreshed administrator session. Reloading data...");
-            return;
-          }
-        } catch {
-          /* ignore */
+      if (msg.includes("Forbidden") || msg.includes("Unauthorized")) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("cavenhusrt_admin_token");
         }
+        setAuthToken(undefined);
+        setIsAdmin(false);
       }
       toast.error(msg);
     } finally {
       setLoading(false);
     }
-  }, [
-    isAdmin,
-    activeTab,
-    orderFilter,
-    orderSearch,
-    orderPage,
-    authToken,
-    sessionToken,
-    user?.email,
-  ]);
+  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage, authToken, sessionToken]);
 
   useEffect(() => {
     if (isAdmin) {
@@ -487,9 +505,12 @@ function AdminDashboard() {
     }
   }, [isAdmin, activeTab, loadActiveTabData]);
 
-  // 3. Supabase Realtime multi-table subscription for live operational updates
+  // 3. Supabase Realtime multi-table subscription (with polling fallback when using server HMAC token)
   useEffect(() => {
     if (!isAdmin) return;
+    let cancelled = false;
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
 
     const triggerDebouncedRefresh = () => {
       if (debounceTimerRef.current) {
@@ -500,62 +521,78 @@ function AdminDashboard() {
       }, 800);
     };
 
-    const channel = supabase
-      .channel("admin-live-updates")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "orders" },
-        triggerDebouncedRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "payments" },
-        triggerDebouncedRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory" },
-        triggerDebouncedRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "inventory_movements" },
-        triggerDebouncedRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "shipments" },
-        triggerDebouncedRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "profiles" },
-        triggerDebouncedRefresh,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "returns" },
-        triggerDebouncedRefresh,
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setRealtimeConnected(true);
-        } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
-          setRealtimeConnected(false);
-        }
-      });
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled) return;
+      if (session?.access_token) {
+        activeChannel = supabase
+          .channel("admin-live-updates")
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "orders" },
+            triggerDebouncedRefresh,
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "payments" },
+            triggerDebouncedRefresh,
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "inventory" },
+            triggerDebouncedRefresh,
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "inventory_movements" },
+            triggerDebouncedRefresh,
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "shipments" },
+            triggerDebouncedRefresh,
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "profiles" },
+            triggerDebouncedRefresh,
+          )
+          .on(
+            "postgres_changes",
+            { event: "*", schema: "public", table: "returns" },
+            triggerDebouncedRefresh,
+          )
+          .subscribe((status) => {
+            if (status === "SUBSCRIBED") {
+              setRealtimeConnected(true);
+            } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+              setRealtimeConnected(false);
+            }
+          });
+      } else {
+        setRealtimeConnected(true);
+        pollInterval = setInterval(() => {
+          void loadActiveTabData();
+        }, 30_000);
+      }
+    });
 
     return () => {
+      cancelled = true;
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
-      void supabase.removeChannel(channel);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      if (activeChannel) {
+        void supabase.removeChannel(activeChannel);
+      }
     };
   }, [isAdmin, loadActiveTabData]);
 
   const handleLogout = async () => {
     try {
-      localStorage.removeItem("cavenhurst_admin_token");
+      localStorage.removeItem("cavenhusrt_admin_token");
     } catch {
       /* ignore */
     }
@@ -565,265 +602,391 @@ function AdminDashboard() {
     toast.info("Logged out of administrator session.");
   };
 
+  const handleToggleSidebar = () => {
+    if (typeof window !== "undefined" && window.innerWidth >= 1024) {
+      setSidebarCollapsed((prev) => !prev);
+    } else {
+      setMobileSidebarOpen((prev) => !prev);
+    }
+  };
+
+  const handleSelectTab = (tabId: AdminTab) => {
+    setActiveTab(tabId);
+    setMobileSidebarOpen(false);
+  };
+
   // Auth Checking Loading State
   if (authChecking || !ready) {
     return (
-      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3">
-        <RefreshCw className="h-6 w-6 animate-spin text-silver" />
-        <p className="font-mono text-xs uppercase tracking-brand text-muted-foreground">
-          Authenticating Administrator...
-        </p>
+      <div className="min-h-screen bg-[#031323]">
+        <AdminTopBar showSidebarToggle={false} />
+        <div className="flex min-h-[65vh] flex-col items-center justify-center gap-3">
+          <RefreshCw className="h-6 w-6 animate-spin text-white" />
+          <p className="font-mono text-xs uppercase tracking-brand text-[#9fb2c9]">
+            Authenticating Administrator...
+          </p>
+        </div>
       </div>
     );
   }
 
   // Unauthorized Access Gate
   if (!isAdmin) {
-    return <AdminAuthGate onAuthenticated={() => void verifyAdmin()} />;
+    return (
+      <div className="min-h-screen bg-[#031323]">
+        <AdminTopBar showSidebarToggle={false} />
+        <AdminAuthGate onAuthenticated={() => void verifyAdmin()} />
+      </div>
+    );
   }
 
-  return (
-    <div className="min-h-screen bg-background pb-16">
-      {/* Top Admin App Bar */}
-      <div className="border-b border-border bg-card/60 backdrop-blur-md sticky top-0 z-40">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex h-16 items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="font-logo text-2xl font-bold tracking-brand text-foreground">
-                CAVENHURST
-              </span>
-              <span className="hidden sm:inline-block rounded-full border border-gold/40 bg-gold/10 px-2.5 py-0.5 font-heading text-[10px] font-bold uppercase tracking-wider text-gold">
-                OPERATIONS CONSOLE
-              </span>
-            </div>
+  const sidebarContent = (isCompact: boolean) => (
+    <div className="flex h-full flex-col justify-between bg-[#051629]">
+      <nav aria-label="Admin sections" className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        {PRIMARY_NAV_TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => handleSelectTab(tab.id)}
+              title={tab.label}
+              aria-label={tab.label}
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-xs transition ${
+                isCompact ? "justify-center px-2" : ""
+              } ${
+                isActive
+                  ? "border border-[#2b4564] bg-[#122741] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                  : "border border-transparent font-medium text-[#cbd5e1] hover:bg-[#0b1f36] hover:text-white"
+              }`}
+            >
+              <Icon className="h-4 w-4 shrink-0 text-white" />
+              {!isCompact && <span className="truncate">{tab.label}</span>}
+            </button>
+          );
+        })}
 
-            <div className="flex items-center gap-3 text-xs">
-              {/* Realtime Live Sync Indicator */}
-              <div
-                className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${
-                  realtimeConnected
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                    : "border-border bg-card text-muted-foreground"
+        <div className="my-2 border-t border-[#182c44] pt-2 space-y-1">
+          {SYSTEM_NAV_TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleSelectTab(tab.id)}
+                title={tab.label}
+                aria-label={tab.label}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-xs transition ${
+                  isCompact ? "justify-center px-2" : ""
+                } ${
+                  isActive
+                    ? "border border-[#2b4564] bg-[#122741] font-semibold text-white"
+                    : "border border-transparent font-medium text-[#9fb2c9] hover:bg-[#0b1f36] hover:text-white"
                 }`}
-                title={
-                  realtimeConnected
-                    ? "Live Supabase Realtime active"
-                    : "Connecting to Supabase Realtime..."
-                }
               >
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    realtimeConnected ? "bg-emerald-400 animate-pulse" : "bg-muted-foreground"
-                  }`}
-                />
-                <span className="hidden sm:inline">
-                  {realtimeConnected ? "Live Sync Active" : "Connecting..."}
-                </span>
-              </div>
-
-              <div className="hidden md:flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1 text-muted-foreground">
-                <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                <span className="font-mono">{user?.email || "Admin"}</span>
-              </div>
-
-              <button
-                onClick={() => void loadActiveTabData()}
-                disabled={loading}
-                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-semibold text-foreground hover:bg-accent transition disabled:opacity-50"
-                title="Refresh current dataset"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-                <span className="hidden sm:inline">Refresh</span>
+                <Icon className="h-4 w-4 shrink-0 text-white" />
+                {!isCompact && <span className="truncate">{tab.label}</span>}
               </button>
-
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 font-semibold text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400 transition"
-              >
-                <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Log Out</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Navigation Tabs Bar */}
-          <div className="flex space-x-1 overflow-x-auto pb-1 pt-1 scrollbar-none">
-            {NAV_TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 border-b-2 px-3.5 py-2.5 text-xs font-semibold whitespace-nowrap transition ${
-                    isActive
-                      ? "border-primary text-foreground font-bold"
-                      : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
-                  }`}
-                >
-                  <Icon className={`h-3.5 w-3.5 ${isActive ? "text-gold" : "text-silver"}`} />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </div>
+            );
+          })}
         </div>
-      </div>
+      </nav>
 
-      {/* Main Content Workspace */}
-      <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8">
-        <Suspense
-          fallback={
-            <div className="h-64 w-full animate-pulse rounded-xl border border-border bg-card/50" />
+      {/* Sidebar Footer: Live Sync + Refresh + Log Out */}
+      <div className="border-t border-[#182c44] p-3 space-y-2.5">
+        <div
+          className={`flex items-center ${isCompact ? "justify-center" : "justify-between px-1"} gap-2 text-[11px]`}
+          title={
+            realtimeConnected
+              ? "Live Supabase Realtime active"
+              : "Connecting to Supabase Realtime..."
           }
         >
-          {activeTab === "overview" && overviewData && (
-            <OverviewTab data={overviewData} onNavigateTab={(t) => setActiveTab(t as AdminTab)} />
-          )}
-
-          {activeTab === "orders" && (
-            <OrdersTab
-              orders={orders}
-              totalCount={totalOrdersCount}
-              currentPage={orderPage}
-              limit={25}
-              loading={loading}
-              filter={orderFilter}
-              search={orderSearch}
-              authToken={authToken}
-              onFilterChange={(f) => {
-                setOrderFilter(f);
-                setOrderPage(1);
-              }}
-              onSearchChange={(s) => {
-                setOrderSearch(s);
-                setOrderPage(1);
-              }}
-              onPageChange={(p) => setOrderPage(p)}
-              onRefresh={() => void loadActiveTabData()}
+          <span className="flex items-center gap-2 font-medium text-[#4ade80]">
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                realtimeConnected ? "bg-emerald-400 animate-pulse" : "bg-[#647a96]"
+              }`}
             />
-          )}
+            {!isCompact && (
+              <span className={realtimeConnected ? "text-emerald-400" : "text-[#8fa3bd]"}>
+                {realtimeConnected ? "Live Sync Active" : "Connecting..."}
+              </span>
+            )}
+          </span>
 
-          {activeTab === "products" && (
-            <ProductsTab
-              products={products}
-              loading={loading}
-              authToken={authToken}
-              onRefresh={() => void loadActiveTabData()}
-            />
+          {!isCompact && (
+            <button
+              type="button"
+              onClick={() => void loadActiveTabData()}
+              disabled={loading}
+              aria-label="Refresh current dataset"
+              title="Refresh current dataset"
+              className="rounded-lg p-1.5 text-white hover:bg-[#102946] transition disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-white ${loading ? "animate-spin" : ""}`} />
+            </button>
           )}
+        </div>
 
-          {activeTab === "categories" && (
-            <CategoriesTab
-              categories={categories}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-              authToken={authToken}
-            />
-          )}
+        <button
+          type="button"
+          onClick={handleLogout}
+          title="Log Out"
+          aria-label="Log Out"
+          className={`flex w-full items-center ${
+            isCompact ? "justify-center px-2" : "gap-2.5 px-3"
+          } rounded-xl border border-[#233a54] bg-[#081c32] py-2 text-xs font-medium text-white hover:bg-[#102946] transition`}
+        >
+          <LogOut className="h-3.5 w-3.5 shrink-0 text-white" />
+          {!isCompact && <span>Log Out</span>}
+        </button>
+      </div>
+    </div>
+  );
 
-          {activeTab === "variants" && (
-            <VariantsTab
-              variants={variants}
-              products={products
-                .filter((p): p is typeof p & { id: string } => Boolean(p.id))
-                .map((p) => ({ id: p.id, name: p.name }))}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-              authToken={authToken}
-            />
-          )}
+  return (
+    <div className="min-h-screen bg-[#031323] text-white flex flex-col overflow-x-clip">
+      <AdminTopBar onToggleSidebar={handleToggleSidebar} showSidebarToggle={true} />
 
-          {activeTab === "inventory" && (
-            <InventoryTab
-              inventory={inventory}
-              movements={inventoryMovements}
-              loading={loading}
-              authToken={authToken}
-              onRefresh={() => void loadActiveTabData()}
-            />
-          )}
+      <div className="flex flex-1 min-w-0">
+        {/* Desktop Fixed/Collapsible Left Sidebar */}
+        <aside
+          className={`hidden lg:block shrink-0 border-r border-[#182c44] sticky top-16 h-[calc(100vh-4rem)] transition-all duration-200 ${
+            sidebarCollapsed ? "w-[72px]" : "w-56"
+          }`}
+        >
+          {sidebarContent(sidebarCollapsed)}
+        </aside>
 
-          {activeTab === "payments" && (
-            <PaymentsTab
-              payments={payments}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-              onInitiateRefund={() => setActiveTab("orders")}
+        {/* Mobile Drawer Sidebar */}
+        {mobileSidebarOpen && (
+          <div className="fixed inset-0 z-50 flex lg:hidden">
+            <div
+              className="fixed inset-0 bg-black/70 backdrop-blur-xs"
+              onClick={() => setMobileSidebarOpen(false)}
             />
-          )}
+            <aside className="relative z-10 flex h-full w-64 flex-col border-r border-[#182c44] bg-[#051629] shadow-2xl">
+              <div className="flex h-16 items-center justify-between border-b border-[#182c44] px-4">
+                <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[#9fb2c9]">
+                  OPERATIONS CONSOLE
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMobileSidebarOpen(false)}
+                  aria-label="Close sidebar"
+                  className="rounded-lg p-1.5 text-white hover:bg-[#102946]"
+                >
+                  <X className="h-4 w-4 text-white" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">{sidebarContent(false)}</div>
+            </aside>
+          </div>
+        )}
 
-          {activeTab === "shipments" && (
-            <ShipmentsTab
-              shipments={shipments}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-            />
-          )}
+        {/* Main Content Workspace */}
+        <main className="flex-1 min-w-0 px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
+          <div className="mx-auto max-w-[1400px]">
+            {activeTab !== "overview" && (
+              <div className="mb-4 flex items-center justify-between border-b border-[#182c44] pb-3">
+                <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#8fa3bd]">
+                  OPERATIONS CONSOLE
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void loadActiveTabData()}
+                  disabled={loading}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#223954] bg-[#071a30] px-2.5 py-1 text-xs font-medium text-white hover:bg-[#0d243f] transition disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 text-white ${loading ? "animate-spin" : ""}`}
+                  />
+                  Refresh
+                </button>
+              </div>
+            )}
 
-          {activeTab === "returns" && (
-            <ReturnsTab
-              returns={returns}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-              authToken={authToken}
-            />
-          )}
+            <Suspense
+              fallback={
+                <div className="h-64 w-full animate-pulse rounded-xl border border-[#1d344e] bg-[#06182c]" />
+              }
+            >
+              {activeTab === "overview" &&
+                (overviewData ? (
+                  <OverviewTab
+                    data={overviewData}
+                    variants={variants}
+                    onNavigateTab={(t) => handleSelectTab(t as AdminTab)}
+                  />
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {[1, 2, 3, 4].map((k) => (
+                      <div
+                        key={k}
+                        className="h-32 animate-pulse rounded-xl border border-[#1d344e] bg-[#06182c]"
+                      />
+                    ))}
+                  </div>
+                ))}
 
-          {activeTab === "customers" && (
-            <CustomersTab
-              customers={customers}
-              loading={loading}
-              authToken={authToken}
-              onRefresh={() => void loadActiveTabData()}
-            />
-          )}
+              {activeTab === "analytics" &&
+                (overviewData ? (
+                  <AnalyticsTab
+                    data={overviewData}
+                    onNavigateTab={(t) => handleSelectTab(t as AdminTab)}
+                  />
+                ) : (
+                  <div className="h-80 w-full animate-pulse rounded-xl border border-[#1d344e] bg-[#06182c]" />
+                ))}
 
-          {activeTab === "coupons" && (
-            <CouponsTab
-              coupons={coupons}
-              loading={loading}
-              authToken={authToken}
-              onRefresh={() => void loadActiveTabData()}
-            />
-          )}
+              {activeTab === "orders" && (
+                <OrdersTab
+                  orders={orders}
+                  totalCount={totalOrdersCount}
+                  currentPage={orderPage}
+                  limit={25}
+                  loading={loading}
+                  filter={orderFilter}
+                  search={orderSearch}
+                  authToken={authToken}
+                  onFilterChange={(f) => {
+                    setOrderFilter(f);
+                    setOrderPage(1);
+                  }}
+                  onSearchChange={(s) => {
+                    setOrderSearch(s);
+                    setOrderPage(1);
+                  }}
+                  onPageChange={(p) => setOrderPage(p)}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
 
-          {activeTab === "reviews" && (
-            <ReviewsTab
-              reviews={reviews}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-              authToken={authToken}
-            />
-          )}
+              {activeTab === "products" && (
+                <ProductsTab
+                  products={products}
+                  loading={loading}
+                  authToken={authToken}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
 
-          {activeTab === "admin_users" && (
-            <AdminUsersTab
-              adminUsers={adminUsers}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-              authToken={authToken}
-            />
-          )}
+              {activeTab === "categories" && (
+                <CategoriesTab
+                  categories={categories}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                  authToken={authToken}
+                />
+              )}
 
-          {activeTab === "audit" && (
-            <AuditLogsTab
-              logs={auditLogs}
-              errorLogs={systemErrorLogs}
-              loading={loading}
-              onRefresh={() => void loadActiveTabData()}
-            />
-          )}
+              {activeTab === "variants" && (
+                <VariantsTab
+                  variants={variants}
+                  products={products
+                    .filter((p): p is typeof p & { id: string } => Boolean(p.id))
+                    .map((p) => ({ id: p.id, name: p.name }))}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                  authToken={authToken}
+                />
+              )}
 
-          {activeTab === "settings" && (
-            <SettingsTab
-              settings={settings}
-              authToken={authToken}
-              onRefresh={() => void loadActiveTabData()}
-            />
-          )}
-        </Suspense>
-      </main>
+              {activeTab === "inventory" && (
+                <InventoryTab
+                  inventory={inventory}
+                  movements={inventoryMovements}
+                  loading={loading}
+                  authToken={authToken}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
+
+              {activeTab === "payments" && (
+                <PaymentsTab
+                  payments={payments}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                  onInitiateRefund={() => handleSelectTab("orders")}
+                />
+              )}
+
+              {activeTab === "shipments" && (
+                <ShipmentsTab
+                  shipments={shipments}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
+
+              {activeTab === "returns" && (
+                <ReturnsTab
+                  returns={returns}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                  authToken={authToken}
+                />
+              )}
+
+              {activeTab === "customers" && (
+                <CustomersTab
+                  customers={customers}
+                  loading={loading}
+                  authToken={authToken}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
+
+              {activeTab === "coupons" && (
+                <CouponsTab
+                  coupons={coupons}
+                  loading={loading}
+                  authToken={authToken}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
+
+              {activeTab === "reviews" && (
+                <ReviewsTab
+                  reviews={reviews}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                  authToken={authToken}
+                />
+              )}
+
+              {activeTab === "admin_users" && (
+                <AdminUsersTab
+                  adminUsers={adminUsers}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                  authToken={authToken}
+                />
+              )}
+
+              {activeTab === "audit" && (
+                <AuditLogsTab
+                  logs={auditLogs}
+                  errorLogs={systemErrorLogs}
+                  loading={loading}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
+
+              {activeTab === "settings" && (
+                <SettingsTab
+                  settings={settings}
+                  authToken={authToken}
+                  onRefresh={() => void loadActiveTabData()}
+                />
+              )}
+            </Suspense>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

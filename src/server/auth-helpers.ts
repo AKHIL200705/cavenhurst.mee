@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
@@ -58,18 +59,34 @@ export function isWhitelistedAdminEmail(email?: string | null | undefined): bool
 }
 
 function getSessionSecret(): string {
-  const secret =
-    process.env["SESSION_SECRET"] ||
+  const explicit = (process.env["SESSION_SECRET"] || "").replace(/^["']|["']$/g, "").trim();
+  if (explicit) return explicit;
+
+  const serviceRole = (
     process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
     process.env["SUPABASE_SECRET_KEY"] ||
-    getGoogleClientSecret() ||
-    "368069d30cacfa9c1d616cd3c887b86708d39fd35ed882dfaa4d3290a47937c0";
-  return secret;
+    ""
+  )
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  if (serviceRole) {
+    return createHmac("sha256", "cavenhusrt-session-signing-v1").update(serviceRole).digest("hex");
+  }
+
+  throw new Error(
+    "[Auth Security Error] SESSION_SECRET (or SUPABASE_SERVICE_ROLE_KEY) is not configured in server environment.",
+  );
 }
 
 async function createHmacSha256(data: string, secret: string): Promise<string> {
-  const { createHmac } = await import("node:crypto");
   return createHmac("sha256", secret).update(data).digest("base64url");
+}
+
+function timingSafeCompareStrings(a: string, b: string): boolean {
+  const bufA = Buffer.from(a, "utf8");
+  const bufB = Buffer.from(b, "utf8");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
 
 /**
@@ -99,7 +116,7 @@ export async function signSessionToken(
 }
 
 /**
- * Verifies and decodes a signed HMAC-SHA256 session token.
+ * Verifies and decodes a signed HMAC-SHA256 session token using timing-safe signature validation.
  */
 export async function verifySessionToken(token: string): Promise<GoogleSessionPayload | null> {
   try {
@@ -111,15 +128,32 @@ export async function verifySessionToken(token: string): Promise<GoogleSessionPa
     const sig = parts[2];
     if (!header || !body || !sig) return null;
 
+    const parsedHeader = JSON.parse(Buffer.from(header, "base64url").toString("utf8")) as {
+      alg?: string;
+      typ?: string;
+    };
+    if (parsedHeader?.alg !== "HS256" || parsedHeader?.typ !== "JWT") {
+      return null;
+    }
+
     const data = `${header}.${body}`;
     const expected = await createHmacSha256(data, getSessionSecret());
 
-    if (sig !== expected) return null;
+    if (!timingSafeCompareStrings(sig, expected)) return null;
 
     const parsed = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
     ) as GoogleSessionPayload;
-    if (!parsed || typeof parsed.exp !== "number") return null;
+    if (
+      !parsed ||
+      typeof parsed.sub !== "string" ||
+      !parsed.sub ||
+      typeof parsed.email !== "string" ||
+      !parsed.email ||
+      typeof parsed.exp !== "number"
+    ) {
+      return null;
+    }
 
     if (parsed.exp < Math.floor(Date.now() / 1000)) {
       return null;

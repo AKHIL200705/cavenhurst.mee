@@ -87,4 +87,21 @@ describe("Account welcome rules", () => {
     );
     expect(events).toEqual(["saved", "completed"]);
   });
+  it("allows /admin and /admin/login routes to handle their own AdminAuthGate without customer welcome redirects", () => {
+    expect(
+      gateNeedsRedirect(
+        gate({ user: { id: "admin-1" }, path: "/admin", welcomeSeen: false, welcomeShown: false }),
+      ),
+    ).toBe(false);
+    expect(
+      gateNeedsRedirect(
+        gate({
+          user: { id: "admin-1" },
+          path: "/admin/login",
+          welcomeSeen: false,
+          welcomeShown: false,
+        }),
+      ),
+    ).toBe(false);
+  });
 });

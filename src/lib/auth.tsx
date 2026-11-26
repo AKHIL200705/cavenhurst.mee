@@ -2,7 +2,12 @@ import type React from "react";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { persistWelcome } from "./welcome";
-import { checkProfileCompletionServerFn } from "@/server/customers";
+import {
+  checkProfileCompletionServerFn,
+  completeWelcomeServerFn,
+  getWelcomeStatusServerFn,
+} from "@/server/customers";
+import { checkGoogleSessionServerFn } from "@/server/auth";
 
 export interface AuthUser {
   id: string;
@@ -43,8 +48,7 @@ type Auth = {
   signOut: () => Promise<void>;
 };
 
-const GOOGLE_SESSION_STORAGE_KEY = "cavenhurst_google_session";
-const GOOGLE_WELCOME_KEY_PREFIX = "cavenhurst_welcome_";
+const GOOGLE_SESSION_STORAGE_KEY = "cavenhusrt_google_session";
 
 const g = globalThis as { __cavenAuthCtx?: React.Context<Auth> };
 const Ctx = (g.__cavenAuthCtx ??= createContext<Auth>({
@@ -74,34 +78,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileChecking, setProfileChecking] = useState<boolean>(true);
   const [attempt, setAttempt] = useState(0);
 
-  // Initialize session on mount
+  // Initialize session on mount (always verify persisted session tokens server-side)
   useEffect(() => {
     let active = true;
+    let googleCheckInFlight = false;
 
-    // 1. Check direct Google Authentication session first
-    try {
-      const stored =
-        typeof window !== "undefined" ? localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY) : null;
-      if (stored) {
+    const verifyStoredGoogleSession = async (): Promise<boolean> => {
+      try {
+        const stored =
+          typeof window !== "undefined" ? localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY) : null;
+        if (!stored) return false;
         const parsed = JSON.parse(stored);
-        if (parsed?.user && parsed?.sessionToken) {
-          if (active) {
-            setUser(parsed.user as AuthUser);
-            setSessionToken(parsed.sessionToken as string);
-            setReady(true);
-            return;
-          }
+        if (!parsed?.sessionToken || typeof parsed.sessionToken !== "string") {
+          localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+          return false;
         }
+        const checked = await checkGoogleSessionServerFn({
+          data: { sessionToken: parsed.sessionToken },
+        });
+        if (!active) return true;
+        if (checked.valid && checked.user) {
+          setUser(checked.user as unknown as AuthUser);
+          setSessionToken(parsed.sessionToken);
+          setReady(true);
+          return true;
+        }
+        localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+      } catch {
+        // Ignore storage / network errors and allow fallback
       }
-    } catch {
-      // Continue to Supabase listener
-    }
+      return false;
+    };
 
-    // 2. Active listener for Supabase authentication state
+    googleCheckInFlight = true;
+    void verifyStoredGoogleSession().then((restored) => {
+      googleCheckInFlight = false;
+      if (!active || restored) return;
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!active) return;
+        if (session?.user) {
+          setUser((session.user as unknown as AuthUser) ?? null);
+          setSessionToken(session.access_token ?? null);
+        }
+        setReady(true);
+      });
+    });
+
+    // Active listener for Supabase authentication state
     const { data } = supabase.auth.onAuthStateChange((_e, s) => {
       if (!active) return;
 
       if (_e === "SIGNED_OUT") {
+        try {
+          if (typeof window !== "undefined") {
+            localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+          }
+        } catch {
+          /* ignore */
+        }
         setUser(null);
         setSessionToken(null);
         setReady(true);
@@ -109,7 +143,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (s?.user) {
-        // Active Supabase auth session takes precedence
         try {
           if (typeof window !== "undefined") {
             localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
@@ -123,41 +156,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // If no active Supabase session, fall back to Google session if present
-      try {
-        const stored =
-          typeof window !== "undefined" ? localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY) : null;
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed?.user && parsed?.sessionToken) {
-            setUser(parsed.user as AuthUser);
-            setSessionToken(parsed.sessionToken as string);
-            setReady(true);
-            return;
-          }
-        }
-      } catch {
-        /* ignore */
-      }
-
-      setUser(null);
-      setSessionToken(null);
-      setReady(true);
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!active) return;
-      if (session?.user) {
-        try {
-          if (typeof window !== "undefined") {
-            localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
-          }
-        } catch {
-          /* ignore */
-        }
-        setUser((session.user as unknown as AuthUser) ?? null);
-        setSessionToken(session.access_token ?? null);
-        setReady(true);
+      if (!googleCheckInFlight) {
+        void verifyStoredGoogleSession().then((restored) => {
+          if (!active || restored) return;
+          setUser(null);
+          setSessionToken(null);
+          setReady(true);
+        });
       }
     });
 
@@ -167,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Welcome state check
+  // Welcome state check — strictly read from immutable server/DB row (never browser storage)
   useEffect(() => {
     if (!user) {
       setWelcome(null);
@@ -176,34 +181,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     const userId = user.id;
 
-    // Admins always bypass welcome checks directly
-    if (user.isAdmin) {
-      setWelcome({ userId, seen: true, error: false });
-      return;
-    }
-
-    const localWelcomeSeen =
-      typeof window !== "undefined" &&
-      localStorage.getItem(`${GOOGLE_WELCOME_KEY_PREFIX}${userId}`) === "true";
-
-    if (localWelcomeSeen) {
-      setWelcome({ userId, seen: true, error: false });
-      return;
-    }
-
-    // Try checking Supabase without blocking the user on failure
-    Promise.resolve(
-      supabase
-        .from("customer_welcome")
-        .select("welcome_seen_at")
-        .eq("user_id", userId)
-        .maybeSingle(),
-    )
-      .then(({ data }) => {
+    getWelcomeStatusServerFn({ data: { authToken: sessionToken ?? undefined } })
+      .then((res) => {
         if (active) {
           setWelcome({
             userId,
-            seen: Boolean(data?.welcome_seen_at),
+            seen: Boolean(res?.seen),
             error: false,
           });
         }
@@ -213,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setWelcome({
             userId,
             seen: false,
-            error: false,
+            error: true,
           });
         }
       });
@@ -221,18 +204,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [user, attempt]);
+  }, [user, sessionToken, attempt]);
 
   // Check profile completion status from database
   useEffect(() => {
     if (!user) {
       setProfileCompleted(false);
-      setProfileChecking(false);
-      return;
-    }
-
-    if (user.isAdmin) {
-      setProfileCompleted(true);
       setProfileChecking(false);
       return;
     }
@@ -243,19 +220,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkProfileCompletionServerFn({ data: { authToken: sessionToken ?? undefined } })
       .then((res) => {
         if (active) {
-          setProfileCompleted(Boolean(res.profileCompleted));
+          setProfileCompleted(Boolean(res.isAdmin || res.profileCompleted));
           setProfileChecking(false);
         }
       })
       .catch((err) => {
         console.warn("[AuthProvider] Profile check notice:", err);
         if (active) {
-          const hasMetaName = Boolean(user.user_metadata?.full_name || user.user_metadata?.name);
-          const rawPhone =
-            user.user_metadata?.mobile_number || user.user_metadata?.phone || user.phone;
-          const cleanPhone = rawPhone ? String(rawPhone).replace(/\D/g, "").slice(-10) : "";
-          const hasMetaPhone = cleanPhone.length === 10;
-          setProfileCompleted(hasMetaName && hasMetaPhone);
+          setProfileCompleted(false);
           setProfileChecking(false);
         }
       });
@@ -272,8 +244,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await checkProfileCompletionServerFn({
         data: { authToken: sessionToken ?? undefined },
       });
-      setProfileCompleted(Boolean(res.profileCompleted));
-      return Boolean(res.profileCompleted);
+      const done = Boolean(res.isAdmin || res.profileCompleted);
+      setProfileCompleted(done);
+      return done;
     } catch {
       return false;
     } finally {
@@ -293,9 +266,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(newUser);
     setSessionToken(newSessionToken);
     setReady(true);
-    setWelcome(newUser.isAdmin ? { userId: newUser.id, seen: true, error: false } : null);
+    setWelcome(null);
     checkProfileCompletionServerFn({ data: { authToken: newSessionToken } })
-      .then((res) => setProfileCompleted(Boolean(res.profileCompleted)))
+      .then((res) => setProfileCompleted(Boolean(res.isAdmin || res.profileCompleted)))
       .catch(() => {});
   };
 
@@ -305,20 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await persistWelcome(
       async () => {
-        try {
-          localStorage.setItem(`${GOOGLE_WELCOME_KEY_PREFIX}${userId}`, "true");
-        } catch {
-          /* ignore */
-        }
-
-        try {
-          const { error } = await supabase.from("customer_welcome").insert({ user_id: userId });
-          if (error && error.code !== "23505") {
-            // Ignore error if already recorded or RLS restricted
-          }
-        } catch {
-          // Fallback succeeded locally
-        }
+        await completeWelcomeServerFn({ data: { authToken: sessionToken ?? undefined } });
       },
       () => setWelcome({ userId, seen: true, error: false }),
     );
@@ -327,6 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+      localStorage.removeItem("cavenhusrt_admin_token");
     } catch {
       /* ignore */
     }

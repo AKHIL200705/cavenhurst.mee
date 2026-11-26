@@ -158,7 +158,7 @@ test.describe("Product Selection -> Cart -> Checkout -> Razorpay Webhook", () =>
     await page.addInitScript(
       ({ authUser, authToken }) => {
         localStorage.setItem(
-          "cavenhurst_google_session",
+          "cavenhusrt_google_session",
           JSON.stringify({ user: authUser, sessionToken: authToken }),
         );
       },

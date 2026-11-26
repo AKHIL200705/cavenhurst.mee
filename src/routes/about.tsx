@@ -2,11 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InfoPage, meta } from "@/components/site/InfoPage";
 
 export const Route = createFileRoute("/about")({
-  head: () => meta("About CAVENHURST", "A unisex clothing brand rooted in simplicity."),
+  head: () => meta("About CAVENHUSRT", "A unisex clothing brand rooted in simplicity."),
   component: () => (
     <InfoPage eyebrow="OUR STORY" title="Rooted in simplicity">
       <p>
-        CAVENHURST is a premium Indian clothing brand creating modern, versatile and long-lasting
+        CAVENHUSRT is a premium Indian clothing brand creating modern, versatile and long-lasting
         wardrobe essentials for everyone.
       </p>
       <p>

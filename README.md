@@ -1,15 +1,15 @@
-# CAVENHURST
+# CAVENHUSRT
 
 > Premium apparel for everyday movement. Modern, versatile, and long-lasting wardrobe essentials, designed in India.
 
-This repository contains the full-stack web application for CAVENHURST, built with **TanStack Start**, **React 19**, **TypeScript**, **Tailwind CSS**, **Supabase**, and deployed on **Vercel**.
+This repository contains the full-stack web application for CAVENHUSRT, built with **TanStack Start**, **React 19**, **TypeScript**, **Tailwind CSS**, **Supabase**, and deployed on **Vercel**.
 
 ---
 
 ## Architecture Overview
 
 ```
-GitHub Repository ───> Vercel (Edge / Serverless SSR & Functions) ───> Custom Domain (cavenhurst.in)
+GitHub Repository ───> Vercel (Edge / Serverless SSR & Functions) ───> Custom Domain (cavenhusrt.in)
                               │
                               └───> Supabase (PostgreSQL, Auth, Storage, RLS)
 ```
@@ -131,8 +131,8 @@ In the **Supabase Dashboard** > **Authentication**:
   1. Navigate to **Authentication** > **Providers** > **Phone**.
   2. Configure your SMS provider (e.g. Twilio or MessageBird).
 - **URL Configuration**:
-  1. Set **Site URL** to your production URL (e.g. `https://cavenhurst.in`).
-  2. In **Redirect URLs**, add `http://localhost:3000/**`, `https://*.vercel.app/**`, and `https://cavenhurst.in/**`.
+  1. Set **Site URL** to your production URL (e.g. `https://cavenhusrt.in`).
+  2. In **Redirect URLs**, add `http://localhost:3000/**`, `https://*.vercel.app/**`, and `https://cavenhusrt.in/**`.
 
 ### 3. Supabase Storage
 
@@ -149,11 +149,11 @@ Create a public storage bucket for product assets:
 
 1. Push this repository to your GitHub account:
    ```bash
-   git remote add origin https://github.com/<your-username>/cavenhurst.git
+   git remote add origin https://github.com/<your-username>/cavenhusrt.git
    git push -u origin main
    ```
 2. Log into [Vercel](https://vercel.com) and click **Add New...** > **Project**.
-3. Import your `cavenhurst` repository.
+3. Import your `cavenhusrt` repository.
 
 ### 2. Build & Development Settings
 
@@ -188,7 +188,7 @@ In the Vercel project settings, add the following variables under **Settings** >
 ### 4. Custom Domain Setup
 
 1. In your Vercel Project, go to **Settings** > **Domains**.
-2. Enter your custom domain (e.g., `cavenhurst.in` and `www.cavenhurst.in`).
+2. Enter your custom domain (e.g., `cavenhusrt.in` and `www.cavenhusrt.in`).
 3. Add the required DNS records in your domain registrar:
    - **A Record**: `@` points to `76.76.21.21`
    - **CNAME Record**: `www` points to `cname.vercel-dns.com`

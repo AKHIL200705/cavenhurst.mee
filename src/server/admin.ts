@@ -2,10 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
-import { PRODUCTS, type Product, type Size } from "@/lib/products";
+import { PRODUCTS } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
-import { releaseOrderInventoryReservations } from "./inventory";
+import { releaseOrderInventoryReservations, syncProductAggregateStock } from "./inventory";
 import { verifyGoogleSessionOrToken, signSessionToken } from "./auth-helpers";
 import type { Json, Database, Tables } from "@/integrations/supabase/types";
 
@@ -45,10 +45,115 @@ function isWhitelistedAdminEmail(email?: string | null): boolean {
 }
 
 /**
- * Strict server-side verification of admin identity.
+ * Verifies whether a verified user identity currently holds active admin privileges.
+ * Rejects deactivated admin_users rows even if email is otherwise present.
  */
-async function verifyAdminSession(providedToken?: string | undefined): Promise<AdminAuthResult> {
-  let token = providedToken;
+async function resolveAuthorizedAdmin(
+  userId: string,
+  email?: string | null,
+): Promise<AdminAuthResult | null> {
+  const normalizedEmail = email?.toLowerCase().trim() || null;
+
+  const sql = getDb();
+  if (sql) {
+    try {
+      const [adminRow] = await sql<{ id: string; is_active: boolean }[]>`
+        SELECT id, is_active FROM public.admin_users
+        WHERE auth_user_id = ${userId}
+           OR (${normalizedEmail ? sql`lower(email) = ${normalizedEmail}` : sql`false`})
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+      `;
+      if (adminRow) {
+        if (!adminRow.is_active) return null;
+        return { userId, email: normalizedEmail };
+      }
+
+      if (normalizedEmail && isWhitelistedAdminEmail(normalizedEmail)) {
+        return { userId, email: normalizedEmail };
+      }
+
+      const [roleRow] = await sql<{ role: string }[]>`
+        SELECT role FROM public.user_roles
+        WHERE (user_id = ${userId} OR (${normalizedEmail ? sql`lower(user_id) = ${normalizedEmail}` : sql`false`}))
+          AND role = 'admin'
+        LIMIT 1
+      `;
+      if (roleRow) return { userId, email: normalizedEmail };
+
+      if (normalizedEmail) {
+        const [wl] = await sql<{ email: string }[]>`
+          SELECT email FROM public.admin_whitelist WHERE lower(email) = ${normalizedEmail} LIMIT 1
+        `;
+        if (wl) return { userId, email: normalizedEmail };
+      }
+
+      return null;
+    } catch (dbErr) {
+      console.warn("[Admin Auth] Direct SQL lookup fallback notice:", dbErr);
+    }
+  }
+
+  // Fallback via PostgREST without raw interpolated .or() strings
+  let adminRow: { id: string; is_active: boolean } | null = null;
+  const { data: byUid } = await supabaseAdmin
+    .from("admin_users")
+    .select("id, is_active")
+    .eq("auth_user_id", userId)
+    .maybeSingle();
+  if (byUid) {
+    adminRow = byUid;
+  } else if (normalizedEmail) {
+    const { data: byEmail } = await supabaseAdmin
+      .from("admin_users")
+      .select("id, is_active")
+      .ilike("email", normalizedEmail)
+      .maybeSingle();
+    if (byEmail) adminRow = byEmail;
+  }
+
+  if (adminRow) {
+    if (!adminRow.is_active) return null;
+    return { userId, email: normalizedEmail };
+  }
+
+  if (normalizedEmail && isWhitelistedAdminEmail(normalizedEmail)) {
+    return { userId, email: normalizedEmail };
+  }
+
+  const { data: roleByUid } = await supabaseAdmin
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (roleByUid) return { userId, email: normalizedEmail };
+
+  if (normalizedEmail) {
+    const { data: roleByEmail } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .ilike("user_id", normalizedEmail)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (roleByEmail) return { userId, email: normalizedEmail };
+
+    const { data: whitelist } = await supabaseAdmin
+      .from("admin_whitelist")
+      .select("email")
+      .ilike("email", normalizedEmail)
+      .maybeSingle();
+    if (whitelist) return { userId, email: normalizedEmail };
+  }
+
+  return null;
+}
+
+/**
+ * Extracts bearer token cleanly from explicit param, request Authorization header, or Supabase cookie.
+ */
+function extractBearerToken(providedToken?: string | undefined): string | null {
+  let token = providedToken?.replace(/^Bearer\s+/i, "").trim();
 
   if (!token) {
     const request = getRequest();
@@ -70,106 +175,57 @@ async function verifyAdminSession(providedToken?: string | undefined): Promise<A
   }
 
   if (!token || token.split(".").length !== 3) {
+    return null;
+  }
+  return token;
+}
+
+/**
+ * Strict fail-closed server-side verification of administrator identity.
+ * NEVER accepts unsigned or unverified JWT payloads.
+ */
+async function verifyAdminSession(providedToken?: string | undefined): Promise<AdminAuthResult> {
+  const token = extractBearerToken(providedToken);
+  if (!token) {
     throw new Error("Unauthorized: Administrator authentication session required.");
   }
 
-  // 1. Try Google Admin session verification
+  // 1. Try cryptographically signed HMAC / Google OAuth verification and re-verify live DB authorization
   try {
     const googleSession = await verifyGoogleSessionOrToken(token);
-    if (googleSession && googleSession.isAdmin) {
-      return {
-        userId: googleSession.sub,
-        email: googleSession.email || null,
-      };
+    if (googleSession) {
+      const verified = await resolveAuthorizedAdmin(googleSession.sub, googleSession.email);
+      if (verified) return verified;
+      throw new Error("Forbidden: Administrator account is inactive or unauthorized.");
     }
   } catch (err) {
-    console.warn("[Admin Auth] verifyGoogleSessionOrToken notice:", err);
-  }
-
-  // 2. Try Supabase admin check
-  try {
-    const {
-      data: { user },
-      error,
-    } = await supabaseAdmin.auth.getUser(token);
-
-    if (!error && user) {
-      const email = user.email?.toLowerCase();
-      if (email && isWhitelistedAdminEmail(email)) {
-        return {
-          userId: user.id,
-          email: user.email || null,
-        };
-      }
-
-      // Check admin_users table
-      const { data: adminUser } = await supabaseAdmin
-        .from("admin_users")
-        .select("id, role, is_active")
-        .or(`email.eq.${email},auth_user_id.eq.${user.id}`)
-        .eq("is_active", true)
-        .maybeSingle();
-
-      if (adminUser) {
-        return {
-          userId: user.id,
-          email: user.email || null,
-        };
-      }
-
-      const { data: roleRow, error: roleError } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .or(`user_id.eq.${user.id},user_id.eq.${email}`)
-        .eq("role", "admin")
-        .maybeSingle();
-
-      if (!roleError && roleRow) {
-        return {
-          userId: user.id,
-          email: user.email || null,
-        };
-      }
-
-      const { data: whitelist } = await supabaseAdmin
-        .from("admin_whitelist")
-        .select("email")
-        .eq("email", email || "")
-        .maybeSingle();
-
-      if (whitelist) {
-        return {
-          userId: user.id,
-          email: user.email || null,
-        };
-      }
-    } else if (error) {
-      console.warn("[Admin Auth] supabaseAdmin.auth.getUser notice:", error.message);
+    if (err instanceof Error && err.message.startsWith("Forbidden:")) {
+      throw err;
     }
-  } catch (err) {
-    console.warn("[Admin Auth] Supabase check exception:", err);
+    // Token is not an internal/Google token; try Supabase GoTrue verification next
   }
 
-  // 3. Fallback: Parse unencrypted JWT claims if Supabase Auth API was unreachable on serverless
-  try {
-    const parts = token.split(".");
-    const payloadPart = parts[1];
-    if (parts.length === 3 && payloadPart) {
-      const payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
-      const email = (payload.email || "").toLowerCase().trim();
-      const now = Math.floor(Date.now() / 1000);
-      if (payload.exp && payload.exp > now && email && isWhitelistedAdminEmail(email)) {
-        return {
-          userId: payload.sub || "admin_verified",
-          email,
-        };
-      }
+  // 2. Try Supabase Auth JWT verification via supabaseAdmin.auth.getUser()
+  const {
+    data: { user },
+    error,
+  } = await supabaseAdmin.auth.getUser(token);
+
+  if (!error && user) {
+    const emailConfirmed = Boolean(
+      user.email_confirmed_at || user.confirmed_at || user.app_metadata?.["provider"] === "google",
+    );
+    if (!emailConfirmed) {
+      throw new Error("Forbidden: Verified email required for administrator access.");
     }
-  } catch {
-    /* ignore */
+
+    const verified = await resolveAuthorizedAdmin(user.id, user.email || null);
+    if (verified) return verified;
+  } else if (error) {
+    console.warn("[Admin Auth] supabaseAdmin.auth.getUser rejected token:", error.message);
   }
 
-  throw new Error("Forbidden: Access restricted to CAVENHURST administrators.");
+  throw new Error("Forbidden: Access restricted to CAVENHUSRT administrators.");
 }
 
 /**
@@ -403,8 +459,8 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
               payment_method: (r as { payment_method?: string | null }).payment_method || "online",
             }));
           }),
-          sql<DbRefundRow[]>`SELECT order_id, amount FROM refunds`
-            .catch(() => sql<DbRefundRow[]>`SELECT order_id, amount FROM payment_refunds`)
+          sql<DbRefundRow[]>`SELECT order_id, amount FROM payment_refunds`
+            .catch(() => sql<DbRefundRow[]>`SELECT order_id, amount FROM refunds`)
             .catch(() => []),
           sql<DbProductRow[]>`SELECT slug, name, stock FROM products`.catch(() => []),
           sql<DbCountRow[]>`SELECT count(*)::int as count FROM profiles`
@@ -632,20 +688,20 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
 
     const totalOrders = allOrders.length;
 
-    // Fetch verified refunds to calculate net realized revenue
+    // Fetch verified refunds from canonical payment_refunds first (fallback to legacy refunds only if needed)
     let refundRows: DbRefundRow[] = [];
-    const { data: allRefunds } = await supabaseAdmin.from("refunds").select("order_id, amount");
-    if (allRefunds && allRefunds.length > 0) {
-      refundRows = allRefunds as DbRefundRow[];
+    const { data: payRefunds } = await supabaseAdmin
+      .from("payment_refunds")
+      .select("order_id, amount");
+    if (payRefunds && payRefunds.length > 0) {
+      refundRows = payRefunds.map((r) => ({
+        order_id: r.order_id,
+        amount: Number(r.amount) || 0,
+      }));
     } else {
-      const { data: payRefunds } = await supabaseAdmin
-        .from("payment_refunds")
-        .select("order_id, amount");
-      if (payRefunds && payRefunds.length > 0) {
-        refundRows = payRefunds.map((r) => ({
-          order_id: r.order_id,
-          amount: Number(r.amount) || 0,
-        }));
+      const { data: allRefunds } = await supabaseAdmin.from("refunds").select("order_id, amount");
+      if (allRefunds && allRefunds.length > 0) {
+        refundRows = allRefunds as DbRefundRow[];
       }
     }
 
@@ -857,10 +913,16 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
     }
 
     if (data.search && data.search.trim()) {
-      const s = data.search.trim();
-      query = query.or(
-        `order_number.ilike.%${s}%,customer_name.ilike.%${s}%,customer_email.ilike.%${s}%,customer_phone.ilike.%${s}%,awb_number.ilike.%${s}%`,
-      );
+      const safeSearch = data.search
+        .trim()
+        .replace(/[,()*\\"]/g, "")
+        .slice(0, 80);
+      if (safeSearch) {
+        const pat = `"%${safeSearch}%"`;
+        query = query.or(
+          `order_number.ilike.${pat},customer_name.ilike.${pat},customer_email.ilike.${pat},customer_phone.ilike.${pat},awb_number.ilike.${pat}`,
+        );
+      }
     }
 
     const {
@@ -945,9 +1007,9 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
               sql<
                 Tables<"shipments">[]
               >`SELECT * FROM shipments WHERE order_id = ${order.id} LIMIT 1`.catch(() => []),
-              sql<Tables<"refunds">[]>`SELECT * FROM refunds WHERE order_id = ${order.id}`.catch(
-                () => [],
-              ),
+              sql<
+                Tables<"payment_refunds">[]
+              >`SELECT * FROM payment_refunds WHERE order_id = ${order.id}`.catch(() => []),
               sql<
                 Tables<"order_status_history">[]
               >`SELECT * FROM order_status_history WHERE order_id = ${order.id} ORDER BY created_at ASC`.catch(
@@ -995,7 +1057,7 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
         supabaseAdmin.from("shipping_addresses").select("*").eq("order_id", order.id).maybeSingle(),
         supabaseAdmin.from("payments").select("*").eq("order_id", order.id).maybeSingle(),
         supabaseAdmin.from("shipments").select("*").eq("order_id", order.id).maybeSingle(),
-        supabaseAdmin.from("refunds").select("*").eq("order_id", order.id),
+        supabaseAdmin.from("payment_refunds").select("*").eq("order_id", order.id),
         supabaseAdmin
           .from("order_status_history")
           .select("*")
@@ -1021,10 +1083,10 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
   });
 
 /**
- * Restocks all three inventory tiers for a cancelled order:
- * 1. products.stock (JSONB)
- * 2. product_variants.stock_quantity
- * 3. inventory.stock_quantity
+ * Restocks all three inventory tiers for a cancelled order with color-accurate variant matching:
+ * 1. product_variants.stock_quantity
+ * 2. inventory.stock_quantity
+ * 3. products.stock (aggregate JSONB synced across variants)
  * 4. inventory_movements (audit log)
  */
 async function restockCancelledOrderItems(
@@ -1042,58 +1104,49 @@ async function restockCancelledOrderItems(
 
   for (const item of items) {
     try {
-      // 1. Update product.stock JSONB
       const { data: prod } = await supabaseAdmin
         .from("products")
-        .select("id, stock")
+        .select("id")
         .eq("slug", item.slug)
         .maybeSingle();
 
       if (prod) {
-        const currentStock = (prod.stock || {}) as Record<string, number>;
-        const currentQty = currentStock[item.size] ?? 0;
-        const newQty = currentQty + item.qty;
-        const updatedStock = { ...currentStock, [item.size]: newQty };
-
-        await supabaseAdmin
-          .from("products")
-          .update({ stock: updatedStock as unknown as Json, updated_at: new Date().toISOString() })
-          .eq("id", prod.id);
-
-        // 2. Identify variant and restock product_variants
         let variantId = item.variantId;
         if (!variantId) {
-          const { data: matchedVariants } = await supabaseAdmin
+          const vq = supabaseAdmin
             .from("product_variants")
-            .select("id, stock_quantity")
+            .select("id")
             .eq("product_id", prod.id)
             .eq("size", item.size);
-
-          if (matchedVariants && matchedVariants.length > 0) {
-            variantId = matchedVariants[0]?.id;
+          if (item.color?.trim()) {
+            vq.ilike("color", item.color.trim());
+          }
+          const { data: matchedVariants } = await vq.limit(1);
+          if (matchedVariants && matchedVariants[0]?.id) {
+            variantId = matchedVariants[0].id;
           }
         }
 
+        let newQty = item.qty;
         if (variantId) {
           const { data: currentVar } = await supabaseAdmin
             .from("product_variants")
             .select("stock_quantity")
             .eq("id", variantId)
-            .single();
+            .maybeSingle();
 
           const currentVarQty = currentVar?.stock_quantity ?? 0;
-          const newVarQty = currentVarQty + item.qty;
+          newQty = currentVarQty + item.qty;
 
           await supabaseAdmin
             .from("product_variants")
             .update({
-              stock_quantity: newVarQty,
+              stock_quantity: newQty,
               is_available: true,
               updated_at: new Date().toISOString(),
             })
             .eq("id", variantId);
 
-          // 3. Restock public.inventory
           const { data: currentInv } = await supabaseAdmin
             .from("inventory")
             .select("stock_quantity")
@@ -1101,17 +1154,19 @@ async function restockCancelledOrderItems(
             .maybeSingle();
 
           if (currentInv) {
+            newQty = (currentInv.stock_quantity ?? 0) + item.qty;
             await supabaseAdmin
               .from("inventory")
               .update({
-                stock_quantity: (currentInv.stock_quantity ?? 0) + item.qty,
+                stock_quantity: newQty,
                 updated_at: new Date().toISOString(),
               })
               .eq("variant_id", variantId);
           }
         }
 
-        // 4. Record inventory movement
+        await syncProductAggregateStock(prod.id);
+
         await supabaseAdmin.from("inventory_movements").insert({
           product_id: prod.id,
           product_slug: item.slug,
@@ -1386,18 +1441,36 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
       );
     }
 
-    const amountPaise = Math.round(data.amountInRupees * 100);
-    const maxPaise = Math.round(order.total * 100);
+    // Check remaining refundable balance BEFORE issuing refund against Razorpay
+    const { data: priorRefundRows } = await supabaseAdmin
+      .from("payment_refunds")
+      .select("amount")
+      .eq("order_id", order.id);
 
-    if (amountPaise <= 0 || amountPaise > maxPaise) {
-      throw new Error(`Refund amount must be between ₹1 and ₹${order.total}.`);
+    const priorRefunded = (priorRefundRows || []).reduce(
+      (sum, r) => sum + (Number(r.amount) || 0),
+      0,
+    );
+    const remainingRefundable = Math.max(0, Number(order.total) - priorRefunded);
+
+    if (remainingRefundable <= 0) {
+      throw new Error("Order has already been fully refunded.");
+    }
+
+    const amountPaise = Math.round(data.amountInRupees * 100);
+    const remainingPaise = Math.round(remainingRefundable * 100);
+
+    if (amountPaise <= 0 || amountPaise > remainingPaise) {
+      throw new Error(
+        `Refund amount must be between ₹1 and remaining refundable balance ₹${remainingRefundable}.`,
+      );
     }
 
     const refundRes = await refundRazorpayPayment({
       paymentId: order.razorpay_payment_id,
       amountInPaise: amountPaise,
       notes: {
-        reason: data.reason || "Customer refund initiated by CAVENHURST administration",
+        reason: data.reason || "Customer refund initiated by CAVENHUSRT administration",
       },
     });
 
@@ -1412,51 +1485,35 @@ export const initiateAdminRefundServerFn = createServerFn({ method: "POST" })
       .eq("order_id", order.id)
       .maybeSingle();
 
-    // 1. Canonical insert into payment_refunds
-    try {
-      await supabaseAdmin.from("payment_refunds").insert({
-        order_id: order.id,
-        payment_id: paymentRecord?.id || null,
-        razorpay_payment_id: order.razorpay_payment_id,
-        razorpay_refund_id: refundRes.refundId || null,
-        amount: data.amountInRupees,
-        amount_paise: amountPaise,
-        currency: "INR",
-        reason: data.reason || "Administrative refund",
-        status: refundRes.status || "processed",
-        admin_user_id: admin.userId,
-        raw_response: (refundRes.raw || {}) as unknown as Json,
-      });
-    } catch (prErr) {
-      console.warn("[Admin Refund] payment_refunds write note:", prErr);
-    }
-
-    // 2. Dual-write into refunds table for backward compatibility
-    await supabaseAdmin.from("refunds").insert({
+    // Canonical single-source refund insert into public.payment_refunds
+    const { error: prErr } = await supabaseAdmin.from("payment_refunds").insert({
       order_id: order.id,
+      payment_id: paymentRecord?.id || null,
       razorpay_payment_id: order.razorpay_payment_id,
       razorpay_refund_id: refundRes.refundId || null,
       amount: data.amountInRupees,
       amount_paise: amountPaise,
+      currency: "INR",
       reason: data.reason || "Administrative refund",
       status: refundRes.status || "processed",
       admin_user_id: admin.userId,
       raw_response: (refundRes.raw || {}) as unknown as Json,
     });
 
-    // Calculate total refunds for this order across both tables to distinguish partial vs full refund
-    const [previousRefundsRes, previousPaymentRefundsRes] = await Promise.all([
-      supabaseAdmin.from("refunds").select("amount").eq("order_id", order.id),
-      supabaseAdmin.from("payment_refunds").select("amount").eq("order_id", order.id),
-    ]);
+    if (prErr) {
+      throw new Error(`Refund succeeded on Razorpay but ledger write failed: ${prErr.message}`);
+    }
 
-    const refundList: Array<{ amount: number }> =
-      previousRefundsRes.data && previousRefundsRes.data.length > 0
-        ? (previousRefundsRes.data as Array<{ amount: number }>)
-        : ((previousPaymentRefundsRes?.data || []) as Array<{ amount: number }>);
+    // Query authoritative refund ledger (already contains the newly inserted row — never double-add!)
+    const { data: allPaymentRefunds } = await supabaseAdmin
+      .from("payment_refunds")
+      .select("amount")
+      .eq("order_id", order.id);
 
-    const totalRefunded =
-      refundList.reduce((sum, r) => sum + (Number(r.amount) || 0), 0) + data.amountInRupees;
+    const totalRefunded = (allPaymentRefunds || []).reduce(
+      (sum, r) => sum + (Number(r.amount) || 0),
+      0,
+    );
     const isFullRefund = totalRefunded >= order.total;
 
     const newPaymentStatus = isFullRefund ? "refunded" : "partially_refunded";
@@ -1750,38 +1807,41 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
 
     const stockMap = (prod.stock || {}) as Record<string, number>;
     const oldStock = stockMap[data.size] ?? 0;
-    const changeQty = data.newStock - oldStock;
     const safeNewStock = Math.max(0, data.newStock);
-    const updatedStock = { ...stockMap, [data.size]: safeNewStock };
+    const cleanColor = data.color?.trim() || null;
 
-    // 1. Update product.stock JSONB
-    await supabaseAdmin
-      .from("products")
-      .update({ stock: updatedStock as unknown as Json, updated_at: new Date().toISOString() })
-      .eq("id", prod.id);
-
-    // 2. Find or create matching variant in product_variants
+    // 1. Find or create matching variant in product_variants (matching product_id + size + color)
     let variantId: string | null = null;
     let variantSku = `${prod.slug}-${data.size.toLowerCase()}`;
-    if (data.color) {
-      variantSku += `-${data.color.toLowerCase().replace(/\s+/g, "")}`;
+    if (cleanColor) {
+      variantSku += `-${cleanColor.toLowerCase().replace(/\s+/g, "")}`;
     }
 
-    const { data: existingVariants } = await supabaseAdmin
+    const varQuery = supabaseAdmin
       .from("product_variants")
       .select("id, sku, stock_quantity")
       .eq("product_id", prod.id)
       .eq("size", data.size);
+    if (cleanColor) {
+      varQuery.ilike("color", cleanColor);
+    }
+    const { data: existingVariants } = await varQuery.limit(1);
 
     const matchedVariant =
       existingVariants && existingVariants.length > 0 ? existingVariants[0] : null;
+    const prevVariantStock = matchedVariant?.stock_quantity ?? oldStock;
+    const changeQty = safeNewStock - prevVariantStock;
 
     if (matchedVariant) {
       variantId = matchedVariant.id;
       variantSku = matchedVariant.sku || variantSku;
       await supabaseAdmin
         .from("product_variants")
-        .update({ stock_quantity: safeNewStock, updated_at: new Date().toISOString() })
+        .update({
+          stock_quantity: safeNewStock,
+          is_available: safeNewStock > 0,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", variantId);
     } else {
       const { data: newVariant } = await supabaseAdmin
@@ -1790,7 +1850,7 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
           product_id: prod.id,
           sku: variantSku,
           size: data.size,
-          color: data.color || "Standard",
+          color: cleanColor || "Standard",
           stock_quantity: safeNewStock,
           is_available: safeNewStock > 0,
         })
@@ -1802,7 +1862,7 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
       }
     }
 
-    // 3. Upsert into public.inventory
+    // 2. Upsert into public.inventory
     if (variantId) {
       await supabaseAdmin.from("inventory").upsert(
         {
@@ -1817,12 +1877,24 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
       );
     }
 
+    // 3. Recompute aggregate products.stock JSONB across all colors for each size
+    await syncProductAggregateStock(prod.id);
+    const { data: refreshedProd } = await supabaseAdmin
+      .from("products")
+      .select("stock")
+      .eq("id", prod.id)
+      .single();
+    const updatedStock = (refreshedProd?.stock || {
+      ...stockMap,
+      [data.size]: safeNewStock,
+    }) as Record<string, number>;
+
     // 4. Record inventory movement
     await supabaseAdmin.from("inventory_movements").insert({
       product_id: prod.id,
       product_slug: prod.slug,
       size: data.size,
-      color: data.color || null,
+      color: cleanColor,
       change_qty: changeQty,
       new_stock: safeNewStock,
       reason: data.reason || "admin_adjustment",
@@ -1832,8 +1904,8 @@ export const adjustAdminStockServerFn = createServerFn({ method: "POST" })
     // 5. Audit log
     await recordAdminAuditLog(admin, "stock_adjustment", "inventory", prod.id, {
       size: data.size,
-      color: data.color,
-      oldStock,
+      color: cleanColor,
+      oldStock: prevVariantStock,
       newStock: safeNewStock,
       change: changeQty,
       reason: data.reason,
@@ -2173,13 +2245,16 @@ export const getAdminCustomerDetailsServerFn = createServerFn({ method: "POST" }
 
     if (!customer) throw new Error("Customer not found");
 
-    const orAddrClauses: string[] = [`customer_id.eq.${customer.id}`];
+    const qLit = (val: string) => `"${val.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    const orAddrClauses: string[] = [`customer_id.eq.${qLit(customer.id)}`];
     if (customer.auth_provider_uid)
-      orAddrClauses.push(`customer_auth_uid.eq.${customer.auth_provider_uid}`);
+      orAddrClauses.push(`customer_auth_uid.eq.${qLit(customer.auth_provider_uid)}`);
 
-    const orOrderClauses: string[] = [`customer_id.eq.${customer.id}`];
-    if (customer.auth_provider_uid) orOrderClauses.push(`user_id.eq.${customer.auth_provider_uid}`);
-    if (customer.email) orOrderClauses.push(`customer_email.eq.${customer.email.toLowerCase()}`);
+    const orOrderClauses: string[] = [`customer_id.eq.${qLit(customer.id)}`];
+    if (customer.auth_provider_uid)
+      orOrderClauses.push(`user_id.eq.${qLit(customer.auth_provider_uid)}`);
+    if (customer.email)
+      orOrderClauses.push(`customer_email.eq.${qLit(customer.email.toLowerCase())}`);
 
     const [addressesRes, ordersRes] = await Promise.all([
       supabaseAdmin
@@ -2968,29 +3043,131 @@ export const toggleAdminUserStatusServerFn = createServerFn({ method: "POST" })
 // 18. ADMIN LOGIN
 // -----------------------------------------------------------------------------
 
+export const verifyCurrentAdminServerFn = createServerFn({ method: "POST" })
+  .validator((params?: AdminAuthParams | undefined) => params || {})
+  .handler(
+    async ({
+      data,
+    }): Promise<{ isAdmin: boolean; userId: string | null; email: string | null }> => {
+      try {
+        const admin = await verifyAdminSession(data?.authToken);
+        return { isAdmin: true, userId: admin.userId, email: admin.email };
+      } catch {
+        return { isAdmin: false, userId: null, email: null };
+      }
+    },
+  );
+
+export const uploadProductImageServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: AdminAuthParams & { fileName: string; contentType: string; base64Data: string }) =>
+      params,
+  )
+  .handler(async ({ data }) => {
+    const admin = await verifyAdminSession(data.authToken);
+
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+    const mime = data.contentType.toLowerCase().trim();
+    if (!allowedTypes.has(mime)) {
+      throw new Error("Unsupported image format. Please upload JPEG, PNG, WebP, or AVIF.");
+    }
+
+    const buffer = Buffer.from(data.base64Data, "base64");
+    if (buffer.length === 0 || buffer.length > 5 * 1024 * 1024) {
+      throw new Error("Image file size must be between 1 byte and 5 MB.");
+    }
+
+    const safeFileName = data.fileName.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-80);
+    const filePath = `products/${safeFileName}`;
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from("product-images")
+      .upload(filePath, buffer, { contentType: mime, upsert: true });
+
+    if (uploadError) {
+      throw new Error(uploadError.message);
+    }
+
+    const { data: publicUrlData } = supabaseAdmin.storage
+      .from("product-images")
+      .getPublicUrl(filePath);
+
+    await recordAdminAuditLog(admin, "product_image_upload", "storage", filePath, {
+      mime,
+      bytes: buffer.length,
+    });
+
+    return { success: true, publicUrl: publicUrlData.publicUrl };
+  });
+
 export const adminLoginServerFn = createServerFn({ method: "POST" })
   .validator((input: { email: string; password?: string; authToken?: string }) => input)
   .handler(async ({ data }) => {
     const email = data.email.toLowerCase().trim();
     if (!email) throw new Error("Email address required.");
 
+    let verifiedIdentity: AdminAuthResult | null = null;
+
+    // Require real cryptographic authentication via bearer token or password
+    const token = extractBearerToken(data.authToken);
+    if (token) {
+      const candidate = await verifyAdminSession(token);
+      if (candidate.email && candidate.email.toLowerCase().trim() !== email) {
+        throw new Error("Unauthorized: Authenticated identity does not match administrator email.");
+      }
+      verifiedIdentity = candidate;
+    } else if (data.password && data.password.length >= 6) {
+      let authedUserId = "";
+      try {
+        const { data: signInRes, error: signInErr } = await supabaseAdmin.auth.signInWithPassword({
+          email,
+          password: data.password,
+        });
+        if (!signInErr && signInRes?.user) {
+          authedUserId = signInRes.user.id;
+        }
+      } catch {
+        // Fallback to pgcrypto verification against auth.users when configured
+      }
+
+      if (!authedUserId) {
+        const sql = getDb();
+        if (sql) {
+          const [verified] = await sql<{ id: string; password_matches: boolean }[]>`
+            SELECT id, (encrypted_password = crypt(${data.password}, encrypted_password)) AS password_matches
+            FROM auth.users
+            WHERE lower(email) = ${email}
+            LIMIT 1
+          `;
+          if (verified?.password_matches === true) {
+            authedUserId = verified.id;
+          }
+        }
+      }
+
+      if (!authedUserId) {
+        throw new Error("Invalid administrator email or password.");
+      }
+
+      verifiedIdentity = await resolveAuthorizedAdmin(authedUserId, email);
+      if (!verifiedIdentity) {
+        throw new Error("Access Denied: You do not have administrator permissions for CAVENHUSRT.");
+      }
+    } else {
+      throw new Error(
+        "Unauthorized: Administrator authentication requires a verified session token or password.",
+      );
+    }
+
     const isWhitelisted = isWhitelistedAdminEmail(email);
     const { data: adminUser } = await supabaseAdmin
       .from("admin_users")
       .select("id, email, full_name, role, is_active")
-      .eq("email", email)
+      .ilike("email", email)
       .maybeSingle();
 
-    if (!isWhitelisted && (!adminUser || !adminUser.is_active)) {
-      throw new Error("Access Denied: You do not have administrator permissions for CAVENHURST.");
-    }
-
-    if (data.authToken) {
-      try {
-        await verifyAdminSession(data.authToken);
-      } catch (tokenErr) {
-        console.warn("[Admin Login] Provided authToken notice during login exchange:", tokenErr);
-      }
+    if (adminUser && !adminUser.is_active) {
+      throw new Error("Access Denied: Your administrator account has been deactivated.");
     }
 
     if (adminUser) {
@@ -3000,13 +3177,20 @@ export const adminLoginServerFn = createServerFn({ method: "POST" })
         .eq("id", adminUser.id);
     }
 
-    const sessionToken = await signSessionToken({
-      sub: adminUser?.id || "admin_root",
-      email,
-      name: adminUser?.full_name || "Administrator",
-      picture: null,
-      isAdmin: true,
+    await recordAdminAuditLog(verifiedIdentity, "admin_login", "admin_session", email, {
+      method: token ? "token_exchange" : "password",
     });
+
+    const sessionToken = await signSessionToken(
+      {
+        sub: adminUser?.id || verifiedIdentity.userId,
+        email,
+        name: adminUser?.full_name || "Administrator",
+        picture: null,
+        isAdmin: true,
+      },
+      24 * 3600,
+    );
 
     return {
       success: true,

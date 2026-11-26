@@ -185,7 +185,7 @@ test.describe("Buy Now Isolation & Cart Calculation Integrity", () => {
     await page.addInitScript(
       ({ authUser, authToken }) => {
         localStorage.setItem(
-          "cavenhurst_google_session",
+          "cavenhusrt_google_session",
           JSON.stringify({ user: authUser, sessionToken: authToken }),
         );
       },
@@ -282,6 +282,9 @@ test.describe("Buy Now Isolation & Cart Calculation Integrity", () => {
     await page.getByPlaceholder("City / District *").fill("Vijayawada");
     await page.locator("select").selectOption("Andhra Pradesh");
     await page.getByPlaceholder("PIN Code (6 digits) *").fill("521212");
+    await expect(page.getByText(/Serviceable via|Valid 6-digit Indian PIN code/i)).toBeVisible({
+      timeout: 15_000,
+    });
 
     await payOnlineBtn.click();
     await expect
@@ -413,6 +416,9 @@ test.describe("Buy Now Isolation & Cart Calculation Integrity", () => {
     await page.getByPlaceholder("City / District *").fill("Vijayawada");
     await page.locator("select").selectOption("Andhra Pradesh");
     await page.getByPlaceholder("PIN Code (6 digits) *").fill("521212");
+    await expect(page.getByText(/Serviceable via|Valid 6-digit Indian PIN code/i)).toBeVisible({
+      timeout: 15_000,
+    });
 
     await page.getByRole("button", { name: /Pay .*Online via Razorpay/i }).click();
     await expect

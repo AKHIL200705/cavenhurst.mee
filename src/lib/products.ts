@@ -208,7 +208,7 @@ export const PRODUCTS: Product[] = [
     colors: [C.white, C.navy],
     stock: full,
     images: [teeCream],
-    description: "Clean classic tee with the CAVENHURST wordmark.",
+    description: "Clean classic tee with the CAVENHUSRT wordmark.",
     fabric: "100% combed cotton, 220 GSM",
     fit: "Regular",
     isNew: false,

@@ -3,19 +3,20 @@ import { Loader2, Minus, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
-import { getProduct, imageFor, resolveProductAsset } from "@/lib/products";
+import { SIZES, getProduct, imageFor, resolveProductAsset, type Size } from "@/lib/products";
 import { calculateOrderPricingPaise, FREE_SHIPPING_THRESHOLD, formatINR } from "@/lib/pricing";
 import { Summary } from "@/components/site/Summary";
 import { useStore } from "@/lib/store";
 import { validateCouponServerFn } from "@/server/orders";
 
 export const Route = createFileRoute("/cart")({
-  head: () => meta("Shopping Bag", "Review your CAVENHURST shopping bag."),
+  head: () => meta("Shopping Bag", "Review your CAVENHUSRT shopping bag."),
   component: Cart,
 });
 
 function Cart() {
-  const { cart, setQty, remove, subtotal, coupon, couponRule, setCoupon } = useStore();
+  const { cart, setQty, updateVariant, remove, subtotal, coupon, couponRule, setCoupon } =
+    useStore();
   const [code, setCode] = useState("");
   const [applyingCoupon, setApplyingCoupon] = useState(false);
 
@@ -59,7 +60,13 @@ function Cart() {
             if (!itemName) return null;
             const itemPrice = c.price ?? p?.price ?? 0;
             const itemImage = resolveProductAsset(c.image) || (p ? imageFor(p, c.color) : "");
-            const maxStock = c.maxStock ?? p?.stock?.[c.size] ?? 10;
+            const stockMap = c.sizeStock || p?.stock || {};
+            const maxStock = c.maxStock ?? stockMap[c.size] ?? 10;
+            const availableSizes = SIZES.filter((s) => (stockMap[s] ?? 1) > 0 || s === c.size);
+            const availableColors =
+              c.availableColors && c.availableColors.length > 0
+                ? c.availableColors
+                : p?.colors.map((col) => col.name) || [c.color];
 
             return (
               <li
@@ -74,17 +81,54 @@ function Cart() {
                   />
                 ) : (
                   <div className="h-32 w-24 rounded-lg bg-muted flex items-center justify-center text-xs text-muted-foreground">
-                    CAVENHURST
+                    CAVENHUSRT
                   </div>
                 )}
                 <div className="flex flex-1 flex-col">
                   <Link to="/product/$slug" params={{ slug: c.slug }} className="font-bold">
                     {itemName}
                   </Link>
-                  <p className="text-sm text-muted-foreground">
-                    {c.color} · Size {c.size}
-                  </p>
-                  <p className="mt-1 font-bold">{formatINR(itemPrice)}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {availableColors.length > 1 ? (
+                      <select
+                        aria-label={`Color for ${itemName}`}
+                        value={c.color}
+                        onChange={(e) => {
+                          if (!updateVariant(i, c.size, e.target.value)) {
+                            toast.error("Selected colour is currently unavailable");
+                          }
+                        }}
+                        className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground outline-none focus:border-electric"
+                      >
+                        {availableColors.map((colName) => (
+                          <option key={colName} value={colName}>
+                            {colName}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span>{c.color}</span>
+                    )}
+                    <span aria-hidden="true">·</span>
+                    <select
+                      aria-label={`Size for ${itemName}`}
+                      value={c.size}
+                      onChange={(e) => {
+                        const nextSize = e.target.value as Size;
+                        if (!updateVariant(i, nextSize, c.color)) {
+                          toast.error(`Size ${nextSize} is out of stock`);
+                        }
+                      }}
+                      className="rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground outline-none focus:border-electric"
+                    >
+                      {availableSizes.map((s) => (
+                        <option key={s} value={s}>
+                          Size {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="mt-1.5 font-bold">{formatINR(itemPrice)}</p>
                   <div className="mt-auto flex items-center justify-between">
                     <div className="flex items-center rounded-md border border-border">
                       <button

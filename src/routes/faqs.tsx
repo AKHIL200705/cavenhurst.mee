@@ -23,7 +23,7 @@ const faqs: [string, string][] = [
 
 export const Route = createFileRoute("/faqs")({
   head: () =>
-    meta("FAQs", "Answers to common questions about CAVENHURST orders, shipping and returns."),
+    meta("FAQs", "Answers to common questions about CAVENHUSRT orders, shipping and returns."),
   component: () => (
     <InfoPage eyebrow="HELP" title="FAQs">
       <Accordion type="single" collapsible className="text-foreground">

@@ -14,8 +14,8 @@ function resolveDbUrl(): string {
     .replace(/^["']|["']$/g, "")
     .trim();
 
-  // If not in process.env, inspect local .env file directly (covers Vite SSR dev environments)
-  if (!dbUrl && typeof process !== "undefined") {
+  // In local dev/Vite SSR where process.env may not preload .env, read local .env once
+  if (!dbUrl && typeof process !== "undefined" && process.env["NODE_ENV"] !== "production") {
     try {
       const envPath = path.resolve(process.cwd(), ".env");
       if (fs.existsSync(envPath)) {
@@ -32,23 +32,10 @@ function resolveDbUrl(): string {
   }
 
   if (!dbUrl) {
-    dbUrl =
-      "postgresql://postgres.ewlsrypetobkwrwtmmgh:cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
-  }
-
-  // Normalize IPv6-only direct host to IPv4/IPv6 dual-stack pooler
-  if (dbUrl.includes("db.ewlsrypetobkwrwtmmgh.supabase.co")) {
-    dbUrl = dbUrl
-      .replace("db.ewlsrypetobkwrwtmmgh.supabase.co", "aws-0-ap-southeast-1.pooler.supabase.com")
-      .replace("://postgres:", "://postgres.ewlsrypetobkwrwtmmgh:");
-  }
-
-  // Ensure pooler has tenant identifier
-  if (
-    dbUrl.includes("aws-0-ap-southeast-1.pooler.supabase.com") &&
-    dbUrl.includes("://postgres:")
-  ) {
-    dbUrl = dbUrl.replace("://postgres:", "://postgres.ewlsrypetobkwrwtmmgh:");
+    console.error(
+      "[Database Security Error] DATABASE_URL is not configured. Refusing to connect without environment credentials.",
+    );
+    return "";
   }
 
   return dbUrl;

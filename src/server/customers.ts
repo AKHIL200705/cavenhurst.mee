@@ -3,6 +3,10 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
 import { getAuthenticatedCustomerId, isWhitelistedAdminEmail } from "./auth-helpers";
 
+function postgrestLiteral(val: string): string {
+  return `"${val.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 /**
  * Server Function: Get customer addresses
  */
@@ -19,8 +23,8 @@ export const getCustomerAddressesServerFn = createServerFn({ method: "POST" })
       .select("*")
       .or(
         auth.customerUuid
-          ? `customer_id.eq.${auth.customerUuid},customer_auth_uid.eq.${auth.id}`
-          : `customer_auth_uid.eq.${auth.id}`,
+          ? `customer_id.eq.${postgrestLiteral(auth.customerUuid)},customer_auth_uid.eq.${postgrestLiteral(auth.id)}`
+          : `customer_auth_uid.eq.${postgrestLiteral(auth.id)}`,
       )
       .order("is_default", { ascending: false })
       .order("created_at", { ascending: false });
@@ -46,11 +50,11 @@ export const getCustomerOrdersServerFn = createServerFn({ method: "POST" })
 
     const orClauses: string[] = [];
     if (auth.customerUuid) {
-      orClauses.push(`customer_id.eq.${auth.customerUuid}`);
+      orClauses.push(`customer_id.eq.${postgrestLiteral(auth.customerUuid)}`);
     }
-    orClauses.push(`user_id.eq.${auth.id}`);
+    orClauses.push(`user_id.eq.${postgrestLiteral(auth.id)}`);
     if (auth.email) {
-      orClauses.push(`customer_email.eq.${auth.email.toLowerCase().trim()}`);
+      orClauses.push(`customer_email.eq.${postgrestLiteral(auth.email.toLowerCase().trim())}`);
     }
 
     const { data: orders, error } = await supabaseAdmin
@@ -150,8 +154,8 @@ export const saveCustomerAddressServerFn = createServerFn({ method: "POST" })
         .eq("id", data.id)
         .or(
           customerUuid
-            ? `customer_id.eq.${customerUuid},customer_auth_uid.eq.${auth.id}`
-            : `customer_auth_uid.eq.${auth.id}`,
+            ? `customer_id.eq.${postgrestLiteral(customerUuid)},customer_auth_uid.eq.${postgrestLiteral(auth.id)}`
+            : `customer_auth_uid.eq.${postgrestLiteral(auth.id)}`,
         );
 
       if (error) throw new Error(error.message);
@@ -197,8 +201,8 @@ export const deleteCustomerAddressServerFn = createServerFn({ method: "POST" })
       .eq("id", data.addressId)
       .or(
         auth.customerUuid
-          ? `customer_id.eq.${auth.customerUuid},customer_auth_uid.eq.${auth.id}`
-          : `customer_auth_uid.eq.${auth.id}`,
+          ? `customer_id.eq.${postgrestLiteral(auth.customerUuid)},customer_auth_uid.eq.${postgrestLiteral(auth.id)}`
+          : `customer_auth_uid.eq.${postgrestLiteral(auth.id)}`,
       );
 
     if (error) throw new Error(error.message);
@@ -353,7 +357,7 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
         `;
         if (existingDuplicate && existingDuplicate.length > 0) {
           throw new Error(
-            "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
+            "This mobile number is already registered with another CAVENHUSRT account. Please enter your unique 10-digit mobile number.",
           );
         }
       } catch (dupErr) {
@@ -388,7 +392,7 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
           pgErr?.message?.includes("idx_profiles_mobile_number_unique")
         ) {
           throw new Error(
-            "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
+            "This mobile number is already registered with another CAVENHUSRT account. Please enter your unique 10-digit mobile number.",
           );
         }
         console.warn("[completeCustomerProfile] SQL profiles upsert notice:", err);
@@ -409,7 +413,7 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
       if (upsertErr) {
         if (upsertErr.code === "23505" || upsertErr.message.includes("unique")) {
           throw new Error(
-            "This mobile number is already registered with another CAVENHURST account. Please enter your unique 10-digit mobile number.",
+            "This mobile number is already registered with another CAVENHUSRT account. Please enter your unique 10-digit mobile number.",
           );
         }
         throw new Error(upsertErr.message || "Failed to save profile record.");
@@ -617,7 +621,7 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
       `;
       if (dup && dup.length > 0) {
         throw new Error(
-          "This mobile number is already registered with another CAVENHURST account.",
+          "This mobile number is already registered with another CAVENHUSRT account.",
         );
       }
     }
@@ -698,5 +702,125 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
       throw new Error("Unable to locate profile record to update.");
     }
 
+    return { success: true };
+  });
+
+/**
+ * Server Function: Read immutable customer welcome status from public.customer_welcome.
+ */
+export const getWelcomeStatusServerFn = createServerFn({ method: "POST" })
+  .validator((params?: { authToken?: string | undefined }) => params || {})
+  .handler(async ({ data }): Promise<{ seen: boolean }> => {
+    const auth = await getAuthenticatedCustomerId(data?.authToken);
+    if (!auth) {
+      throw new Error("Authentication required to check welcome state.");
+    }
+
+    const sql = getDb();
+    if (sql) {
+      const [row] = await sql<{ welcome_seen_at: string | null }[]>`
+        SELECT welcome_seen_at FROM public.customer_welcome WHERE user_id = ${auth.id} LIMIT 1
+      `;
+      return { seen: Boolean(row?.welcome_seen_at) };
+    }
+
+    const { data: row, error } = await supabaseAdmin
+      .from("customer_welcome")
+      .select("welcome_seen_at")
+      .eq("user_id", auth.id)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { seen: Boolean(row?.welcome_seen_at) };
+  });
+
+/**
+ * Server Function: Record immutable customer welcome completion for verified user.
+ */
+export const completeWelcomeServerFn = createServerFn({ method: "POST" })
+  .validator((params?: { authToken?: string | undefined }) => params || {})
+  .handler(async ({ data }): Promise<{ success: boolean }> => {
+    const auth = await getAuthenticatedCustomerId(data?.authToken);
+    if (!auth) {
+      throw new Error("Authentication required to complete welcome.");
+    }
+
+    const sql = getDb();
+    if (sql) {
+      await sql`
+        INSERT INTO public.customer_welcome (user_id, welcome_seen_at)
+        VALUES (${auth.id}, now())
+        ON CONFLICT (user_id) DO NOTHING
+      `;
+      return { success: true };
+    }
+
+    const { error } = await supabaseAdmin
+      .from("customer_welcome")
+      .upsert({ user_id: auth.id }, { onConflict: "user_id", ignoreDuplicates: true });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return { success: true };
+  });
+
+/**
+ * Server Function: Authenticated contact support message submission.
+ */
+export const submitContactMessageServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (params: { authToken?: string | undefined; name: string; email: string; message: string }) =>
+      params,
+  )
+  .handler(async ({ data }) => {
+    const auth = await getAuthenticatedCustomerId(data.authToken);
+    if (!auth) {
+      throw new Error("Please sign in to send a message.");
+    }
+
+    const name = data.name.trim().slice(0, 100);
+    const email = data.email.trim().slice(0, 255);
+    const message = data.message.trim().slice(0, 2000);
+    if (!name || !/^\S+@\S+\.\S+$/.test(email) || !message) {
+      throw new Error("Please enter valid name, email, and message details.");
+    }
+
+    const { error } = await supabaseAdmin.from("contact_messages").insert({
+      user_id: auth.id,
+      name,
+      email,
+      message,
+    });
+    if (error) throw new Error("Couldn't send your message. Please try again.");
+    return { success: true };
+  });
+
+/**
+ * Server Function: Authenticated newsletter subscription.
+ */
+export const subscribeNewsletterServerFn = createServerFn({ method: "POST" })
+  .validator((params: { authToken?: string | undefined; email: string }) => params)
+  .handler(async ({ data }) => {
+    const auth = await getAuthenticatedCustomerId(data.authToken);
+    if (!auth) {
+      throw new Error("Please sign in to subscribe.");
+    }
+
+    const email = data.email.trim().toLowerCase().slice(0, 255);
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      throw new Error("Enter a valid email address.");
+    }
+
+    const { error } = await supabaseAdmin
+      .from("newsletter_subscribers")
+      .insert({ email, user_id: auth.id });
+    if (error && error.code !== "23505") {
+      throw new Error("Couldn't subscribe right now. Please try again.");
+    }
     return { success: true };
   });

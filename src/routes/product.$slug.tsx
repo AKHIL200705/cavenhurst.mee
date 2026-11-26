@@ -32,6 +32,7 @@ import {
   submitProductReviewServerFn,
   getStoreCatalogServerFn,
 } from "@/server/catalog";
+import { checkPincodeServiceabilityFn } from "@/server/orders";
 import { useAuth } from "@/lib/auth";
 
 export interface ProductReviewItem {
@@ -79,21 +80,21 @@ export const Route = createFileRoute("/product/$slug")({
   head: ({ loaderData }) => ({
     meta: loaderData?.product
       ? [
-          { title: `${loaderData.product.name} | CAVENHURST` },
+          { title: `${loaderData.product.name} | CAVENHUSRT` },
           { name: "description", content: loaderData.product.description },
-          { property: "og:title", content: `${loaderData.product.name} | CAVENHURST` },
+          { property: "og:title", content: `${loaderData.product.name} | CAVENHUSRT` },
           { property: "og:description", content: loaderData.product.description },
           { property: "og:type", content: "product" },
           { name: "twitter:card", content: "summary_large_image" },
         ]
-      : meta("Product", "Discover CAVENHURST premium everyday apparel.").meta,
+      : meta("Product", "Discover CAVENHUSRT premium everyday apparel.").meta,
   }),
   component: ProductPage,
 });
 
 function ProductPage() {
-  const { product: p, reviews: initialReviews, related } = Route.useLoaderData();
-  const { user } = useAuth();
+  const { product: p, reviews: reviewsList, related } = Route.useLoaderData();
+  const { user, sessionToken } = useAuth();
   const { add, startDirectBuy, toggleWish, wishlist } = useStore();
   const navigate = useNavigate();
   const [img, setImg] = useState(0);
@@ -102,7 +103,7 @@ function ProductPage() {
   const [qty, setQty] = useState(1);
   const [pin, setPin] = useState("");
   const [pinMsg, setPinMsg] = useState("");
-  const [reviewsList, setReviewsList] = useState(initialReviews);
+  const [checkingPin, setCheckingPin] = useState(false);
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [reviewName, setReviewName] = useState(user?.user_metadata?.full_name || "");
   const [reviewRating, setReviewRating] = useState(5);
@@ -167,6 +168,10 @@ function ProductPage() {
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) {
+      toast.error("Please sign in to submit a review.");
+      return;
+    }
     if (!reviewText.trim()) {
       toast.error("Please provide review text.");
       return;
@@ -175,26 +180,15 @@ function ProductPage() {
     try {
       await submitProductReviewServerFn({
         data: {
+          authToken: sessionToken ?? undefined,
           productSlug: p.slug,
           customerName: reviewName.trim() || "Verified Buyer",
           rating: reviewRating,
           title: reviewTitle.trim() || undefined,
           reviewText: reviewText.trim(),
-          customerAuthUid: user?.id,
         },
       });
-      toast.success("Thank you! Your review has been submitted.");
-      setReviewsList([
-        {
-          id: Math.random().toString(),
-          customer_name: reviewName.trim() || "Verified Buyer",
-          rating: reviewRating,
-          title: reviewTitle.trim(),
-          review_text: reviewText.trim(),
-          created_at: new Date().toISOString(),
-        },
-        ...reviewsList,
-      ]);
+      toast.success("Thank you! Your review has been submitted for moderation.");
       setReviewText("");
       setReviewTitle("");
       setShowReviewForm(false);
@@ -261,16 +255,39 @@ function ProductPage() {
     navigate({ to: "/checkout", search: { mode: "direct" } });
   };
 
-  const checkPin = () => {
+  const checkPin = async () => {
     if (!/^[1-9]\d{5}$/.test(pin)) {
       setPinMsg("Enter a valid 6-digit PIN code.");
       return;
     }
-    const d = new Date();
-    d.setDate(d.getDate() + 5);
-    setPinMsg(
-      `Delivery to ${pin} usually takes 3–7 business days. Estimated by ${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}.`,
-    );
+    setCheckingPin(true);
+    try {
+      const res = await checkPincodeServiceabilityFn({
+        data: { pincode: pin, paymentMode: "prepaid" },
+      });
+      if (!res.serviceable) {
+        if (res.providerStatus === "pending_credentials") {
+          setPinMsg(
+            `PIN ${pin} format valid — live ShipMaxx360 courier serviceability check is pending merchant credentials.`,
+          );
+          return;
+        }
+        setPinMsg(res.message || `Delivery currently unavailable for PIN ${pin}.`);
+        return;
+      }
+      const etaDays = res.estimatedDays || 5;
+      const d = new Date();
+      d.setDate(d.getDate() + etaDays);
+      const courier = res.courierPartner ? ` via ${res.courierPartner}` : "";
+      const codInfo = res.codAvailable ? "COD & Online available." : "Prepaid available.";
+      setPinMsg(
+        `Delivery to ${pin}${courier} in ~${etaDays} business days (est. ${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}). ${codInfo}`,
+      );
+    } catch (err) {
+      setPinMsg(err instanceof Error ? err.message : "Could not check delivery availability.");
+    } finally {
+      setCheckingPin(false);
+    }
   };
 
   return (
@@ -396,7 +413,7 @@ function ProductPage() {
         </div>
 
         <div className="font-sans">
-          <p className="font-heading text-xs uppercase tracking-brand text-electric">CAVENHURST</p>
+          <p className="font-heading text-xs uppercase tracking-brand text-electric">CAVENHUSRT</p>
           <h1 className="mt-2 font-heading text-3xl sm:text-5xl lg:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">
             {p.name}
           </h1>
@@ -563,8 +580,13 @@ function ProductPage() {
                 placeholder="Enter PIN code"
                 className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none"
               />
-              <button onClick={checkPin} className="rounded-md bg-secondary px-4 text-sm font-bold">
-                Check
+              <button
+                type="button"
+                onClick={checkPin}
+                disabled={checkingPin}
+                className="rounded-md bg-secondary px-4 text-sm font-bold disabled:opacity-50"
+              >
+                {checkingPin ? "Checking..." : "Check"}
               </button>
             </div>
             {pinMsg && <p className="mt-2 text-xs text-silver">{pinMsg}</p>}

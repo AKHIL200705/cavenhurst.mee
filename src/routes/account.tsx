@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Truck, Shield, MapPin, Plus, Trash2, Edit2, Check, X, Loader2 } from "lucide-react";
+import { Truck, Shield, Plus, Trash2, Edit2, Check, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
 import { useAuth } from "@/lib/auth";
@@ -16,9 +16,10 @@ import {
   getCustomerProfileServerFn,
   updateCustomerProfileServerFn,
 } from "@/server/customers";
+import { verifyCurrentAdminServerFn } from "@/server/admin";
 
 export const Route = createFileRoute("/account")({
-  head: () => meta("My Account", "Your CAVENHURST saved bag, wishlist and order history."),
+  head: () => meta("My Account", "Your CAVENHUSRT saved bag, wishlist and order history."),
   component: Account,
 });
 
@@ -117,22 +118,17 @@ function Account() {
 
   const loadData = useCallback(async () => {
     if (!user) return;
-    const userEmail = user.email?.toLowerCase();
-    if (
-      user.isAdmin ||
-      (userEmail && ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail))
-    ) {
-      setIsAdmin(true);
-    }
 
     try {
-      const [addrs, ords, prof] = await Promise.all([
+      const [addrs, ords, prof, adminCheck] = await Promise.all([
         getCustomerAddressesServerFn({ data: { authToken: sessionToken || undefined } }),
         getCustomerOrdersServerFn({ data: { authToken: sessionToken || undefined } }),
         getCustomerProfileServerFn({ data: { authToken: sessionToken || undefined } }),
+        verifyCurrentAdminServerFn({ data: { authToken: sessionToken || undefined } }),
       ]);
       setAddresses((addrs as Address[]) || []);
       setOrders((ords as Order[]) || []);
+      setIsAdmin(Boolean(adminCheck?.isAdmin));
       if (prof) {
         setProfileData({
           fullName: prof.fullName || (user.user_metadata?.full_name as string) || "",
@@ -143,56 +139,41 @@ function Account() {
     } catch (err) {
       console.error("[Account] Error fetching customer data:", err);
     }
-
-    // Role check
-    if (userEmail) {
-      const { data: adminRow } = await supabase
-        .from("admin_users")
-        .select("id")
-        .or(`email.eq.${userEmail},auth_user_id.eq.${user.id}`)
-        .eq("is_active", true)
-        .maybeSingle();
-
-      if (adminRow) {
-        setIsAdmin(true);
-      }
-    }
-
-    supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", user.id)
-      .eq("role", "admin")
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) setIsAdmin(true);
-      });
   }, [user, sessionToken]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
-  // Real-time updates for customer orders
+  // Real-time updates for customer orders when authenticated via Supabase Auth JWT
   useEffect(() => {
     if (!user) return;
-    const channel = supabase
-      .channel(`customer-orders-${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "orders",
-        },
-        () => {
-          void loadData();
-        },
-      )
-      .subscribe();
+    let active = true;
+    let activeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!active || !session?.access_token) return;
+      activeChannel = supabase
+        .channel(`customer-orders-${user.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "orders",
+          },
+          () => {
+            void loadData();
+          },
+        )
+        .subscribe();
+    });
 
     return () => {
-      void supabase.removeChannel(channel);
+      active = false;
+      if (activeChannel) {
+        void supabase.removeChannel(activeChannel);
+      }
     };
   }, [user, loadData]);
 

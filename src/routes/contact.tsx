@@ -2,16 +2,16 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { toast } from "sonner";
 import { InfoPage, meta } from "@/components/site/InfoPage";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { submitContactMessageServerFn } from "@/server/customers";
 
 export const Route = createFileRoute("/contact")({
-  head: () => meta("Contact Us", "Get in touch with CAVENHURST customer care."),
+  head: () => meta("Contact Us", "Get in touch with CAVENHUSRT customer care."),
   component: Contact,
 });
 
 function Contact() {
-  const { user } = useAuth();
+  const { user, sessionToken } = useAuth();
   const [busy, setBusy] = useState(false);
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -25,22 +25,25 @@ function Contact() {
       return;
     }
     setBusy(true);
-    const { error } = await supabase
-      .from("contact_messages")
-      .insert({ user_id: user.id, name, email, message });
-    setBusy(false);
-    if (error) {
-      toast.error("Couldn't send your message. Please try again.");
-      return;
+    try {
+      await submitContactMessageServerFn({
+        data: { authToken: sessionToken ?? undefined, name, email, message },
+      });
+      toast.success("Thanks — we'll get back to you within 24 hours.");
+      form.reset();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Couldn't send your message. Please try again.",
+      );
+    } finally {
+      setBusy(false);
     }
-    toast.success("Thanks — we'll get back to you within 24 hours.");
-    form.reset();
   };
   const field =
     "rounded-md border border-input bg-transparent px-4 py-3 text-foreground outline-none";
   return (
     <InfoPage eyebrow="SUPPORT" title="Contact us">
-      <p>Email: support@cavenhurst.in · Mon–Sat, 10am–7pm IST</p>
+      <p>Email: support@cavenhusrt.in · Mon–Sat, 10am–7pm IST</p>
       <form className="grid gap-3" onSubmit={submit}>
         <input name="name" required maxLength={100} placeholder="Name" className={field} />
         <input

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -11,36 +11,52 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
-import { adminLoginServerFn } from "@/server/admin";
+import { adminLoginServerFn, verifyCurrentAdminServerFn } from "@/server/admin";
 
 interface AdminAuthGateProps {
   onAuthenticated: () => void;
 }
 
 export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
-  const { user } = useAuth();
-  const [email, setEmail] = useState("akhilsaiabbireddy2007@gmail.com");
+  const { user, sessionToken } = useAuth();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [verifiedCurrentAdmin, setVerifiedCurrentAdmin] = useState(false);
 
-  const isCurrentSessionAdmin =
-    user?.isAdmin ||
-    (user?.email &&
-      ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(
-        user.email.toLowerCase(),
-      ));
+  useEffect(() => {
+    let active = true;
+    if (!user || !sessionToken) {
+      setVerifiedCurrentAdmin(false);
+      return;
+    }
+
+    void verifyCurrentAdminServerFn({ data: { authToken: sessionToken } })
+      .then((res) => {
+        if (active) setVerifiedCurrentAdmin(Boolean(res?.isAdmin));
+      })
+      .catch(() => {
+        if (active) setVerifiedCurrentAdmin(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user, sessionToken]);
 
   const handleCurrentSessionLogin = async () => {
+    if (!user?.email || !sessionToken) {
+      toast.error("Active authenticated session token required.");
+      return;
+    }
     setLoading(true);
     try {
-      if (user?.email) {
-        const res = await adminLoginServerFn({
-          data: { email: user.email.toLowerCase().trim() },
-        });
-        if (res.sessionToken) {
-          localStorage.setItem("cavenhurst_admin_token", res.sessionToken);
-        }
+      const res = await adminLoginServerFn({
+        data: { email: user.email.toLowerCase().trim(), authToken: sessionToken },
+      });
+      if (res.sessionToken) {
+        localStorage.setItem("cavenhusrt_admin_token", res.sessionToken);
       }
       toast.success("Administrator session verified from active account.");
       onAuthenticated();
@@ -57,8 +73,9 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
     setErrorMsg(null);
 
     try {
+      const cleanEmail = email.trim().toLowerCase();
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: cleanEmail,
         password,
       });
 
@@ -68,77 +85,32 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         return;
       }
 
-      if (!data.user) {
-        setErrorMsg("User account not found");
+      if (!data.user || !data.session?.access_token) {
+        setErrorMsg("User account or session not found");
         return;
       }
 
-      const userEmail = data.user.email?.toLowerCase();
-      const isAllowedEmail =
-        userEmail &&
-        ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"].includes(userEmail);
+      const serverAuth = await adminLoginServerFn({
+        data: {
+          email: cleanEmail,
+          authToken: data.session.access_token,
+        },
+      });
 
-      let isAdminUser = Boolean(isAllowedEmail);
-
-      if (!isAdminUser) {
-        const { data: adminRow } = await supabase
-          .from("admin_users")
-          .select("id")
-          .or(`email.eq.${userEmail},auth_user_id.eq.${data.user.id}`)
-          .eq("is_active", true)
-          .maybeSingle();
-        isAdminUser = Boolean(adminRow);
-      }
-
-      if (!isAdminUser) {
-        const { data: roleRow } = await supabase
-          .from("user_roles")
-          .select("role")
-          .or(`user_id.eq.${data.user.id},user_id.eq.${userEmail}`)
-          .eq("role", "admin")
-          .maybeSingle();
-        isAdminUser = Boolean(roleRow);
-      }
-
-      if (!isAdminUser) {
-        const { data: whitelist } = await supabase
-          .from("admin_whitelist")
-          .select("email")
-          .eq("email", userEmail || "")
-          .maybeSingle();
-        isAdminUser = Boolean(whitelist);
-      }
-
-      if (!isAdminUser) {
+      if (!serverAuth.success || !serverAuth.sessionToken) {
+        await supabase.auth.signOut();
         setErrorMsg(
-          "Access Denied: This account does not possess CAVENHURST administrator privileges.",
+          "Access Denied: This account does not possess CAVENHUSRT administrator privileges.",
         );
         toast.error("Access denied: Not an administrator.");
         return;
       }
 
-      if (data.session?.access_token) {
-        localStorage.setItem("cavenhurst_admin_token", data.session.access_token);
-      }
-
-      // Also get server signed token for seamless server functions access
-      try {
-        const serverAuth = await adminLoginServerFn({
-          data: {
-            email: userEmail!,
-            authToken: data.session?.access_token,
-          },
-        });
-        if (serverAuth.sessionToken) {
-          localStorage.setItem("cavenhurst_admin_token", serverAuth.sessionToken);
-        }
-      } catch {
-        // Fallback to supabase access token
-      }
-
+      localStorage.setItem("cavenhusrt_admin_token", serverAuth.sessionToken);
       toast.success("Administrator session verified.");
       onAuthenticated();
     } catch (err) {
+      await supabase.auth.signOut().catch(() => {});
       const msg = err instanceof Error ? err.message : "Authentication error";
       setErrorMsg(msg);
       toast.error(msg);
@@ -151,14 +123,14 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
     <div className="flex min-h-[75vh] items-center justify-center px-4 py-16">
       <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-2xl backdrop-blur-md">
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 border border-primary/20 text-primary">
-            <ShieldAlert className="h-8 w-8 text-gold" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#0d223a] border border-[#233c59] text-white">
+            <ShieldAlert className="h-8 w-8 text-white" />
           </div>
           <span className="mt-4 font-heading text-xs uppercase tracking-wider text-silver">
             RESTRICTED ACCESS
           </span>
           <h1 className="mt-1 font-heading text-3xl font-bold uppercase tracking-tight text-foreground">
-            CAVENHURST Admin Portal
+            CAVENHUSRT Admin Portal
           </h1>
           <p className="mt-2 text-xs text-muted-foreground">
             Please authenticate with your verified staff or administrator credentials to access
@@ -167,24 +139,24 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         </div>
 
         {errorMsg && (
-          <div className="mt-6 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-xs text-rose-400">
+          <div className="mt-6 rounded-lg border border-[#2b4564] bg-[#0c2036] p-3 text-xs text-white">
             {errorMsg}
           </div>
         )}
 
-        {isCurrentSessionAdmin && (
+        {verifiedCurrentAdmin && (
           <div className="mt-6 p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 space-y-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-emerald-400">
               <UserCheck className="h-4 w-4" /> Detected Active Administrator
             </div>
             <p className="text-xs text-muted-foreground">
-              Logged in as{" "}
-              <strong className="text-foreground">{user?.email || "Akhil Sai Abbireddy"}</strong>
+              Logged in as <strong className="text-foreground">{user?.email || "Admin"}</strong>
             </p>
             <button
               type="button"
+              disabled={loading}
               onClick={handleCurrentSessionLogin}
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 hover:bg-emerald-500 py-2.5 text-xs font-bold text-white transition shadow-md"
+              className="flex w-full items-center justify-center gap-2 rounded-md bg-emerald-600 hover:bg-emerald-500 py-2.5 text-xs font-bold text-white transition shadow-md disabled:opacity-50"
             >
               Continue with Verified Admin Account <ArrowRight className="h-3.5 w-3.5" />
             </button>
@@ -209,7 +181,7 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@cavenhurst.com"
+                placeholder="admin@cavenhusrt.com"
                 className="w-full rounded-md border border-input bg-background/50 px-3 py-2 pl-9 text-sm outline-none focus:border-gold transition"
               />
             </div>
@@ -249,14 +221,12 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
 
         <div className="mt-8 rounded-xl border border-border bg-background/30 p-4 text-[11px] text-muted-foreground space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-            <ShieldCheck className="h-4 w-4 text-emerald-500" /> Initial Administrator Setup
+            <ShieldCheck className="h-4 w-4 text-emerald-500" /> Administrator Provisioning
           </div>
           <p>
-            For security, admin privileges must be granted directly via PostgreSQL in Supabase. Run:
+            Administrator access is enforced server-side and can only be granted by existing super
+            admins or via Supabase service-role SQL.
           </p>
-          <code className="block rounded bg-card p-1.5 font-mono text-[10px] text-silver select-all">
-            SELECT public.assign_admin_role_by_email('your-email@example.com');
-          </code>
         </div>
       </div>
     </div>

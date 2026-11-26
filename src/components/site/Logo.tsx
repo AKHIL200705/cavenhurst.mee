@@ -17,7 +17,7 @@ export function Logo({ compact = false }: { compact?: boolean }) {
     <span className="flex items-center gap-3 text-foreground">
       <WingMark className="h-9 w-auto" />
       {!compact && (
-        <span className="font-logo text-lg font-medium tracking-brand sm:text-xl">CAVENHURST</span>
+        <span className="font-logo text-lg font-medium tracking-brand sm:text-xl">CAVENHUSRT</span>
       )}
     </span>
   );

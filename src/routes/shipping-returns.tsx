@@ -3,7 +3,7 @@ import { InfoPage, meta } from "@/components/site/InfoPage";
 
 export const Route = createFileRoute("/shipping-returns")({
   head: () =>
-    meta("Shipping and Returns", "CAVENHURST shipping across India and our 7-day returns policy."),
+    meta("Shipping and Returns", "CAVENHUSRT shipping across India and our 7-day returns policy."),
   component: () => (
     <InfoPage eyebrow="SUPPORT" title="Shipping & Returns">
       <h2>Shipping</h2>

@@ -14,11 +14,8 @@ import {
   type GoogleSessionPayload,
   type GoogleUserMetadata,
   type GoogleAuthUser,
-  getGoogleClientId,
-  getGoogleClientSecret,
   isWhitelistedAdminEmail,
   signSessionToken,
-  verifySessionToken,
   verifyGoogleIdToken,
   verifyGoogleAccessToken,
   verifyGoogleSessionOrToken,
@@ -358,7 +355,7 @@ export const checkGoogleSessionServerFn = createServerFn({ method: "POST" })
   });
 
 // -----------------------------------------------------------------------------
-// CAVENHURST OTP REGISTRATION & PHONE/EMAIL LOGIN
+// CAVENHUSRT OTP REGISTRATION & PHONE/EMAIL LOGIN
 // -----------------------------------------------------------------------------
 
 export interface SendRegistrationOtpInput {

@@ -52,7 +52,7 @@
   --color-welcome-muted: var(--welcome-muted);
 }
 
-/* CAVENHURST: midnight navy, silver, electric blue */
+/* CAVENHUSRT: midnight navy, silver, electric blue */
 :root {
   --welcome: oklch(0.12 0 0);
   --welcome-foreground: oklch(0.98 0 0);

@@ -27,17 +27,17 @@ export const Route = createFileRoute("/collections/$slug")({
   head: ({ loaderData }) => ({
     meta: loaderData
       ? [
-          { title: `${loaderData.title} | CAVENHURST` },
+          { title: `${loaderData.title} | CAVENHUSRT` },
           {
             name: "description",
-            content: `${loaderData.tagline} Shop CAVENHURST ${loaderData.title}.`,
+            content: `${loaderData.tagline} Shop CAVENHUSRT ${loaderData.title}.`,
           },
-          { property: "og:title", content: `${loaderData.title} | CAVENHURST` },
+          { property: "og:title", content: `${loaderData.title} | CAVENHUSRT` },
           { property: "og:description", content: loaderData.tagline },
           { property: "og:type", content: "website" },
           { name: "twitter:card", content: "summary_large_image" },
         ]
-      : meta("Collection", "Explore CAVENHURST premium apparel collections.").meta,
+      : meta("Collection", "Explore CAVENHUSRT premium apparel collections.").meta,
   }),
   component: Collection,
 });

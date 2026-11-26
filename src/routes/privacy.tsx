@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InfoPage, meta } from "@/components/site/InfoPage";
 
 export const Route = createFileRoute("/privacy")({
-  head: () => meta("Privacy Policy", "How CAVENHURST collects and protects your information."),
+  head: () => meta("Privacy Policy", "How CAVENHUSRT collects and protects your information."),
   component: () => (
     <InfoPage eyebrow="LEGAL" title="Privacy Policy">
       <p>
@@ -12,7 +12,7 @@ export const Route = createFileRoute("/privacy")({
       </p>
       <p>
         We never sell your data. You can request access to or deletion of your information by
-        contacting support@cavenhurst.in.
+        contacting support@cavenhusrt.in.
       </p>
     </InfoPage>
   ),

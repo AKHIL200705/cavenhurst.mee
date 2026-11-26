@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
-import { Search, Filter, Eye, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Filter, Eye, Loader2, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   OrderDetailsDialog,
   type OrderDetailsOrder,
@@ -210,10 +210,10 @@ export function OrdersTab({
                       <span
                         className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
                           o.payment_status === "paid"
-                            ? "bg-emerald-500/20 text-emerald-400"
+                            ? "border border-[#2b4564] bg-[#122741] text-white"
                             : o.payment_status === "pending"
-                              ? "bg-amber-500/20 text-amber-400"
-                              : "bg-rose-500/20 text-rose-400"
+                              ? "border border-[#233b56] bg-[#0a1e35] text-[#cbd5e1]"
+                              : "border border-[#233b56] bg-[#08192e] text-[#8fa3bd]"
                         }`}
                       >
                         {o.payment_status || "pending"}
@@ -237,11 +237,11 @@ export function OrdersTab({
                       <span
                         className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
                           o.status === "delivered"
-                            ? "bg-emerald-500/20 text-emerald-400"
+                            ? "border border-[#2b4564] bg-[#122741] text-white"
                             : o.status === "cancelled"
-                              ? "bg-rose-500/20 text-rose-400"
+                              ? "border border-[#233b56] bg-[#08192e] text-[#9fb2c9]"
                               : o.status === "processing"
-                                ? "bg-blue-500/20 text-blue-400"
+                                ? "border border-[#2b4564] bg-[#0d243f] text-white"
                                 : "bg-card text-muted-foreground border border-border"
                         }`}
                       >
@@ -254,9 +254,15 @@ export function OrdersTab({
                     <td className="p-3.5 text-center">
                       <button
                         onClick={() => handleOpenDetails(o)}
-                        className="inline-flex items-center gap-1 rounded border border-border bg-card px-2.5 py-1 text-[11px] font-semibold hover:bg-accent transition"
+                        disabled={loadingDetails}
+                        className="inline-flex items-center gap-1 rounded border border-border bg-card px-2.5 py-1 text-[11px] font-semibold hover:bg-accent transition disabled:opacity-50"
                       >
-                        <Eye className="h-3 w-3" /> View
+                        {loadingDetails && selectedOrder?.id === o.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Eye className="h-3 w-3" />
+                        )}
+                        View
                       </button>
                     </td>
                   </tr>

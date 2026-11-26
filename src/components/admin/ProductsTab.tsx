@@ -218,10 +218,10 @@ export function ProductsTab({ products, loading, authToken, onRefresh }: Product
                         <span
                           className={`font-bold ${
                             totalUnits === 0
-                              ? "text-rose-400"
+                              ? "text-[#8fa3bd]"
                               : totalUnits <= 10
-                                ? "text-amber-400"
-                                : "text-foreground"
+                                ? "text-[#cbd5e1]"
+                                : "text-white"
                           }`}
                         >
                           {totalUnits} units
@@ -258,10 +258,10 @@ export function ProductsTab({ products, loading, authToken, onRefresh }: Product
                           </button>
                           <button
                             onClick={() => handleDelete(p)}
-                            className="rounded p-1.5 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-400 transition"
+                            className="rounded p-1.5 text-muted-foreground hover:bg-[#122741] hover:text-white transition"
                             title="Delete or Archive Garment"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Trash2 className="h-3.5 w-3.5 text-white" />
                           </button>
                         </div>
                       </td>

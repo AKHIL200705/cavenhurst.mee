@@ -152,9 +152,9 @@ export function InventoryTab({
                                 onClick={() => openAdjustModal(item, s, count)}
                                 className={`inline-block w-12 rounded py-1 font-mono font-bold transition ${
                                   count === 0
-                                    ? "bg-rose-500/10 text-rose-400 hover:bg-rose-500/20"
+                                    ? "border border-[#2b4564] bg-[#0a1e35] text-[#9fb2c9] hover:bg-[#122741]"
                                     : count <= 3
-                                      ? "bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+                                      ? "border border-[#2b4564] bg-[#0d243f] text-white hover:bg-[#143052]"
                                       : "bg-background/60 hover:bg-background text-foreground"
                                 }`}
                                 title="Click to adjust stock"
@@ -287,7 +287,7 @@ export function InventoryTab({
                       <td className="p-3 font-mono">{m.size}</td>
                       <td
                         className={`p-3 text-center font-mono font-bold ${
-                          m.change_qty > 0 ? "text-emerald-400" : "text-rose-400"
+                          m.change_qty > 0 ? "text-white" : "text-[#8fa3bd]"
                         }`}
                       >
                         {m.change_qty > 0 ? `+${m.change_qty}` : m.change_qty}

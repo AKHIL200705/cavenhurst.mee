@@ -298,78 +298,83 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
   const keyId = process.env["RAZORPAY_KEY_ID"];
   const keySecret = process.env["RAZORPAY_KEY_SECRET"];
 
-  if (keyId && keySecret) {
-    try {
-      const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`;
-      const rzpRes = await fetch(
-        `https://api.razorpay.com/v1/payments/${encodeURIComponent(input.razorpayPaymentId)}`,
-        {
-          headers: {
-            Authorization: authHeader,
-          },
+  if (!keyId || !keySecret) {
+    return {
+      success: false,
+      error: "Payment gateway credentials are not configured on the server.",
+    };
+  }
+
+  try {
+    const authHeader = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`;
+    const rzpRes = await fetch(
+      `https://api.razorpay.com/v1/payments/${encodeURIComponent(input.razorpayPaymentId)}`,
+      {
+        headers: {
+          Authorization: authHeader,
         },
-      );
+      },
+    );
 
-      if (rzpRes.ok) {
-        const paymentData = (await rzpRes.json()) as {
-          id: string;
-          order_id: string;
-          status: string;
-          amount: number;
-          currency: string;
-          captured?: boolean;
-        };
+    if (rzpRes.ok) {
+      const paymentData = (await rzpRes.json()) as {
+        id: string;
+        order_id: string;
+        status: string;
+        amount: number;
+        currency: string;
+        captured?: boolean;
+      };
 
-        // Verify order reference on payment entity
-        if (paymentData.order_id && paymentData.order_id !== input.razorpayOrderId) {
-          return {
-            success: false,
-            error: "Payment verification failed: Payment entity order_id does not match order.",
-          };
-        }
-
-        // Verify currency
-        if (paymentData.currency && paymentData.currency !== "INR") {
-          return {
-            success: false,
-            error: `Payment verification failed: Currency mismatch (${paymentData.currency}). Expected INR.`,
-          };
-        }
-
-        // Verify amount in paise matches order total
-        const expectedPaise = Math.round(existingOrder.total * 100);
-        if (paymentData.amount !== expectedPaise) {
-          console.error(
-            `[Razorpay Amount Mismatch] expected=${expectedPaise} paise, received=${paymentData.amount} paise`,
-          );
-          return {
-            success: false,
-            error: `Payment verification failed: Amount mismatch. Expected ₹${existingOrder.total}, received ₹${paymentData.amount / 100}.`,
-          };
-        }
-
-        // Verify status is strictly captured (never treat authorized as captured!)
-        if (paymentData.status !== "captured") {
-          return {
-            success: false,
-            error: `Payment verification failed: Payment status is '${paymentData.status}'. Payment must be fully captured to confirm order.`,
-          };
-        }
-      } else {
-        const errText = await rzpRes.text().catch(() => "");
-        console.error("[Razorpay API Verification Failed]", rzpRes.status, errText);
+      // Verify order reference on payment entity
+      if (paymentData.order_id && paymentData.order_id !== input.razorpayOrderId) {
         return {
           success: false,
-          error: "Payment verification failed with provider API.",
+          error: "Payment verification failed: Payment entity order_id does not match order.",
         };
       }
-    } catch (err) {
-      console.error("[Razorpay Verification Error] Network or API failure:", err);
+
+      // Verify currency
+      if (paymentData.currency && paymentData.currency !== "INR") {
+        return {
+          success: false,
+          error: `Payment verification failed: Currency mismatch (${paymentData.currency}). Expected INR.`,
+        };
+      }
+
+      // Verify amount in paise matches order total
+      const expectedPaise = Math.round(existingOrder.total * 100);
+      if (paymentData.amount !== expectedPaise) {
+        console.error(
+          `[Razorpay Amount Mismatch] expected=${expectedPaise} paise, received=${paymentData.amount} paise`,
+        );
+        return {
+          success: false,
+          error: `Payment verification failed: Amount mismatch. Expected ₹${existingOrder.total}, received ₹${paymentData.amount / 100}.`,
+        };
+      }
+
+      // Verify status is strictly captured (never treat authorized as captured!)
+      if (paymentData.status !== "captured") {
+        return {
+          success: false,
+          error: `Payment verification failed: Payment status is '${paymentData.status}'. Payment must be fully captured to confirm order.`,
+        };
+      }
+    } else {
+      const errText = await rzpRes.text().catch(() => "");
+      console.error("[Razorpay API Verification Failed]", rzpRes.status, errText);
       return {
         success: false,
-        error: "Unable to verify payment status with payment gateway. Please contact support.",
+        error: "Payment verification failed with provider API.",
       };
     }
+  } catch (err) {
+    console.error("[Razorpay Verification Error] Network or API failure:", err);
+    return {
+      success: false,
+      error: "Unable to verify payment status with payment gateway. Please contact support.",
+    };
   }
 
   // 6. Update existing pending ledger row or insert if missing (prevent duplicate payment records)
@@ -385,7 +390,7 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
   });
 
   // 7. Update order state to paid & confirmed (never touch shipment_status!)
-  await supabaseAdmin
+  const { error: ordUpdateErr } = await supabaseAdmin
     .from("orders")
     .update({
       status: "confirmed",
@@ -395,6 +400,10 @@ export async function confirmVerifiedPayment(input: VerifyPaymentInput) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", input.orderId);
+
+  if (ordUpdateErr) {
+    throw new Error(`Failed to mark order as paid: ${ordUpdateErr.message}`);
+  }
 
   // Mandatory write to order_status_history
   await supabaseAdmin.from("order_status_history").insert({
@@ -489,9 +498,12 @@ export async function processRazorpayWebhook(
     processed: false,
   });
 
-  if (eventErr && eventErr.code === "23505") {
-    // Duplicate webhook event already recorded
-    return { processed: true, duplicate: true };
+  if (eventErr) {
+    if (eventErr.code === "23505") {
+      return { processed: true, duplicate: true };
+    }
+    console.error("[Razorpay Webhook] Failed to persist webhook event:", eventErr);
+    throw new Error(`Webhook event persistence error: ${eventErr.message}`);
   }
 
   if (eventType === "payment.captured" || eventType === "order.paid") {
@@ -504,12 +516,19 @@ export async function processRazorpayWebhook(
 
     if (order && order.payment_status !== "paid") {
       // Amount verification if amount is present in webhook payload
-      if (paymentEntity?.amount) {
+      if (typeof paymentEntity?.amount === "number") {
         const expectedPaise = Math.round(order.total * 100);
         if (paymentEntity.amount !== expectedPaise) {
           console.error(
             `[Webhook Amount Mismatch] Order total ${order.total} does not match payment ${paymentEntity.amount / 100}`,
           );
+          await supabaseAdmin
+            .from("payment_webhook_events")
+            .update({
+              processed: false,
+              error: `Amount mismatch: expected ${expectedPaise}, received ${paymentEntity.amount}`,
+            })
+            .eq("event_id", eventId);
           return { processed: false, error: "Payment amount mismatch in webhook payload" };
         }
       }
@@ -524,7 +543,7 @@ export async function processRazorpayWebhook(
         payload: eventPayload as unknown as Json,
       });
 
-      await supabaseAdmin
+      const { error: orderUpdErr } = await supabaseAdmin
         .from("orders")
         .update({
           status: "confirmed",
@@ -533,6 +552,14 @@ export async function processRazorpayWebhook(
           updated_at: new Date().toISOString(),
         })
         .eq("id", order.id);
+
+      if (orderUpdErr) {
+        await supabaseAdmin
+          .from("payment_webhook_events")
+          .update({ processed: false, error: orderUpdErr.message })
+          .eq("event_id", eventId);
+        throw new Error(`Order payment update failed: ${orderUpdErr.message}`);
+      }
 
       // Mandatory write to order_status_history
       await supabaseAdmin.from("order_status_history").insert({
@@ -550,7 +577,7 @@ export async function processRazorpayWebhook(
           .eq("order_id", order.id);
 
         if (orderItems && orderItems.length > 0) {
-          await commitOrderInventory(
+          const commitRes = await commitOrderInventory(
             order.id,
             order.order_number || order.id,
             orderItems.map((oi) => ({
@@ -563,6 +590,14 @@ export async function processRazorpayWebhook(
               qty: oi.qty,
             })),
           );
+          if (!commitRes.success) {
+            await logStructuredServerError({
+              source: "payment",
+              action: "webhook_commit_inventory",
+              targetId: order.id,
+              error: commitRes.error || "Inventory commit failed during payment webhook",
+            });
+          }
         }
       } catch (invErr) {
         console.error("[Webhook Payment Captured] Inventory commit error:", invErr);
@@ -589,6 +624,7 @@ export async function processRazorpayWebhook(
       await supabaseAdmin
         .from("orders")
         .update({
+          status: "cancelled",
           payment_status: "failed",
           updated_at: new Date().toISOString(),
         })
@@ -602,8 +638,27 @@ export async function processRazorpayWebhook(
         changed_by: "razorpay_webhook",
       });
 
-      // Release reserved stock so other shoppers can purchase
+      // Release reserved stock and any coupon redemption claimed at checkout
       await releaseOrderInventoryReservations(order.id);
+      const { data: redemption } = await supabaseAdmin
+        .from("coupon_redemptions")
+        .select("id, coupon_id")
+        .eq("order_id", order.id)
+        .maybeSingle();
+      if (redemption) {
+        const { data: cp } = await supabaseAdmin
+          .from("coupons")
+          .select("id, times_used")
+          .eq("id", redemption.coupon_id)
+          .maybeSingle();
+        if (cp) {
+          await supabaseAdmin
+            .from("coupons")
+            .update({ times_used: Math.max(0, (cp.times_used || 0) - 1) })
+            .eq("id", cp.id);
+        }
+        await supabaseAdmin.from("coupon_redemptions").delete().eq("id", redemption.id);
+      }
     }
   }
 

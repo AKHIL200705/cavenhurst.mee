@@ -89,7 +89,7 @@ export function CollectionView({
         />
         <div className="absolute inset-0 bg-hero-gradient" />
         <div className="relative mx-auto max-w-7xl px-4 py-16 sm:py-24">
-          <p className="font-heading text-xs uppercase tracking-brand text-silver">CAVENHURST</p>
+          <p className="font-heading text-xs uppercase tracking-brand text-silver">CAVENHUSRT</p>
           <h1 className="mt-3 font-heading text-5xl sm:text-7xl lg:text-8xl font-bold uppercase tracking-tight leading-none text-foreground">
             {title}
           </h1>

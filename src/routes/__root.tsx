@@ -93,7 +93,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "CAVENHURST — Premium apparel for everyday movement" },
+      { title: "CAVENHUSRT — Premium apparel for everyday movement" },
       {
         name: "description",
         content: "Premium Indian clothing brand. Oversized tees, hoodies and fan edition.",
@@ -238,6 +238,13 @@ function AuthGate() {
       </div>
     );
   if (path === "/welcome") return <Outlet />;
+  if (path === "/admin") {
+    return (
+      <div key={path} className="page-transition min-h-screen bg-[#031323]">
+        <Outlet />
+      </div>
+    );
+  }
   return (
     <>
       <AnnouncementBar />

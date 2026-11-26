@@ -28,7 +28,7 @@ const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 const webhookSecret =
   process.env["RAZORPAY_WEBHOOK_SECRET"] ||
   fileEnv["RAZORPAY_WEBHOOK_SECRET"] ||
-  "cavenhurst_e2e_razorpay_webhook_secret";
+  "cavenhusrt_e2e_razorpay_webhook_secret";
 
 process.env["RAZORPAY_WEBHOOK_SECRET"] = webhookSecret;
 

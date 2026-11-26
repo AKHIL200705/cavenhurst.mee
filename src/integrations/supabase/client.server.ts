@@ -33,49 +33,31 @@ function createSupabaseAdminClient() {
   const SUPABASE_URL = cleanKey(
     process.env["SUPABASE_URL"] ||
       process.env["VITE_SUPABASE_URL"] ||
-      process.env["NEXT_PUBLIC_SUPABASE_URL"] ||
-      "https://ewlsrypetobkwrwtmmgh.supabase.co",
+      process.env["NEXT_PUBLIC_SUPABASE_URL"],
   ).replace(/\/+$/, "");
 
   const SUPABASE_SERVICE_ROLE_KEY = cleanKey(
     process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
       process.env["SUPABASE_SECRET_KEY"] ||
       process.env["SUPABASE_SERVICE_KEY"] ||
-      process.env["SUPABASE_SECRET"] ||
-      process.env["SUPABASE_KEY"],
+      process.env["SUPABASE_SECRET"],
   );
-
-  const effectiveKey =
-    SUPABASE_SERVICE_ROLE_KEY ||
-    cleanKey(
-      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-        process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-        process.env["VITE_SUPABASE_ANON_KEY"] ||
-        process.env["SUPABASE_ANON_KEY"],
-    ) ||
-    "public-anonymous-key";
 
   if (!SUPABASE_URL) {
     throw new Error(
-      "[Supabase Security Error] SUPABASE_URL is missing in server environment. Please configure it in your environment variables.",
-    );
-  }
-
-  if (!effectiveKey) {
-    throw new Error(
-      "[Supabase Security Error] Neither SUPABASE_SERVICE_ROLE_KEY nor SUPABASE_PUBLISHABLE_KEY is configured in your environment variables.",
+      "[Supabase Security Error] SUPABASE_URL is missing in server environment. Refusing to initialize server client.",
     );
   }
 
   if (!SUPABASE_SERVICE_ROLE_KEY) {
-    console.warn(
-      "[Supabase Configuration Warning] SUPABASE_SERVICE_ROLE_KEY is not configured in environment. Operating with publishable key or direct database connection.",
+    throw new Error(
+      "[Supabase Security Error] SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) is missing in server environment. Refusing to fail open to publishable key.",
     );
   }
 
-  return createClient<Database>(SUPABASE_URL, effectiveKey, {
+  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     global: {
-      fetch: createSupabaseFetch(effectiveKey),
+      fetch: createSupabaseFetch(SUPABASE_SERVICE_ROLE_KEY),
     },
     auth: {
       storage: undefined,

@@ -11,8 +11,8 @@ import { markWelcomeShown, resetWelcomeShown } from "@/routes/__root";
 export const Route = createFileRoute("/welcome")({
   head: () =>
     meta(
-      "Welcome to CAVENHURST",
-      "Where timeless style meets modern elegance. Your personal welcome to CAVENHURST.",
+      "Welcome to CAVENHUSRT",
+      "Where timeless style meets modern elegance. Your personal welcome to CAVENHUSRT.",
     ),
   component: Welcome,
 });
@@ -42,7 +42,7 @@ function Welcome() {
         <h1 className="max-w-full break-words font-welcome text-4xl font-normal leading-tight sm:text-6xl lg:text-7xl">
           {firstName ? `WELCOME, ${firstName.toLocaleUpperCase()}` : "WELCOME"}
         </h1>
-        <p className="mt-4 font-welcome-body text-2xl font-medium sm:text-4xl">TO CAVENHURST</p>
+        <p className="mt-4 font-welcome-body text-2xl font-medium sm:text-4xl">TO CAVENHUSRT</p>
         <p className="mt-8 max-w-sm font-welcome-body text-sm leading-relaxed text-welcome-muted sm:text-base">
           Where timeless style meets modern elegance.
         </p>
@@ -68,7 +68,7 @@ function Welcome() {
             </>
           ) : (
             <>
-              EXPLORE CAVENHURST <ArrowRight />
+              EXPLORE CAVENHUSRT <ArrowRight />
             </>
           )}
         </Button>

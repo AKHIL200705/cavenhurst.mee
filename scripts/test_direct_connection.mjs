@@ -1,36 +1,44 @@
 import postgres from "postgres";
 
 async function testDirect() {
-  console.log("Testing direct connection to db.ewlsrypetobkwrwtmmgh.supabase.co:5432...");
-  try {
-    const sql = postgres(
-      "postgresql://postgres:Cavenhurst%40123@db.ewlsrypetobkwrwtmmgh.supabase.co:5432/postgres",
-      {
-        ssl: { rejectUnauthorized: false },
-        connect_timeout: 5,
-      },
+  const directUrl = (process.env.DIRECT_DATABASE_URL || "").trim();
+  const poolerUrl = (process.env.DATABASE_URL || "").trim();
+
+  if (!directUrl && !poolerUrl) {
+    console.error(
+      "Missing environment variables. Run with: node --env-file=.env scripts/test_direct_connection.mjs",
     );
-    const res = await sql`SELECT current_database(), version()`;
-    console.log("DIRECT CONNECTION SUCCESS:", res[0]);
-    await sql.end();
-  } catch (err) {
-    console.error("DIRECT CONNECTION FAILED:", err.message);
+    process.exit(1);
   }
 
-  console.log("\nTesting pooler connection to aws-0-ap-southeast-1.pooler.supabase.com:5432...");
-  try {
-    const sqlPooler = postgres(
-      "postgresql://postgres.ewlsrypetobkwrwtmmgh:Cavenhurst%40123@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
-      {
+  if (directUrl) {
+    console.log("Testing DIRECT_DATABASE_URL...");
+    try {
+      const sql = postgres(directUrl, {
         ssl: { rejectUnauthorized: false },
         connect_timeout: 5,
-      },
-    );
-    const resPooler = await sqlPooler`SELECT current_database(), version()`;
-    console.log("POOLER CONNECTION SUCCESS:", resPooler[0]);
-    await sqlPooler.end();
-  } catch (err) {
-    console.error("POOLER CONNECTION FAILED:", err.message);
+      });
+      const res = await sql`SELECT current_database(), version()`;
+      console.log("DIRECT CONNECTION SUCCESS:", res[0]);
+      await sql.end();
+    } catch (err) {
+      console.error("DIRECT CONNECTION FAILED:", err.message);
+    }
+  }
+
+  if (poolerUrl) {
+    console.log("Testing DATABASE_URL (pooler)...");
+    try {
+      const sqlPooler = postgres(poolerUrl, {
+        ssl: { rejectUnauthorized: false },
+        connect_timeout: 5,
+      });
+      const resPooler = await sqlPooler`SELECT current_database(), version()`;
+      console.log("POOLER CONNECTION SUCCESS:", resPooler[0]);
+      await sqlPooler.end();
+    } catch (err) {
+      console.error("POOLER CONNECTION FAILED:", err.message);
+    }
   }
 }
 

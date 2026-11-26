@@ -29,7 +29,7 @@ import {
 import fabric from "@/assets/fabric-navy.jpg";
 
 export const Route = createFileRoute("/login")({
-  head: () => meta("Login / Sign Up", "Sign in to CAVENHURST to shop, track orders and more."),
+  head: () => meta("Login / Sign Up", "Sign in to CAVENHUSRT to shop, track orders and more."),
   component: Login,
 });
 
@@ -74,10 +74,10 @@ function Login() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const savedKey = sessionStorage.getItem("cavenhurst_reg_key");
-      const savedEmail = sessionStorage.getItem("cavenhurst_reg_email");
-      const savedName = sessionStorage.getItem("cavenhurst_reg_name");
-      const savedPhone = sessionStorage.getItem("cavenhurst_reg_phone");
+      const savedKey = sessionStorage.getItem("cavenhusrt_reg_key");
+      const savedEmail = sessionStorage.getItem("cavenhusrt_reg_email");
+      const savedName = sessionStorage.getItem("cavenhusrt_reg_name");
+      const savedPhone = sessionStorage.getItem("cavenhusrt_reg_phone");
 
       if (savedKey && savedEmail) {
         setRegistrationKey(savedKey);
@@ -155,10 +155,10 @@ function Login() {
     async (isAdmin: boolean) => {
       const savedReturnTo =
         typeof window !== "undefined"
-          ? window.sessionStorage.getItem("cavenhurst_google_return_to") || undefined
+          ? window.sessionStorage.getItem("cavenhusrt_google_return_to") || undefined
           : undefined;
       if (typeof window !== "undefined") {
-        window.sessionStorage.removeItem("cavenhurst_google_return_to");
+        window.sessionStorage.removeItem("cavenhusrt_google_return_to");
       }
       const targetReturnTo = returnTo || savedReturnTo;
 
@@ -224,8 +224,8 @@ function Login() {
     // Clean the OAuth hash fragment from the URL immediately
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
 
-    const expectedState = window.sessionStorage.getItem("cavenhurst_google_oauth_state");
-    window.sessionStorage.removeItem("cavenhurst_google_oauth_state");
+    const expectedState = window.sessionStorage.getItem("cavenhusrt_google_oauth_state");
+    window.sessionStorage.removeItem("cavenhusrt_google_oauth_state");
 
     if (oauthError) {
       if (oauthError !== "access_denied") {
@@ -256,9 +256,9 @@ function Login() {
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    window.sessionStorage.setItem("cavenhurst_google_oauth_state", state);
+    window.sessionStorage.setItem("cavenhusrt_google_oauth_state", state);
     if (returnTo) {
-      window.sessionStorage.setItem("cavenhurst_google_return_to", returnTo);
+      window.sessionStorage.setItem("cavenhusrt_google_return_to", returnTo);
     }
 
     const redirectUri = `${window.location.origin}/login`;
@@ -325,10 +325,10 @@ function Login() {
         setRegistrationKey(res.registrationKey);
         if (typeof window !== "undefined") {
           try {
-            sessionStorage.setItem("cavenhurst_reg_key", res.registrationKey);
-            sessionStorage.setItem("cavenhurst_reg_email", cleanEmail);
-            sessionStorage.setItem("cavenhurst_reg_name", cleanName);
-            sessionStorage.setItem("cavenhurst_reg_phone", cleanPhone);
+            sessionStorage.setItem("cavenhusrt_reg_key", res.registrationKey);
+            sessionStorage.setItem("cavenhusrt_reg_email", cleanEmail);
+            sessionStorage.setItem("cavenhusrt_reg_name", cleanName);
+            sessionStorage.setItem("cavenhusrt_reg_phone", cleanPhone);
           } catch {
             /* ignore */
           }
@@ -365,10 +365,10 @@ function Login() {
 
     const activeKey =
       registrationKey ||
-      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_key") || "" : "");
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhusrt_reg_key") || "" : "");
     const activeEmail =
       regEmail.trim().toLowerCase() ||
-      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_email") || "" : "");
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhusrt_reg_email") || "" : "");
 
     setBusy(true);
     try {
@@ -383,10 +383,10 @@ function Login() {
       if (res?.success && res.user && res.sessionToken) {
         if (typeof window !== "undefined") {
           try {
-            sessionStorage.removeItem("cavenhurst_reg_key");
-            sessionStorage.removeItem("cavenhurst_reg_email");
-            sessionStorage.removeItem("cavenhurst_reg_name");
-            sessionStorage.removeItem("cavenhurst_reg_phone");
+            sessionStorage.removeItem("cavenhusrt_reg_key");
+            sessionStorage.removeItem("cavenhusrt_reg_email");
+            sessionStorage.removeItem("cavenhusrt_reg_name");
+            sessionStorage.removeItem("cavenhusrt_reg_phone");
           } catch {
             /* ignore */
           }
@@ -395,7 +395,7 @@ function Login() {
           res.user as unknown as Parameters<typeof setGoogleSession>[0],
           res.sessionToken,
         );
-        toast.success(`Welcome to CAVENHURST, ${res.user.user_metadata?.full_name || "Customer"}!`);
+        toast.success(`Welcome to CAVENHUSRT, ${res.user.user_metadata?.full_name || "Customer"}!`);
         await handlePostLoginRedirect(Boolean(res.isAdmin));
       }
     } catch (err) {
@@ -413,10 +413,10 @@ function Login() {
 
     const activeKey =
       registrationKey ||
-      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_key") || "" : "");
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhusrt_reg_key") || "" : "");
     const activeEmail =
       regEmail.trim().toLowerCase() ||
-      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhurst_reg_email") || "" : "");
+      (typeof window !== "undefined" ? sessionStorage.getItem("cavenhusrt_reg_email") || "" : "");
 
     setBusy(true);
     try {
@@ -432,7 +432,7 @@ function Login() {
           setRegistrationKey(res.registrationKey);
           if (typeof window !== "undefined") {
             try {
-              sessionStorage.setItem("cavenhurst_reg_key", res.registrationKey);
+              sessionStorage.setItem("cavenhusrt_reg_key", res.registrationKey);
             } catch {
               /* ignore */
             }
@@ -645,7 +645,7 @@ function Login() {
         {/* Brand Header */}
         <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center font-sans">
           <WingMark className="h-16 w-auto text-foreground drop-shadow-2xl" />
-          <h1 className="mt-5 font-logo text-2xl font-bold tracking-brand">CAVENHURST</h1>
+          <h1 className="mt-5 font-logo text-2xl font-bold tracking-brand">CAVENHUSRT</h1>
           <p className="mt-2 font-heading text-xs font-bold uppercase tracking-[0.25em] text-electric">
             WEAR THE LEGACY
           </p>
@@ -945,10 +945,10 @@ function Login() {
                   onClick={() => {
                     if (typeof window !== "undefined") {
                       try {
-                        sessionStorage.removeItem("cavenhurst_reg_key");
-                        sessionStorage.removeItem("cavenhurst_reg_email");
-                        sessionStorage.removeItem("cavenhurst_reg_name");
-                        sessionStorage.removeItem("cavenhurst_reg_phone");
+                        sessionStorage.removeItem("cavenhusrt_reg_key");
+                        sessionStorage.removeItem("cavenhusrt_reg_email");
+                        sessionStorage.removeItem("cavenhusrt_reg_name");
+                        sessionStorage.removeItem("cavenhusrt_reg_phone");
                       } catch {
                         /* ignore */
                       }
@@ -1200,7 +1200,7 @@ function Login() {
           )}
 
           <p className="mt-6 text-center text-[11px] text-muted-foreground">
-            By continuing, you agree to CAVENHURST's{" "}
+            By continuing, you agree to CAVENHUSRT's{" "}
             <Link to="/terms" className="underline hover:text-foreground">
               Terms of Service
             </Link>{" "}

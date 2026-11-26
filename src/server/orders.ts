@@ -1,7 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
-import { getProduct, type Size } from "@/lib/products";
+import { getDb } from "@/server/db";
+import { type Size } from "@/lib/products";
 import { calculateOrderPricingPaise, type CouponPricingRule } from "@/lib/pricing";
 import { logStructuredServerError } from "./logger";
 import {
@@ -106,30 +107,47 @@ async function getServerSessionUser(): Promise<{
 async function checkIsUserAdmin(userId: string, email?: string | null): Promise<boolean> {
   if (email && isWhitelistedAdminEmail(email)) return true;
   try {
-    const { data: roleData } = await supabaseAdmin
+    const cleanEmail = email?.toLowerCase().trim();
+    const { data: roleByUid } = await supabaseAdmin
       .from("user_roles")
       .select("role")
-      .or(`user_id.eq.${userId}${email ? `,user_id.eq.${email}` : ""}`)
+      .eq("user_id", userId)
       .eq("role", "admin")
       .maybeSingle();
-    if (roleData) return true;
+    if (roleByUid) return true;
 
-    if (email) {
-      const { data: adminUser } = await supabaseAdmin
+    if (cleanEmail) {
+      const { data: roleByEmail } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .ilike("user_id", cleanEmail)
+        .eq("role", "admin")
+        .maybeSingle();
+      if (roleByEmail) return true;
+
+      const { data: adminByEmail } = await supabaseAdmin
         .from("admin_users")
         .select("id")
-        .or(`email.eq.${email},auth_user_id.eq.${userId}`)
+        .ilike("email", cleanEmail)
         .eq("is_active", true)
         .maybeSingle();
-      if (adminUser) return true;
+      if (adminByEmail) return true;
 
       const { data: whitelist } = await supabaseAdmin
         .from("admin_whitelist")
         .select("email")
-        .eq("email", email)
+        .ilike("email", cleanEmail)
         .maybeSingle();
       if (whitelist) return true;
     }
+
+    const { data: adminByUid } = await supabaseAdmin
+      .from("admin_users")
+      .select("id")
+      .eq("auth_user_id", userId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (adminByUid) return true;
 
     return false;
   } catch {
@@ -149,7 +167,6 @@ function generateOrderNumber(): string {
  * Never trusts client prices or fake static product data!
  */
 async function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: string | null) {
-  let subtotal = 0;
   const itemsWithDetails: Array<{
     productId?: string | undefined;
     variantId?: string | undefined;
@@ -187,20 +204,22 @@ async function calculateOrderTotals(cart: CheckoutCartItemInput[], couponCode: s
       );
     }
 
-    // Fetch matching variant if exists
+    // Fetch matching variant including color
     let variantId = stockInfo.variantId;
     if (!variantId) {
-      const { data: variant } = await supabaseAdmin
+      const varQuery = supabaseAdmin
         .from("product_variants")
         .select("id")
         .eq("product_id", dbProd.id)
-        .eq("size", item.size)
-        .maybeSingle();
-      if (variant) variantId = variant.id;
+        .eq("size", item.size);
+      if (item.color?.trim()) {
+        varQuery.ilike("color", item.color.trim());
+      }
+      const { data: variants } = await varQuery.limit(1);
+      if (variants && variants[0]?.id) variantId = variants[0].id;
     }
 
     const price = Number(dbProd.price) || 0;
-    subtotal += price * item.qty;
 
     itemsWithDetails.push({
       productId: dbProd.id,
@@ -428,10 +447,11 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       throw new Error("Your shopping bag is empty.");
     }
 
-    // 2. Derive verified user identity from server session or passed token (never trust client userId!)
+    // 2. Derive verified user identity strictly from server session or passed token (NEVER link guest email to another account!)
     const tokenAuth = await getAuthenticatedCustomerId(data.authToken);
     const headerAuth = tokenAuth ? null : await getServerSessionUser();
     const verifiedUserId = tokenAuth?.id ?? headerAuth?.id ?? null;
+    const verifiedUserEmail = (tokenAuth?.email ?? headerAuth?.email)?.toLowerCase().trim() || null;
     let customerUuid: string | null = tokenAuth?.customerUuid ?? null;
 
     if (!customerUuid && verifiedUserId) {
@@ -442,11 +462,11 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         .maybeSingle();
       if (c) customerUuid = c.id;
     }
-    if (!customerUuid && customer.email.trim()) {
+    if (!customerUuid && verifiedUserId && verifiedUserEmail) {
       const { data: c } = await supabaseAdmin
         .from("customers")
         .select("id")
-        .eq("email", customer.email.trim().toLowerCase())
+        .ilike("email", verifiedUserEmail)
         .maybeSingle();
       if (c) customerUuid = c.id;
     }
@@ -456,6 +476,15 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       await calculateOrderTotals(cart, coupon);
     if (itemsWithDetails.length === 0) {
       throw new Error("No valid products found in your order.");
+    }
+
+    if (paymentMethod === "online") {
+      const precheckKeyId = getRazorpayKeyId();
+      if (!isRazorpayConfigured() || !precheckKeyId) {
+        throw new Error(
+          "Online payment is temporarily unavailable. Please select Cash on Delivery or contact store support.",
+        );
+      }
     }
 
     const checkoutMode = data.checkoutMode === "DIRECT_BUY" ? "DIRECT_BUY" : "CART_CHECKOUT";
@@ -604,10 +633,14 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       qty: item.qty,
       image: item.image,
     }));
-    await supabaseAdmin.from("order_items").insert(orderItemsToInsert);
+    const { error: itemsErr } = await supabaseAdmin.from("order_items").insert(orderItemsToInsert);
+    if (itemsErr) {
+      await supabaseAdmin.from("orders").delete().eq("id", orderId);
+      throw new Error("Failed to record order items. Please try again.");
+    }
 
     // 7. Insert immutable order address snapshot into order_addresses
-    await supabaseAdmin.from("order_addresses").insert({
+    const { error: oaErr } = await supabaseAdmin.from("order_addresses").insert({
       order_id: orderId,
       address_type: "shipping",
       full_name: customer.name.trim(),
@@ -619,9 +652,13 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       postal_code: customer.pin.trim(),
       country: "India",
     });
+    if (oaErr) {
+      await supabaseAdmin.from("orders").delete().eq("id", orderId);
+      throw new Error("Failed to record delivery address. Please try again.");
+    }
 
     // Also write to shipping_addresses for backwards compatibility
-    await supabaseAdmin.from("shipping_addresses").insert({
+    const { error: saErr } = await supabaseAdmin.from("shipping_addresses").insert({
       order_id: orderId,
       user_id: verifiedUserId,
       full_name: customer.name.trim(),
@@ -633,9 +670,12 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       pincode: customer.pin.trim(),
       country: "India",
     });
+    if (saErr) {
+      console.warn("[Shipping Address Snapshot] Write warning:", saErr.message);
+    }
 
-    // Save to customer account address book if authenticated
-    if (customerUuid) {
+    // Save to customer account address book strictly when authenticated (never for guest orders!)
+    if (verifiedUserId && customerUuid) {
       try {
         await supabaseAdmin.from("customer_addresses").insert({
           customer_id: customerUuid,
@@ -684,7 +724,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         throw new Error(reserveRes.error || "Failed to reserve inventory for this order.");
       }
     } else {
-      // For Cash on Delivery, inventory is committed immediately upon order confirmation
+      // For Cash on Delivery, inventory is committed atomically — abort and rollback if stock exhausted
       const commitRes = await commitOrderInventory(
         orderId,
         orderNumber,
@@ -692,19 +732,50 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         verifiedUserId,
       );
       if (!commitRes.success) {
-        console.warn("[Inventory Commit Warning]", commitRes.error);
+        await supabaseAdmin.from("orders").delete().eq("id", orderId);
+        throw new Error(
+          commitRes.error || "Insufficient stock available to place this Cash on Delivery order.",
+        );
       }
     }
 
-    // 10. Increment coupon times_used and log redemption if applied
+    // 10. Atomic coupon redemption check & increment (with rollback on payment init failure)
+    let redeemedCouponId: string | null = null;
     if (coupon && discount > 0) {
-      const { data: cp } = await supabaseAdmin
-        .from("coupons")
-        .select("id, times_used")
-        .ilike("code", coupon.trim().toUpperCase())
-        .maybeSingle();
+      const cleanCouponCode = coupon.trim().toUpperCase();
+      const sql = getDb();
+      if (sql) {
+        const [claimed] = await sql<{ id: string }[]>`
+          UPDATE public.coupons
+          SET times_used = COALESCE(times_used, 0) + 1, updated_at = NOW()
+          WHERE upper(code) = ${cleanCouponCode}
+            AND is_active = true
+            AND (expires_at IS NULL OR expires_at > NOW())
+            AND (usage_limit IS NULL OR COALESCE(times_used, 0) < usage_limit)
+          RETURNING id
+        `;
+        if (!claimed) {
+          if (paymentMethod === "online") await releaseOrderInventoryReservations(orderId);
+          await supabaseAdmin.from("orders").delete().eq("id", orderId);
+          throw new Error(
+            `Coupon code "${cleanCouponCode}" has expired or reached its usage limit.`,
+          );
+        }
+        redeemedCouponId = claimed.id;
+      } else {
+        const { data: cp } = await supabaseAdmin
+          .from("coupons")
+          .select("id, times_used, usage_limit")
+          .ilike("code", cleanCouponCode)
+          .eq("is_active", true)
+          .maybeSingle();
 
-      if (cp) {
+        if (!cp || (cp.usage_limit && (cp.times_used || 0) >= cp.usage_limit)) {
+          if (paymentMethod === "online") await releaseOrderInventoryReservations(orderId);
+          await supabaseAdmin.from("orders").delete().eq("id", orderId);
+          throw new Error(`Coupon code "${cleanCouponCode}" is no longer available.`);
+        }
+
         await supabaseAdmin
           .from("coupons")
           .update({
@@ -712,10 +783,13 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
             updated_at: new Date().toISOString(),
           })
           .eq("id", cp.id);
+        redeemedCouponId = cp.id;
+      }
 
+      if (redeemedCouponId) {
         try {
           await supabaseAdmin.from("coupon_redemptions").insert({
-            coupon_id: cp.id,
+            coupon_id: redeemedCouponId,
             customer_id: customerUuid,
             order_id: orderId,
             discount_amount: discount,
@@ -726,12 +800,16 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       }
     }
 
-    // 8. Handle Payment Method
+    // 11. Handle Payment Method
     if (paymentMethod === "online") {
       const razorpayKeyId = getRazorpayKeyId();
 
-      // Check if Razorpay is configured
       if (!isRazorpayConfigured() || !razorpayKeyId) {
+        await releaseOrderInventoryReservations(orderId);
+        if (redeemedCouponId) {
+          await supabaseAdmin.from("coupon_redemptions").delete().eq("order_id", orderId);
+        }
+        await supabaseAdmin.from("orders").delete().eq("id", orderId);
         throw new Error(
           "Online payment is temporarily unavailable. Please select Cash on Delivery or contact store support.",
         );
@@ -758,22 +836,33 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
           error: rzpRes.error || "Razorpay initialization failed",
           context: { orderId, totalPaise, checkoutMode },
         });
-        // Rollback pending order and release reserved stock if Razorpay initialization fails
+        // Rollback pending order, coupon redemption, and release reserved stock if Razorpay initialization fails
         await releaseOrderInventoryReservations(orderId);
+        if (redeemedCouponId) {
+          const sql = getDb();
+          if (sql) {
+            await sql`UPDATE public.coupons SET times_used = GREATEST(0, times_used - 1) WHERE id = ${redeemedCouponId}::uuid`;
+          }
+          await supabaseAdmin.from("coupon_redemptions").delete().eq("order_id", orderId);
+        }
         await supabaseAdmin.from("orders").delete().eq("id", orderId);
         throw new Error(rzpRes.error || "Failed to initialize payment gateway checkout.");
       }
 
       // Record Razorpay order ID
-      await supabaseAdmin
+      const { error: ordRzpErr } = await supabaseAdmin
         .from("orders")
         .update({
           razorpay_order_id: rzpRes.order.id,
           payment_status: "pending",
         })
         .eq("id", orderId);
+      if (ordRzpErr) {
+        await releaseOrderInventoryReservations(orderId);
+        throw new Error("Failed to bind payment order reference. Please retry checkout.");
+      }
 
-      await supabaseAdmin.from("payments").insert({
+      const { error: pmtInsErr } = await supabaseAdmin.from("payments").insert({
         order_id: orderId,
         user_id: verifiedUserId,
         gateway: "razorpay",
@@ -784,6 +873,9 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         currency: "INR",
         status: "pending",
       });
+      if (pmtInsErr) {
+        console.warn("[Payments Ledger] Initial pending payment write notice:", pmtInsErr.message);
+      }
 
       return {
         success: true,
@@ -798,7 +890,6 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       };
     } else {
       // Cash on Delivery (COD)
-      // Call ShipMaxx360 to register COD consignment
       const shipmentRes = await createShipMaxxShipment({
         orderId,
         orderNumber,
@@ -840,7 +931,8 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
 
 /**
  * Server Function: Verify Razorpay Payment and Dispatch ShipMaxx360 Shipment
- * Cryptographically verifies payment, ensures captured status, and prevents duplicate processing.
+ * Cryptographically verifies payment, verifies caller ownership on user-bound orders,
+ * ensures captured status, and prevents duplicate processing.
  */
 export const verifyPaymentServerFn = createServerFn({ method: "POST" })
   .validator(
@@ -857,6 +949,19 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
     const authUser =
       (await getAuthenticatedCustomerId(data.authToken)) || (await getServerSessionUser());
     const verifiedUserId = authUser ? authUser.id : null;
+
+    const { data: ownerCheckOrder } = await supabaseAdmin
+      .from("orders")
+      .select("user_id")
+      .eq("id", data.orderId)
+      .maybeSingle();
+
+    if (
+      ownerCheckOrder?.user_id &&
+      (!verifiedUserId || ownerCheckOrder.user_id !== verifiedUserId)
+    ) {
+      throw new Error("Unauthorized: This order belongs to another account.");
+    }
 
     // 2. Verify Razorpay cryptographic signature, amount, currency, and mark order paid
     const verification = await confirmVerifiedPayment({
@@ -970,7 +1075,7 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
 
     const isAdmin = await checkIsUserAdmin(authUser.id, authUser.email);
     if (!isAdmin) {
-      throw new Error("Forbidden: Access restricted to CAVENHURST administrators.");
+      throw new Error("Forbidden: Access restricted to CAVENHUSRT administrators.");
     }
 
     let query = supabaseAdmin
@@ -981,22 +1086,29 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
       .order("created_at", { ascending: false });
 
     if (data.filter && data.filter !== "all") {
-      if (data.filter === "cod") {
+      const safeFilter = data.filter.replace(/[^a-zA-Z0-9_-]/g, "");
+      if (safeFilter === "cod") {
         query = query.eq("payment_method", "cod");
-      } else if (data.filter === "paid") {
+      } else if (safeFilter === "paid") {
         query = query.eq("payment_status", "paid");
-      } else if (data.filter === "pending_payment") {
+      } else if (safeFilter === "pending_payment") {
         query = query.eq("payment_status", "pending");
-      } else {
-        query = query.or(`status.eq.${data.filter},shipment_status.eq.${data.filter}`);
+      } else if (safeFilter) {
+        query = query.or(`status.eq."${safeFilter}",shipment_status.eq."${safeFilter}"`);
       }
     }
 
     if (data.search && data.search.trim()) {
-      const s = data.search.trim();
-      query = query.or(
-        `order_number.ilike.%${s}%,customer_name.ilike.%${s}%,customer_email.ilike.%${s}%,awb_number.ilike.%${s}%`,
-      );
+      const safeSearch = data.search
+        .trim()
+        .replace(/[,()*\\"]/g, "")
+        .slice(0, 80);
+      if (safeSearch) {
+        const pat = `"%${safeSearch}%"`;
+        query = query.or(
+          `order_number.ilike.${pat},customer_name.ilike.${pat},customer_email.ilike.${pat},awb_number.ilike.${pat}`,
+        );
+      }
     }
 
     interface AdminOrderListRow {

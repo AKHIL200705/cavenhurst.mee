@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
+import { getAuthenticatedCustomerId } from "./auth-helpers";
 import {
   COLOR_PHOTOS,
   PRODUCTS,
@@ -98,10 +99,16 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
             p.*,
             COALESCE(
               (
-                SELECT jsonb_object_agg(v.size, GREATEST(0, COALESCE(i.stock_quantity - COALESCE(i.reserved_quantity, 0), v.stock_quantity, 0)))
-                FROM public.product_variants v
-                LEFT JOIN public.inventory i ON i.variant_id = v.id
-                WHERE v.product_id = p.id
+                SELECT jsonb_object_agg(sz.size, sz.avail)
+                FROM (
+                  SELECT
+                    v.size,
+                    SUM(GREATEST(0, COALESCE(i.stock_quantity - COALESCE(i.reserved_quantity, 0), v.stock_quantity, 0)))::int AS avail
+                  FROM public.product_variants v
+                  LEFT JOIN public.inventory i ON i.variant_id = v.id
+                  WHERE v.product_id = p.id
+                  GROUP BY v.size
+                ) sz
               ),
               p.stock
             ) AS live_stock
@@ -154,10 +161,16 @@ export const getProductBySlugServerFn = createServerFn({ method: "POST" })
             p.*,
             COALESCE(
               (
-                SELECT jsonb_object_agg(v.size, GREATEST(0, COALESCE(i.stock_quantity - COALESCE(i.reserved_quantity, 0), v.stock_quantity, 0)))
-                FROM public.product_variants v
-                LEFT JOIN public.inventory i ON i.variant_id = v.id
-                WHERE v.product_id = p.id
+                SELECT jsonb_object_agg(sz.size, sz.avail)
+                FROM (
+                  SELECT
+                    v.size,
+                    SUM(GREATEST(0, COALESCE(i.stock_quantity - COALESCE(i.reserved_quantity, 0), v.stock_quantity, 0)))::int AS avail
+                  FROM public.product_variants v
+                  LEFT JOIN public.inventory i ON i.variant_id = v.id
+                  WHERE v.product_id = p.id
+                  GROUP BY v.size
+                ) sz
               ),
               p.stock
             ) AS live_stock
@@ -230,6 +243,7 @@ export const getProductReviewsServerFn = createServerFn({ method: "POST" })
 export const submitProductReviewServerFn = createServerFn({ method: "POST" })
   .validator(
     (params: {
+      authToken?: string | undefined;
       productSlug: string;
       customerName: string;
       rating: number;
@@ -239,34 +253,62 @@ export const submitProductReviewServerFn = createServerFn({ method: "POST" })
     }) => params,
   )
   .handler(async ({ data }) => {
-    try {
-      const { data: prod } = await supabaseAdmin
-        .from("products")
-        .select("id")
-        .eq("slug", data.productSlug)
-        .maybeSingle();
-
-      if (!prod?.id) throw new Error("Product not found");
-
-      const { data: inserted, error } = await supabaseAdmin
-        .from("product_reviews")
-        .insert({
-          product_id: prod.id,
-          customer_name: data.customerName,
-          customer_auth_uid: data.customerAuthUid || null,
-          rating: Math.min(5, Math.max(1, data.rating)),
-          title: data.title || null,
-          review_text: data.reviewText,
-          status: "approved",
-        })
-        .select("id")
-        .single();
-
-      if (error) throw new Error(error.message);
-      return { success: true, id: inserted.id };
-    } catch (err: unknown) {
-      throw new Error(err instanceof Error ? err.message : "Failed to submit review");
+    const auth = await getAuthenticatedCustomerId(data.authToken);
+    if (!auth) {
+      throw new Error("Please sign in to submit a product review.");
     }
+
+    const reviewText = data.reviewText.trim();
+    if (!reviewText || reviewText.length < 3) {
+      throw new Error("Please enter a review before submitting.");
+    }
+
+    const { data: prod } = await supabaseAdmin
+      .from("products")
+      .select("id")
+      .eq("slug", data.productSlug)
+      .maybeSingle();
+
+    if (!prod?.id) throw new Error("Product not found");
+
+    // Check if the authenticated customer previously ordered this product
+    let isVerifiedPurchase = false;
+    const sql = getDb();
+    if (sql) {
+      try {
+        const [purchased] = await sql<{ id: string }[]>`
+          SELECT oi.id
+          FROM public.order_items oi
+          JOIN public.orders o ON o.id = oi.order_id
+          WHERE oi.product_id = ${prod.id}::uuid
+            AND (o.user_id = ${auth.id} OR (${auth.customerUuid ? sql`o.customer_id = ${auth.customerUuid}::uuid` : sql`false`}))
+            AND o.status NOT IN ('cancelled', 'failed')
+          LIMIT 1
+        `;
+        isVerifiedPurchase = Boolean(purchased);
+      } catch {
+        isVerifiedPurchase = false;
+      }
+    }
+
+    const { data: inserted, error } = await supabaseAdmin
+      .from("product_reviews")
+      .insert({
+        product_id: prod.id,
+        customer_id: auth.customerUuid || null,
+        customer_name: data.customerName.trim().slice(0, 100) || "Verified Customer",
+        customer_auth_uid: auth.id,
+        rating: Math.min(5, Math.max(1, Math.round(data.rating))),
+        title: data.title?.trim().slice(0, 120) || null,
+        review_text: reviewText.slice(0, 2000),
+        is_verified_purchase: isVerifiedPurchase,
+        status: "pending",
+      })
+      .select("id")
+      .single();
+
+    if (error) throw new Error(error.message);
+    return { success: true, id: inserted.id, status: "pending" as const };
   });
 
 /**

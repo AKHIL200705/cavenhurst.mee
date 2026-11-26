@@ -44,7 +44,7 @@ export async function logStructuredServerError(input: StructuredErrorLogInput): 
   const message = extractErrorMessage(input.error);
   console.error(`[${input.source.toUpperCase()}] ${input.action}:`, message);
 
-  const actorEmail = input.actorEmail || "system@cavenhurst.com";
+  const actorEmail = input.actorEmail || "system@cavenhusrt.com";
   const actionName = `error_${input.source}_${input.action}`.slice(0, 120);
   const targetType = input.targetType || input.source;
   const targetId = input.targetId || "unknown";

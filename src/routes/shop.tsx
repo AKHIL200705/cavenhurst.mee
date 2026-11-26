@@ -5,7 +5,7 @@ import { meta } from "@/components/site/InfoPage";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 
 export const Route = createFileRoute("/shop")({
-  head: () => meta("Shop All", "Shop all CAVENHURST premium tees, hoodies and fan edition."),
+  head: () => meta("Shop All", "Shop all CAVENHUSRT premium tees, hoodies and fan edition."),
   loader: async (): Promise<{ products: Product[] }> => {
     try {
       const catalog = await getStoreCatalogServerFn();

@@ -1,7 +1,16 @@
-import fs from "fs";
+const url = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "").replace(/\/+$/, "");
+const key = (
+  process.env.SUPABASE_PUBLISHABLE_KEY ||
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  ""
+).trim();
 
-const url = "https://ewlsrypetobkwrwtmmgh.supabase.co";
-const key = "sb_publishable_apZ6lrNsDBkfDvic9YAUQw_Flzj3z1h";
+if (!url || !key) {
+  console.error(
+    "Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY. Run with: node --env-file=.env scripts/test_supabase_api.mjs",
+  );
+  process.exit(1);
+}
 
 async function testApi() {
   console.log("Testing Supabase REST API...");

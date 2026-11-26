@@ -1,6 +1,6 @@
 import type React from "react";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { getProduct } from "./products";
+import { getProduct, imageFor, type Size } from "./products";
 import { type CouponPricingRule } from "./pricing";
 import { useAuth } from "./auth";
 import {
@@ -12,7 +12,7 @@ import {
 
 export type CartItem = CartItemData;
 
-const DIRECT_BUY_STORAGE_KEY = "cavenhurst-direct-buy";
+const DIRECT_BUY_STORAGE_KEY = "cavenhusrt-direct-buy";
 
 type Store = {
   cart: CartItem[];
@@ -24,6 +24,7 @@ type Store = {
   directBuyCouponRule: CouponPricingRule | null;
   add: (item: CartItem) => boolean;
   setQty: (i: number, qty: number) => void;
+  updateVariant: (i: number, nextSize: Size, nextColor: string) => boolean;
   remove: (i: number) => void;
   clear: () => void;
   toggleWish: (slug: string) => boolean;
@@ -63,7 +64,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // Initialize cart from localStorage and Direct Buy session from sessionStorage on mount
   useEffect(() => {
     try {
-      const s = JSON.parse(localStorage.getItem("cavenhurst-store") || "{}");
+      const s = JSON.parse(localStorage.getItem("cavenhusrt-store") || "{}");
       if (Array.isArray(s.cart)) setCart(s.cart);
       if (Array.isArray(s.wishlist)) setWishlist(s.wishlist);
       setCouponState(s.coupon ?? null);
@@ -94,7 +95,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (ready) {
       localStorage.setItem(
-        "cavenhurst-store",
+        "cavenhusrt-store",
         JSON.stringify({
           cart,
           wishlist,
@@ -162,7 +163,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setWishlist(res.wishlist);
         }
         localStorage.setItem(
-          "cavenhurst-store",
+          "cavenhusrt-store",
           JSON.stringify({
             cart: res?.cart ?? cartRef.current,
             wishlist: res?.wishlist ?? wishlistRef.current,
@@ -181,12 +182,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
   }, [user, sessionToken, ready, syncedUser, coupon]);
 
-  const stockFor = (item: CartItem): number => {
-    if (typeof item.maxStock === "number" && item.maxStock >= 0) {
+  const stockFor = (item: CartItem, sizeOverride?: Size): number => {
+    const targetSize = sizeOverride || item.size;
+    if (sizeOverride && item.sizeStock && typeof item.sizeStock[targetSize] === "number") {
+      return item.sizeStock[targetSize];
+    }
+    if (!sizeOverride && typeof item.maxStock === "number" && item.maxStock >= 0) {
       return item.maxStock;
     }
     const p = getProduct(item.slug);
-    return p?.stock?.[item.size] ?? 10;
+    return p?.stock?.[targetSize] ?? 10;
   };
 
   const add = (item: CartItem) => {
@@ -233,6 +238,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         },
       }).catch((e) => console.error("[Store] SetQty server sync error:", e));
     }
+  };
+
+  const updateVariant = (i: number, nextSize: Size, nextColor: string): boolean => {
+    const targetItem = cart[i];
+    if (!targetItem) return false;
+    if (targetItem.size === nextSize && targetItem.color === nextColor) return true;
+
+    const max = stockFor(targetItem, nextSize);
+    if (max <= 0) return false;
+
+    const p = getProduct(targetItem.slug);
+    const updatedImage = p ? imageFor(p, nextColor) : targetItem.image;
+    const duplicateIdx = cart.findIndex(
+      (c, j) =>
+        j !== i && c.slug === targetItem.slug && c.size === nextSize && c.color === nextColor,
+    );
+
+    setCart((current) => {
+      if (duplicateIdx >= 0) {
+        const mergedQty = Math.min(current[duplicateIdx]!.qty + targetItem.qty, max);
+        return current
+          .map((x, j) =>
+            j === duplicateIdx ? { ...x, qty: mergedQty, maxStock: max, image: updatedImage } : x,
+          )
+          .filter((_, j) => j !== i);
+      }
+      const clampedQty = Math.max(1, Math.min(targetItem.qty, max));
+      return current.map((x, j) =>
+        j === i
+          ? {
+              ...x,
+              size: nextSize,
+              color: nextColor,
+              qty: clampedQty,
+              maxStock: max,
+              image: updatedImage,
+            }
+          : x,
+      );
+    });
+
+    if (user && sessionToken) {
+      void updateCartItemServerFn({
+        data: {
+          authToken: sessionToken,
+          action: "updateVariant",
+          prevSize: targetItem.size,
+          prevColor: targetItem.color,
+          item: {
+            ...targetItem,
+            size: nextSize,
+            color: nextColor,
+            maxStock: max,
+          },
+        },
+      }).catch((e) => console.error("[Store] UpdateVariant server sync error:", e));
+    }
+
+    return true;
   };
 
   const remove = (i: number) => {
@@ -347,6 +411,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         directBuyCouponRule,
         add,
         setQty,
+        updateVariant,
         remove,
         clear,
         toggleWish,

@@ -3,12 +3,12 @@ import { Heart, Home, Layers, LayoutGrid, User, Instagram, Youtube, Facebook } f
 import { useState } from "react";
 import { toast } from "sonner";
 import { Logo } from "./Logo";
-import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { subscribeNewsletterServerFn } from "@/server/customers";
 
 export function Footer() {
   const [email, setEmail] = useState("");
-  const { user } = useAuth();
+  const { user, sessionToken } = useAuth();
   return (
     <footer className="border-t border-border bg-navy-deep pb-24 lg:pb-0">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 md:grid-cols-2 lg:grid-cols-5">
@@ -31,15 +31,15 @@ export function Footer() {
                 toast.error("Please sign in to subscribe");
                 return;
               }
-              const { error } = await supabase
-                .from("newsletter_subscribers")
-                .insert({ email: v, user_id: user.id });
-              if (error && error.code !== "23505") {
+              try {
+                await subscribeNewsletterServerFn({
+                  data: { authToken: sessionToken ?? undefined, email: v },
+                });
+                toast.success("Thanks! You're on the list.");
+                setEmail("");
+              } catch {
                 toast.error("Couldn't subscribe right now. Please try again.");
-                return;
               }
-              toast.success("Thanks! You're on the list.");
-              setEmail("");
             }}
           >
             <input
@@ -81,7 +81,7 @@ export function Footer() {
         <FooterCol
           title="Company"
           links={[
-            ["/about", "About CAVENHURST"],
+            ["/about", "About CAVENHUSRT"],
             ["/privacy", "Privacy Policy"],
             ["/terms", "Terms & Conditions"],
           ]}
@@ -89,7 +89,7 @@ export function Footer() {
       </div>
       <div className="border-t border-border">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-muted-foreground sm:flex-row">
-          <span>© {new Date().getFullYear()} CAVENHURST. All rights reserved.</span>
+          <span>© {new Date().getFullYear()} CAVENHUSRT. All rights reserved.</span>
           <span className="flex gap-2">
             {["UPI", "VISA", "Mastercard", "RuPay", "COD"].map((p) => (
               <span key={p} className="rounded border border-border px-2 py-1 font-semibold">

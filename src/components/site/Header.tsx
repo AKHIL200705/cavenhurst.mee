@@ -113,7 +113,7 @@ export function Header() {
             </Link>
           </nav>
         </div>
-        <Link to="/" aria-label="CAVENHURST home">
+        <Link to="/" aria-label="CAVENHUSRT home">
           <Logo />
         </Link>
         <div className="flex items-center justify-end gap-3 sm:gap-5">

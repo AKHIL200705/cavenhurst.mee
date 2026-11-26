@@ -18,7 +18,7 @@ const sql = postgres(match[1], { ssl: { rejectUnauthorized: false }, connect_tim
 
 async function runFullSystemCheck() {
   console.log("================================================================================");
-  console.log("             CAVENHURST - COMPREHENSIVE FULL-STACK SYSTEM AUDIT                 ");
+  console.log("             CAVENHUSRT - COMPREHENSIVE FULL-STACK SYSTEM AUDIT                 ");
   console.log("================================================================================\n");
 
   const results = {

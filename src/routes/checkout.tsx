@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -53,7 +53,7 @@ export const Route = createFileRoute("/checkout")({
   validateSearch: (search: Record<string, unknown>): { mode?: "direct" | "cart" | undefined } => ({
     mode: search["mode"] === "direct" ? "direct" : search["mode"] === "cart" ? "cart" : undefined,
   }),
-  head: () => meta("Checkout", "Secure checkout for CAVENHURST orders across India."),
+  head: () => meta("Checkout", "Secure checkout for CAVENHUSRT orders across India."),
   component: Checkout,
 });
 
@@ -128,7 +128,6 @@ function Checkout() {
     clearDirectBuy,
   } = useStore();
   const { user, sessionToken } = useAuth();
-  const navigate = useNavigate();
 
   const checkoutItems = useMemo(
     () => (isDirectBuy ? (directBuyItem ? [directBuyItem] : []) : cart),
@@ -338,7 +337,7 @@ function Checkout() {
           #{orderSuccess.orderNumber}
         </p>
         <p className="mt-4 text-sm sm:text-base text-muted-foreground leading-relaxed">
-          Thank you for choosing CAVENHURST. Your order has been placed and is being prepared for
+          Thank you for choosing CAVENHUSRT. Your order has been placed and is being prepared for
           dispatch from our logistics hub.
         </p>
 
@@ -456,7 +455,7 @@ function Checkout() {
           key: orderRes.keyId,
           amount: orderRes.amountInPaise,
           currency: orderRes.currency || "INR",
-          name: "CAVENHURST",
+          name: "CAVENHUSRT",
           description: `Order #${orderRes.orderNumber}`,
           order_id: orderRes.razorpayOrderId,
           prefill: {
@@ -465,7 +464,7 @@ function Checkout() {
             contact: f.phone,
           },
           theme: {
-            color: "#0A1F3C", // CAVENHURST Midnight Navy
+            color: "#0A1F3C", // CAVENHUSRT Midnight Navy
           },
           modal: {
             ondismiss: () => {
@@ -551,7 +550,7 @@ function Checkout() {
             Checkout
           </h1>
           <p className="mt-2 text-xs sm:text-sm text-silver font-medium">
-            Official CAVENHURST store · Dispatched via ShipMaxx360 from Andhra Pradesh Hub (521212)
+            Official CAVENHUSRT store · Dispatched via ShipMaxx360 from Andhra Pradesh Hub (521212)
           </p>
         </div>
 

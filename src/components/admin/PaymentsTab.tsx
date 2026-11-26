@@ -93,10 +93,10 @@ export function PaymentsTab({ payments, loading, onRefresh, onInitiateRefund }: 
                       <span
                         className={`inline-block rounded px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase ${
                           p.status === "captured" || p.status === "paid"
-                            ? "bg-emerald-500/20 text-emerald-400"
+                            ? "border border-[#2b4564] bg-[#122741] text-white"
                             : p.status === "refunded"
-                              ? "bg-rose-500/20 text-rose-400"
-                              : "bg-amber-500/20 text-amber-400"
+                              ? "border border-[#233b56] bg-[#08192e] text-[#9fb2c9]"
+                              : "border border-[#233b56] bg-[#0a1e35] text-[#cbd5e1]"
                         }`}
                       >
                         {p.status}
@@ -107,9 +107,9 @@ export function PaymentsTab({ payments, loading, onRefresh, onInitiateRefund }: 
                         p.razorpay_payment_id && (
                           <button
                             onClick={() => onInitiateRefund(p)}
-                            className="inline-flex items-center gap-1 rounded border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[11px] font-bold text-rose-400 hover:bg-rose-500/20 transition"
+                            className="inline-flex items-center gap-1 rounded border border-[#2b4564] bg-[#122741] px-2.5 py-1 text-[11px] font-bold text-white hover:bg-[#1a3454] transition"
                           >
-                            <RotateCcw className="h-3 w-3" /> Refund
+                            <RotateCcw className="h-3 w-3 text-white" /> Refund
                           </button>
                         )}
                     </td>

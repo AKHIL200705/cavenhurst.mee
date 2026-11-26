@@ -370,7 +370,7 @@ test("Customer Addresses: Validation rules and normalization", () => {
   const validRes = validateCustomerAddress({
     fullName: "Akhil Sai",
     phone: "+91 9876543210",
-    addressLine1: "Flat 402, Cavenhurst Tower",
+    addressLine1: "Flat 402, Cavenhusrt Tower",
     city: "Hyderabad",
     state: "Telangana",
     postalCode: "500081",
@@ -385,7 +385,7 @@ test("Customer Addresses: Validation rules and normalization", () => {
     validateCustomerAddress({
       fullName: "Akhil Sai",
       phone: "9876543210",
-      addressLine1: "Flat 402, Cavenhurst Tower",
+      addressLine1: "Flat 402, Cavenhusrt Tower",
       city: "Hyderabad",
       state: "Telangana",
       postalCode: "012345",
@@ -398,7 +398,7 @@ test("Customer Addresses: Validation rules and normalization", () => {
     validateCustomerAddress({
       fullName: "Akhil Sai",
       phone: "1234567890",
-      addressLine1: "Flat 402, Cavenhurst Tower",
+      addressLine1: "Flat 402, Cavenhusrt Tower",
       city: "Hyderabad",
       state: "Telangana",
       postalCode: "500081",
@@ -1245,7 +1245,7 @@ test("Admin Customers: Search and profile status filtering", () => {
       id: "cust-3",
       authUid: "auth-uuid-3333",
       name: "Jane Doe",
-      email: "jane@cavenhurst.com",
+      email: "jane@cavenhusrt.com",
       phone: "9123456789",
       mobileNumber: "9123456789",
       profileCompleted: true,
@@ -1295,8 +1295,8 @@ test("OTP: 6-digit cryptographic generation and format specification", () => {
 });
 
 test("OTP: Salted cryptographic HMAC-SHA256 hashing and verification", () => {
-  const secret = "test_salt_secret_cavenhurst_32bytes!";
-  const email = "customer@cavenhurst.com";
+  const secret = "test_salt_secret_cavenhusrt_32bytes!";
+  const email = "customer@cavenhusrt.com";
   const otp = "584920";
 
   function hashOtp(code, mail) {
@@ -1310,7 +1310,7 @@ test("OTP: Salted cryptographic HMAC-SHA256 hashing and verification", () => {
   assert.equal(hashOtp(otp, email), hash, "Identical OTP and email must yield identical hash");
   assert.notEqual(hashOtp("584921", email), hash, "Different OTP must yield different hash");
   assert.notEqual(
-    hashOtp(otp, "other@cavenhurst.com"),
+    hashOtp(otp, "other@cavenhusrt.com"),
     hash,
     "Different email must yield different hash",
   );
@@ -1404,23 +1404,23 @@ test("Diagnostics: Email masking and non-disclosure of sensitive OTP data", () =
   }
 
   assert.equal(maskEmail("akhilsaiabbireddy2007@gmail.com"), "a***7@gmail.com");
-  assert.equal(maskEmail("ab@cavenhurst.com"), "a***@cavenhurst.com");
+  assert.equal(maskEmail("ab@cavenhusrt.com"), "a***@cavenhusrt.com");
   assert.equal(maskEmail("customer@domain.in"), "c***r@domain.in");
   assert.equal(maskEmail("invalid"), "***");
 });
 
 test("Upstash Redis: Key schema and TTL configuration specification", () => {
-  const email = "customer@cavenhurst.com";
+  const email = "customer@cavenhusrt.com";
   const purpose = "registration";
   const cleanEmail = email.toLowerCase().trim();
 
-  const otpKey = `cavenhurst:otp:${purpose}:${cleanEmail}`;
-  const cooldownKey = `cavenhurst:cooldown:${purpose}:${cleanEmail}`;
-  const resendCountKey = `cavenhurst:resend_count:${purpose}:${cleanEmail}`;
+  const otpKey = `cavenhusrt:otp:${purpose}:${cleanEmail}`;
+  const cooldownKey = `cavenhusrt:cooldown:${purpose}:${cleanEmail}`;
+  const resendCountKey = `cavenhusrt:resend_count:${purpose}:${cleanEmail}`;
 
-  assert.equal(otpKey, "cavenhurst:otp:registration:customer@cavenhurst.com");
-  assert.equal(cooldownKey, "cavenhurst:cooldown:registration:customer@cavenhurst.com");
-  assert.equal(resendCountKey, "cavenhurst:resend_count:registration:customer@cavenhurst.com");
+  assert.equal(otpKey, "cavenhusrt:otp:registration:customer@cavenhusrt.com");
+  assert.equal(cooldownKey, "cavenhusrt:cooldown:registration:customer@cavenhusrt.com");
+  assert.equal(resendCountKey, "cavenhusrt:resend_count:registration:customer@cavenhusrt.com");
 
   // Verify TTL requirements
   const OTP_TTL_SECONDS = 300; // 5 minutes
@@ -1486,7 +1486,7 @@ test("Registration Key: Cryptographic generation, format, and entropy", () => {
 });
 
 test("Password Security: AES-256-GCM authenticated encryption and zero plaintext storage", () => {
-  const secret = "cavenhurst_registration_test_secret_salt_32bytes!";
+  const secret = "cavenhusrt_registration_test_secret_salt_32bytes!";
   const key = createHash("sha256").update(secret).digest();
 
   function encryptPassword(plain) {
@@ -1535,21 +1535,21 @@ test("Password Security: AES-256-GCM authenticated encryption and zero plaintext
 
 test("Upstash Redis: Registration session key schema and dual-link indexing", () => {
   const regKey = "reg_a1b2c3d4e5f6789012345678901234567890123456789012";
-  const email = "Customer@Cavenhurst.com";
+  const email = "Customer@Cavenhusrt.com";
   const cleanEmail = email.toLowerCase().trim();
 
-  const regSessionKey = `cavenhurst:reg:${regKey}`;
-  const emailLinkKey = `cavenhurst:otp:registration:${cleanEmail}`;
-  const cooldownKey = `cavenhurst:cooldown:registration:${cleanEmail}`;
-  const resendCountKey = `cavenhurst:resend_count:registration:${cleanEmail}`;
+  const regSessionKey = `cavenhusrt:reg:${regKey}`;
+  const emailLinkKey = `cavenhusrt:otp:registration:${cleanEmail}`;
+  const cooldownKey = `cavenhusrt:cooldown:registration:${cleanEmail}`;
+  const resendCountKey = `cavenhusrt:resend_count:registration:${cleanEmail}`;
 
   assert.equal(
     regSessionKey,
-    "cavenhurst:reg:reg_a1b2c3d4e5f6789012345678901234567890123456789012",
+    "cavenhusrt:reg:reg_a1b2c3d4e5f6789012345678901234567890123456789012",
   );
-  assert.equal(emailLinkKey, "cavenhurst:otp:registration:customer@cavenhurst.com");
-  assert.equal(cooldownKey, "cavenhurst:cooldown:registration:customer@cavenhurst.com");
-  assert.equal(resendCountKey, "cavenhurst:resend_count:registration:customer@cavenhurst.com");
+  assert.equal(emailLinkKey, "cavenhusrt:otp:registration:customer@cavenhusrt.com");
+  assert.equal(cooldownKey, "cavenhusrt:cooldown:registration:customer@cavenhusrt.com");
+  assert.equal(resendCountKey, "cavenhusrt:resend_count:registration:customer@cavenhusrt.com");
 });
 
 test("Registration Session: Verification, attempt limits, expiration, and key invalidation", () => {
@@ -1560,7 +1560,7 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
       .digest("hex");
   }
 
-  const email = "customer@cavenhurst.com";
+  const email = "customer@cavenhusrt.com";
   const validOtp = "654321";
   const invalidOtp = "111222";
   const correctHash = hashOtp(validOtp, email);
@@ -1570,7 +1570,7 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   const regKey = "reg_test12345678901234567890123456789012345678901234";
 
   function createSession(expiresInMs = 300000) {
-    store.set(`cavenhurst:reg:${regKey}`, {
+    store.set(`cavenhusrt:reg:${regKey}`, {
       registrationKey: regKey,
       email,
       fullName: "Akhil Sai",
@@ -1582,7 +1582,7 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   }
 
   function verify(key, enteredOtp) {
-    const record = store.get(`cavenhurst:reg:${key}`);
+    const record = store.get(`cavenhusrt:reg:${key}`);
     if (!record) {
       return {
         success: false,
@@ -1590,11 +1590,11 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
       };
     }
     if (Date.now() > record.expiresAt) {
-      store.delete(`cavenhurst:reg:${key}`);
+      store.delete(`cavenhusrt:reg:${key}`);
       return { success: false, error: "Verification code has expired. Please request a new code." };
     }
     if (record.attempts >= 5) {
-      store.delete(`cavenhurst:reg:${key}`);
+      store.delete(`cavenhusrt:reg:${key}`);
       return {
         success: false,
         error: "Too many incorrect attempts. For security, please start registration again.",
@@ -1609,7 +1609,7 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
         error: `Incorrect verification code. ${remaining} attempts remaining.`,
       };
     }
-    store.delete(`cavenhurst:reg:${key}`);
+    store.delete(`cavenhusrt:reg:${key}`);
     return { success: true };
   }
 
@@ -1632,7 +1632,7 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   const lockedRes = verify(regKey, validOtp);
   assert.match(lockedRes.error, /Too many incorrect attempts/);
   assert.equal(
-    store.has(`cavenhurst:reg:${regKey}`),
+    store.has(`cavenhusrt:reg:${regKey}`),
     false,
     "Key must be deleted after 5 failed attempts",
   );
@@ -1641,14 +1641,14 @@ test("Registration Session: Verification, attempt limits, expiration, and key in
   createSession(-1000); // Expired 1 second ago
   const expiredRes = verify(regKey, validOtp);
   assert.match(expiredRes.error, /Verification code has expired/);
-  assert.equal(store.has(`cavenhurst:reg:${regKey}`), false, "Expired key must be deleted");
+  assert.equal(store.has(`cavenhusrt:reg:${regKey}`), false, "Expired key must be deleted");
 
   // 5. Successful verification invalidates key atomically (prevents reuse)
   createSession();
   const successRes = verify(regKey, validOtp);
   assert.equal(successRes.success, true);
   assert.equal(
-    store.has(`cavenhurst:reg:${regKey}`),
+    store.has(`cavenhusrt:reg:${regKey}`),
     false,
     "Key must be purged upon successful verification",
   );

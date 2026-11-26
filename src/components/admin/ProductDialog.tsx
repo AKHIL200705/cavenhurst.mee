@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { X, Upload, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
-import { saveAdminProductServerFn } from "@/server/admin";
+import { saveAdminProductServerFn, uploadProductImageServerFn } from "@/server/admin";
 import { SIZES } from "@/lib/products";
 
 export interface AdminProductFormItem {
@@ -94,26 +93,39 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+    if (!allowedTypes.has(file.type.toLowerCase())) {
+      toast.error("Please select a JPEG, PNG, WebP, or AVIF image.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image file must be 5 MB or smaller.");
+      return;
+    }
+
     setUploadingImg(true);
     try {
-      const fileExt = file.name.split(".").pop();
-      const fileName = `${slug || "garment"}-${Date.now()}.${fileExt}`;
-      const filePath = `products/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("product-images")
-        .upload(filePath, file, { upsert: true });
-
-      if (uploadError) {
-        throw new Error(uploadError.message);
+      const arrayBuf = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuf);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += 8192) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
       }
+      const base64Data = btoa(binary);
 
-      const { data: publicUrlData } = supabase.storage
-        .from("product-images")
-        .getPublicUrl(filePath);
+      const fileExt = file.name.split(".").pop() || "jpg";
+      const fileName = `${slug || "garment"}-${Date.now()}.${fileExt}`;
+      const uploadRes = await uploadProductImageServerFn({
+        data: {
+          authToken,
+          fileName,
+          contentType: file.type,
+          base64Data,
+        },
+      });
 
-      if (publicUrlData?.publicUrl) {
-        setImages([...images, publicUrlData.publicUrl]);
+      if (uploadRes?.publicUrl) {
+        setImages([...images, uploadRes.publicUrl]);
         toast.success("Image uploaded to Supabase Storage.");
       }
     } catch (err) {
@@ -225,7 +237,7 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-4">
             <div>
               <label className="block font-semibold text-silver mb-1">Category</label>
               <select
@@ -257,6 +269,16 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
                 required
                 value={mrp}
                 onChange={(e) => setMrp(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono outline-none focus:border-gold"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-silver mb-1">Sort Priority</label>
+              <input
+                type="number"
+                min={1}
+                value={rank}
+                onChange={(e) => setRank(e.target.value)}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono outline-none focus:border-gold"
               />
             </div>
@@ -338,7 +360,7 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
                   <button
                     type="button"
                     onClick={() => handleRemoveColor(i)}
-                    className="text-muted-foreground hover:text-rose-400"
+                    className="text-muted-foreground hover:text-white"
                   >
                     ×
                   </button>
@@ -403,7 +425,7 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
                   <button
                     type="button"
                     onClick={() => setImages(images.filter((_, idx) => idx !== i))}
-                    className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-rose-400"
+                    className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-white"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
