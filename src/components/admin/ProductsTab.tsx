@@ -116,8 +116,8 @@ export function ProductsTab({ products, loading, authToken, onRefresh }: Product
     <div className="space-y-6">
       {/* Top Controls */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 items-center gap-3">
-          <div className="relative flex-1 max-w-xs">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}

@@ -449,19 +449,21 @@ function Account() {
           </form>
         ) : (
           <div className="mt-6 grid gap-4 sm:grid-cols-3 text-sm">
-            <div className="rounded-xl border border-border/60 bg-background/50 p-3">
+            <div className="min-w-0 rounded-xl border border-border/60 bg-background/50 p-3">
               <span className="text-xs text-muted-foreground">Name</span>
-              <p className="mt-1 font-semibold">{profileData.fullName || "Not provided"}</p>
+              <p className="mt-1 break-words font-semibold">
+                {profileData.fullName || "Not provided"}
+              </p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-background/50 p-3">
+            <div className="min-w-0 rounded-xl border border-border/60 bg-background/50 p-3">
               <span className="text-xs text-muted-foreground">Email Address</span>
-              <p className="mt-1 font-semibold">
+              <p className="mt-1 break-all font-semibold">
                 {profileData.email || user.email || "No email registered"}
               </p>
             </div>
-            <div className="rounded-xl border border-border/60 bg-background/50 p-3">
+            <div className="min-w-0 rounded-xl border border-border/60 bg-background/50 p-3">
               <span className="text-xs text-muted-foreground">Phone Number</span>
-              <p className="mt-1 font-semibold">
+              <p className="mt-1 break-words font-semibold">
                 {profileData.phone || user.phone || "Not provided"}
               </p>
             </div>
@@ -469,7 +471,7 @@ function Account() {
         )}
 
         {!profileData.email && !user.email && (
-          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex items-center justify-between gap-3">
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3">
             <span>
               Please add your email address so you can receive order confirmations and invoice
               receipts.

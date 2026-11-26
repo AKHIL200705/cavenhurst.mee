@@ -89,10 +89,12 @@ function AdminLogin() {
             }
           },
         });
+        const availableWidth =
+          googleBtnRef.current.parentElement?.clientWidth || window.innerWidth - 80;
         g.accounts.id.renderButton(googleBtnRef.current, {
           theme: "filled_black",
           size: "large",
-          width: 320,
+          width: Math.min(320, Math.max(200, availableWidth)),
           text: "continue_with",
           shape: "rectangular",
         });
@@ -154,7 +156,7 @@ function AdminLogin() {
 
   return (
     <div className="flex min-h-[85vh] items-center justify-center px-4 py-16">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-2xl space-y-6">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-6 sm:p-8 shadow-2xl space-y-6">
         <div className="text-center space-y-2">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-electric/10 text-electric border border-electric/30">
             <ShieldCheck className="h-6 w-6" />

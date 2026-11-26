@@ -191,7 +191,7 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative w-full max-w-3xl rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-3xl rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-border pb-4">
           <div>
@@ -368,13 +368,13 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
               ))}
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex flex-wrap items-center gap-2 pt-2">
               <input
                 type="text"
                 placeholder="Colour name (e.g. Midnight Navy)"
                 value={newColorName}
                 onChange={(e) => setNewColorName(e.target.value)}
-                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none"
               />
               <input
                 type="color"
@@ -394,7 +394,7 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
 
           {/* Product Images */}
           <div className="rounded-xl border border-border bg-background/50 p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-bold uppercase tracking-brand text-silver">
                 Product Photography
               </span>
@@ -433,13 +433,13 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
               ))}
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex flex-wrap items-center gap-2 pt-2">
               <input
                 type="text"
                 placeholder="Or paste image URL (/src/assets/... or https://...)"
                 value={newImageUrl}
                 onChange={(e) => setNewImageUrl(e.target.value)}
-                className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none"
               />
               <button
                 type="button"
@@ -458,7 +458,7 @@ export function ProductDialog({ product, authToken, onClose, onSaved }: ProductD
 
           {/* Toggles & Display Controls */}
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center gap-4 sm:gap-6">
               <label className="flex items-center gap-2 cursor-pointer font-semibold">
                 <input
                   type="checkbox"

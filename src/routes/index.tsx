@@ -127,8 +127,9 @@ function Home() {
                 className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
               />
               <div className="absolute inset-0 bg-fade-gradient" />
-              <span className="absolute bottom-4 left-4 flex items-center gap-2 font-heading text-lg sm:text-xl font-bold uppercase tracking-wide">
-                {c.title} <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              <span className="absolute bottom-3 left-3 right-3 flex items-center gap-1.5 font-heading text-base font-bold uppercase tracking-wide sm:bottom-4 sm:left-4 sm:right-4 sm:gap-2 sm:text-xl">
+                {c.title}{" "}
+                <ArrowRight className="h-4 w-4 shrink-0 transition group-hover:translate-x-1" />
               </span>
             </Link>
           ))}

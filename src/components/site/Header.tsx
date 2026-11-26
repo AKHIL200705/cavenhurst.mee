@@ -34,13 +34,13 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <header className="glass-navigation navigation-motion sticky top-0 z-40 border-b border-border">
-      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto_1fr] items-center px-4">
+      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[auto_1fr_auto] items-center gap-2 px-3 sm:grid-cols-[1fr_auto_1fr] sm:px-4">
         <div className="flex items-center gap-6">
           <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
             <SheetTrigger aria-label="Open menu" className="p-1">
               <Menu className="h-6 w-6" />
             </SheetTrigger>
-            <SheetContent side="left" className="glass-panel navigation-motion w-80">
+            <SheetContent side="left" className="glass-panel navigation-motion w-[min(20rem,88vw)]">
               <SheetTitle className="mb-8">
                 <Logo />
               </SheetTitle>
@@ -113,10 +113,10 @@ export function Header() {
             </Link>
           </nav>
         </div>
-        <Link to="/" aria-label="CAVENHUSRT home">
+        <Link to="/" aria-label="CAVENHUSRT home" className="justify-self-center max-w-full">
           <Logo />
         </Link>
-        <div className="flex items-center justify-end gap-3 sm:gap-5">
+        <div className="flex items-center justify-end gap-2.5 pr-1 sm:gap-5 sm:pr-0">
           <Link to="/search" aria-label="Search">
             <Search className="h-5 w-5" />
           </Link>

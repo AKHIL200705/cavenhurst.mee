@@ -115,7 +115,7 @@ function CompleteProfilePage() {
   };
 
   return (
-    <div className="relative flex min-h-[85vh] w-full items-center justify-center px-4 py-16 sm:px-6">
+    <div className="relative flex min-h-[85vh] w-full items-center justify-center overflow-hidden px-4 py-16 sm:px-6">
       {/* Background ambient luxury glow */}
       <div
         className="pointer-events-none absolute -top-40 left-1/2 -z-10 h-96 w-96 -translate-x-1/2 rounded-full opacity-20 blur-3xl"
@@ -132,7 +132,7 @@ function CompleteProfilePage() {
             <span className="mt-4 font-heading text-[10px] font-bold uppercase tracking-wider text-silver">
               MANDATORY ACCOUNT VERIFICATION
             </span>
-            <h1 className="mt-1 font-heading text-3xl sm:text-4xl font-bold uppercase tracking-tight text-foreground leading-none">
+            <h1 className="mt-1 font-heading text-2xl sm:text-4xl font-bold uppercase tracking-tight text-foreground leading-none">
               COMPLETE YOUR PROFILE
             </h1>
             <p className="mt-2 font-sans text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-sm">
@@ -163,7 +163,7 @@ function CompleteProfilePage() {
 
             {/* Mobile Number with Country Code */}
             <div className="space-y-1.5">
-              <label className="flex items-center justify-between font-mono text-xs text-silver uppercase tracking-wider">
+              <label className="flex flex-wrap items-center justify-between gap-1 font-mono text-xs text-silver uppercase tracking-wider">
                 <span className="flex items-center gap-1.5">
                   <Phone className="h-3.5 w-3.5 text-electric" /> Mobile Number
                 </span>

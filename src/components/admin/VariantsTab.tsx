@@ -247,7 +247,7 @@ export function VariantsTab({
                       <span
                         className={`rounded-full px-2 py-0.5 text-[11px] ${
                           v.stock_quantity <= 3
-                            ? "bg-sale/20 text-sale"
+                            ? "border border-[#233b56] bg-[#08192e] text-[#cbd5e1]"
                             : "bg-secondary text-foreground"
                         }`}
                       >
@@ -278,7 +278,7 @@ export function VariantsTab({
                         </button>
                         <button
                           onClick={() => handleDelete(v.id)}
-                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-sale"
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-white"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

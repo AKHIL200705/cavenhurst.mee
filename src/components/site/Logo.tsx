@@ -14,10 +14,12 @@ export function WingMark({ className = "h-6 w-auto" }: { className?: string }) {
 
 export function Logo({ compact = false }: { compact?: boolean }) {
   return (
-    <span className="flex items-center gap-3 text-foreground">
-      <WingMark className="h-9 w-auto" />
+    <span className="flex items-center gap-2 text-foreground sm:gap-3">
+      <WingMark className="h-7 w-auto shrink-0 sm:h-9" />
       {!compact && (
-        <span className="font-logo text-lg font-medium tracking-brand sm:text-xl">CAVENHUSRT</span>
+        <span className="whitespace-nowrap font-logo text-sm font-medium tracking-[0.12em] sm:text-xl sm:tracking-brand">
+          CAVENHUSRT
+        </span>
       )}
     </span>
   );

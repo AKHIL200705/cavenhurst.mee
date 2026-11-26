@@ -544,7 +544,7 @@ function Checkout() {
       onSubmit={submit}
       className="mx-auto grid max-w-7xl gap-10 px-4 py-12 lg:grid-cols-[1fr_400px]"
     >
-      <div className="space-y-8">
+      <div className="min-w-0 space-y-8">
         <div>
           <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground leading-none">
             Checkout
@@ -921,7 +921,7 @@ function Checkout() {
             }}
             placeholder="Promo code (e.g. CAVEN10)"
             disabled={applyingCoupon}
-            className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none focus:border-electric disabled:opacity-60"
+            className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none focus:border-electric disabled:opacity-60"
           />
           <button
             type="button"

@@ -113,62 +113,64 @@ export function CategoriesTab({ categories, loading, onRefresh, authToken }: Cat
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-muted/40 font-mono text-muted-foreground border-b border-border">
-            <tr>
-              <th className="p-3.5">Category Name</th>
-              <th className="p-3.5">Slug</th>
-              <th className="p-3.5">Description</th>
-              <th className="p-3.5 text-right">Created Date</th>
-              <th className="p-3.5 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {loading ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-muted/40 font-mono text-muted-foreground border-b border-border">
               <tr>
-                <td colSpan={5} className="p-8 text-center text-silver">
-                  <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                  Loading categories...
-                </td>
+                <th className="p-3.5">Category Name</th>
+                <th className="p-3.5">Slug</th>
+                <th className="p-3.5">Description</th>
+                <th className="p-3.5 text-right">Created Date</th>
+                <th className="p-3.5 text-center">Actions</th>
               </tr>
-            ) : categories.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="p-8 text-center text-muted-foreground italic">
-                  No categories defined.
-                </td>
-              </tr>
-            ) : (
-              categories.map((c) => (
-                <tr key={c.id} className="hover:bg-accent/20 transition">
-                  <td className="p-3.5 font-semibold text-foreground flex items-center gap-2">
-                    <FolderTree className="h-3.5 w-3.5 text-primary" /> {c.name}
-                  </td>
-                  <td className="p-3.5 font-mono text-[11px] text-muted-foreground">{c.slug}</td>
-                  <td className="p-3.5 text-muted-foreground">{c.description || "—"}</td>
-                  <td className="p-3.5 text-right text-muted-foreground">
-                    {new Date(c.created_at).toLocaleDateString("en-IN")}
-                  </td>
-                  <td className="p-3.5 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => handleEdit(c)}
-                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <Edit2 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(c.id, c.name)}
-                        className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-sale"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-silver">
+                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
+                    Loading categories...
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : categories.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="p-8 text-center text-muted-foreground italic">
+                    No categories defined.
+                  </td>
+                </tr>
+              ) : (
+                categories.map((c) => (
+                  <tr key={c.id} className="hover:bg-accent/20 transition">
+                    <td className="p-3.5 font-semibold text-foreground flex items-center gap-2">
+                      <FolderTree className="h-3.5 w-3.5 text-primary" /> {c.name}
+                    </td>
+                    <td className="p-3.5 font-mono text-[11px] text-muted-foreground">{c.slug}</td>
+                    <td className="p-3.5 text-muted-foreground">{c.description || "—"}</td>
+                    <td className="p-3.5 text-right text-muted-foreground">
+                      {new Date(c.created_at).toLocaleDateString("en-IN")}
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          onClick={() => handleEdit(c)}
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(c.id, c.name)}
+                          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-white"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Category Modal */}

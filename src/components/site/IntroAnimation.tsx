@@ -34,16 +34,16 @@ export function IntroAnimation() {
       suppressHydrationWarning
       role="dialog"
       aria-label="CAVENHUSRT intro"
-      className={`fixed inset-0 z-[100] grid place-items-center bg-background transition-opacity duration-500 ease-out ${leaving ? "pointer-events-none opacity-0" : "opacity-100"}`}
+      className={`fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-background px-4 transition-opacity duration-500 ease-out ${leaving ? "pointer-events-none opacity-0" : "opacity-100"}`}
     >
-      <div className="flex flex-col items-center gap-5 text-center">
+      <div className="flex max-w-full flex-col items-center gap-5 text-center">
         <div className="animate-in fade-in zoom-in-50 duration-700">
-          <WingMark className="h-14 w-auto text-silver" />
+          <WingMark className="h-12 w-auto text-silver sm:h-14" />
         </div>
-        <p className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both font-logo text-4xl italic tracking-brand delay-300 duration-700 sm:text-6xl">
+        <p className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both font-logo text-[clamp(1.6rem,6.5vw,3.75rem)] italic tracking-[clamp(0.1em,1.2vw,0.22em)] delay-300 duration-700">
           CAVENHUSRT
         </p>
-        <p className="animate-in fade-in fill-mode-both text-xs uppercase tracking-[0.4em] text-silver delay-700 duration-700">
+        <p className="animate-in fade-in fill-mode-both text-[11px] uppercase tracking-[0.28em] text-silver delay-700 duration-700 sm:text-xs sm:tracking-[0.4em]">
           Urban Motion
         </p>
       </div>

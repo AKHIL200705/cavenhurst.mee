@@ -84,87 +84,91 @@ export function ReturnsTab({ returns, loading, onRefresh, authToken }: ReturnsTa
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <table className="w-full text-left text-xs">
-          <thead className="bg-muted/40 font-mono text-muted-foreground border-b border-border">
-            <tr>
-              <th className="p-3.5">Return #</th>
-              <th className="p-3.5">Order Ref</th>
-              <th className="p-3.5">Customer</th>
-              <th className="p-3.5">Reason</th>
-              <th className="p-3.5 text-right">Refund Value</th>
-              <th className="p-3.5 text-center">Status</th>
-              <th className="p-3.5 text-right">Requested</th>
-              <th className="p-3.5 text-center">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {loading ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-muted/40 font-mono text-muted-foreground border-b border-border">
               <tr>
-                <td colSpan={8} className="p-8 text-center text-silver">
-                  <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                  Querying return requests...
-                </td>
+                <th className="p-3.5">Return #</th>
+                <th className="p-3.5">Order Ref</th>
+                <th className="p-3.5">Customer</th>
+                <th className="p-3.5">Reason</th>
+                <th className="p-3.5 text-right">Refund Value</th>
+                <th className="p-3.5 text-center">Status</th>
+                <th className="p-3.5 text-right">Requested</th>
+                <th className="p-3.5 text-center">Actions</th>
               </tr>
-            ) : returns.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="p-8 text-center text-muted-foreground italic">
-                  No active return requests found.
-                </td>
-              </tr>
-            ) : (
-              returns.map((r) => (
-                <tr key={r.id} className="hover:bg-accent/20 transition">
-                  <td className="p-3.5 font-mono font-bold text-foreground flex items-center gap-1.5">
-                    <RotateCcw className="h-3.5 w-3.5 text-primary" /> #{r.return_number}
-                  </td>
-                  <td className="p-3.5 font-mono text-[11px] text-muted-foreground">
-                    #{r.orders?.order_number || r.order_id.slice(0, 8)}
-                  </td>
-                  <td className="p-3.5">
-                    <p className="font-semibold text-foreground">
-                      {r.orders?.customer_name || "Customer"}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">{r.orders?.customer_email}</p>
-                  </td>
-                  <td className="p-3.5 max-w-xs truncate" title={r.reason}>
-                    {r.reason}
-                  </td>
-                  <td className="p-3.5 text-right font-mono font-bold text-foreground">
-                    {formatINR(r.refund_amount)}
-                  </td>
-                  <td className="p-3.5 text-center">
-                    <span
-                      className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                        r.status === "approved" || r.status === "refunded"
-                          ? "bg-emerald-500/10 text-emerald-500"
-                          : r.status === "rejected"
-                            ? "bg-sale/20 text-sale"
-                            : "bg-secondary text-foreground"
-                      }`}
-                    >
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="p-3.5 text-right text-muted-foreground">
-                    {new Date(r.created_at).toLocaleDateString("en-IN")}
-                  </td>
-                  <td className="p-3.5 text-center">
-                    <button
-                      onClick={() => {
-                        setSelectedReturn(r);
-                        setNewStatus(r.status);
-                        setAdminNotes(r.admin_notes || "");
-                      }}
-                      className="rounded border border-border px-2 py-1 text-[11px] font-semibold hover:bg-accent text-primary"
-                    >
-                      Manage
-                    </button>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-silver">
+                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
+                    Querying return requests...
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : returns.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="p-8 text-center text-muted-foreground italic">
+                    No active return requests found.
+                  </td>
+                </tr>
+              ) : (
+                returns.map((r) => (
+                  <tr key={r.id} className="hover:bg-accent/20 transition">
+                    <td className="p-3.5 font-mono font-bold text-foreground flex items-center gap-1.5">
+                      <RotateCcw className="h-3.5 w-3.5 text-primary" /> #{r.return_number}
+                    </td>
+                    <td className="p-3.5 font-mono text-[11px] text-muted-foreground">
+                      #{r.orders?.order_number || r.order_id.slice(0, 8)}
+                    </td>
+                    <td className="p-3.5">
+                      <p className="font-semibold text-foreground">
+                        {r.orders?.customer_name || "Customer"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {r.orders?.customer_email}
+                      </p>
+                    </td>
+                    <td className="p-3.5 max-w-xs truncate" title={r.reason}>
+                      {r.reason}
+                    </td>
+                    <td className="p-3.5 text-right font-mono font-bold text-foreground">
+                      {formatINR(r.refund_amount)}
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <span
+                        className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          r.status === "approved" || r.status === "refunded"
+                            ? "bg-emerald-500/10 text-emerald-500"
+                            : r.status === "rejected"
+                              ? "border border-[#233b56] bg-[#08192e] text-[#cbd5e1]"
+                              : "bg-secondary text-foreground"
+                        }`}
+                      >
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-right text-muted-foreground">
+                      {new Date(r.created_at).toLocaleDateString("en-IN")}
+                    </td>
+                    <td className="p-3.5 text-center">
+                      <button
+                        onClick={() => {
+                          setSelectedReturn(r);
+                          setNewStatus(r.status);
+                          setAdminNotes(r.admin_notes || "");
+                        }}
+                        className="rounded border border-border px-2 py-1 text-[11px] font-semibold hover:bg-accent text-primary"
+                      >
+                        Manage
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Return Details & Status Modal */}

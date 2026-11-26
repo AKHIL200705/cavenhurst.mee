@@ -12,7 +12,7 @@ export function Footer() {
   return (
     <footer className="border-t border-border bg-navy-deep pb-24 lg:pb-0">
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-14 md:grid-cols-2 lg:grid-cols-5">
-        <div className="lg:col-span-2">
+        <div className="min-w-0 lg:col-span-2">
           <Logo />
           <p className="mt-4 max-w-sm text-sm text-muted-foreground">
             Premium apparel for everyday movement. Modern, versatile and long-lasting wardrobe
@@ -46,9 +46,9 @@ export function Footer() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Your email"
-              className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus:border-electric"
+              className="w-full min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus:border-electric"
             />
-            <button className="shrink-0 rounded-md bg-primary px-4 text-sm font-bold text-primary-foreground">
+            <button className="shrink-0 rounded-md bg-primary px-3 text-sm font-bold text-primary-foreground sm:px-4">
               Subscribe
             </button>
           </form>
@@ -90,7 +90,7 @@ export function Footer() {
       <div className="border-t border-border">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-muted-foreground sm:flex-row">
           <span>© {new Date().getFullYear()} CAVENHUSRT. All rights reserved.</span>
-          <span className="flex gap-2">
+          <span className="flex flex-wrap justify-center gap-2">
             {["UPI", "VISA", "Mastercard", "RuPay", "COD"].map((p) => (
               <span key={p} className="rounded border border-border px-2 py-1 font-semibold">
                 {p}
@@ -105,7 +105,7 @@ export function Footer() {
 
 function FooterCol({ title, links }: { title: string; links: string[][] }) {
   return (
-    <div>
+    <div className="min-w-0">
       <h4 className="mb-4 font-heading text-sm font-bold uppercase tracking-[0.16em] text-silver">
         {title}
       </h4>
@@ -137,10 +137,10 @@ export function BottomNav() {
           key={to}
           to={to as "/"}
           activeOptions={{ exact: true }}
-          className="flex flex-col items-center gap-1 py-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground data-[status=active]:text-foreground"
+          className="flex min-w-0 flex-col items-center gap-1 px-0.5 py-2 text-[8px] font-bold uppercase tracking-tight text-muted-foreground data-[status=active]:text-foreground sm:text-[10px] sm:tracking-wider"
         >
-          <Icon className="h-5 w-5" />
-          {label}
+          <Icon className="h-5 w-5 shrink-0" />
+          <span className="max-w-full truncate">{label}</span>
         </Link>
       ))}
     </nav>

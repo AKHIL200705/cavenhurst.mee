@@ -224,7 +224,7 @@ export function OrderDetailsDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
-      <div className="relative w-full max-w-4xl rounded-2xl border border-border bg-card p-6 shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-4xl rounded-2xl border border-border bg-card p-4 sm:p-6 shadow-2xl space-y-6 my-8 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-border pb-4">
           <div>
@@ -312,17 +312,17 @@ export function OrderDetailsDialog({
                 </span>
               </div>
               {(order.razorpay_payment_id || payment?.razorpay_payment_id) && (
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-muted-foreground">Razorpay Payment ID:</span>
-                  <span className="font-mono text-[11px] select-all">
+                  <span className="font-mono text-[11px] break-all select-all">
                     {order.razorpay_payment_id || payment?.razorpay_payment_id}
                   </span>
                 </div>
               )}
               {(order.razorpay_order_id || payment?.razorpay_order_id) && (
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-muted-foreground">Razorpay Order ID:</span>
-                  <span className="font-mono text-[11px] select-all">
+                  <span className="font-mono text-[11px] break-all select-all">
                     {order.razorpay_order_id || payment?.razorpay_order_id}
                   </span>
                 </div>
@@ -342,9 +342,9 @@ export function OrderDetailsDialog({
                   {order.courier_partner || shipment?.courier_partner || "Unassigned"}
                 </span>
               </div>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-muted-foreground">AWB Tracking Number:</span>
-                <span className="font-mono font-bold text-electric">
+                <span className="font-mono font-bold text-electric break-all">
                   {order.awb_number || shipment?.awb_number || "None"}
                 </span>
               </div>
@@ -397,7 +397,7 @@ export function OrderDetailsDialog({
 
         {/* Totals Breakdown */}
         <div className="flex justify-end">
-          <div className="w-72 space-y-1.5 rounded-xl border border-border bg-background/50 p-4 text-xs">
+          <div className="w-full sm:w-72 space-y-1.5 rounded-xl border border-border bg-background/50 p-4 text-xs">
             <div className="flex justify-between text-muted-foreground">
               <span>Subtotal:</span>
               <span className="font-mono">{formatINR(order.subtotal || order.total)}</span>
@@ -434,7 +434,7 @@ export function OrderDetailsDialog({
             {refunds.map((r, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between text-xs text-muted-foreground"
+                className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
               >
                 <span>Refund ID: {r.razorpay_refund_id || r.id}</span>
                 <span className="font-mono font-bold text-white">
@@ -447,7 +447,7 @@ export function OrderDetailsDialog({
 
         {/* Order Lifecycle & Audit History */}
         <div className="space-y-3 rounded-xl border border-border bg-background/40 p-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-brand text-silver">
               <History className="h-4 w-4 text-electric" /> Order Lifecycle & Audit Trail (
               {history.length})
@@ -529,7 +529,7 @@ export function OrderDetailsDialog({
               <select
                 value={newStatus}
                 onChange={(e) => setNewStatus(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-electric"
+                className="max-w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-electric"
               >
                 <option value="pending_payment">Pending Payment</option>
                 <option value="paid">Paid</option>
@@ -540,11 +540,11 @@ export function OrderDetailsDialog({
                 <option value="returned">Returned</option>
               </select>
 
-              <label className="text-xs font-semibold text-silver ml-2">Logistics:</label>
+              <label className="text-xs font-semibold text-silver sm:ml-2">Logistics:</label>
               <select
                 value={newShipmentStatus}
                 onChange={(e) => setNewShipmentStatus(e.target.value)}
-                className="rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-electric"
+                className="max-w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-electric"
               >
                 <option value="unfulfilled">Unfulfilled</option>
                 <option value="shipment_created">Shipment Created</option>

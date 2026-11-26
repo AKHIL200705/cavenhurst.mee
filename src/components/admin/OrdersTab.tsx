@@ -114,7 +114,7 @@ export function OrdersTab({
       {/* Controls Bar */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         {/* Search */}
-        <div className="relative flex-1 sm:w-80">
+        <div className="relative w-full lg:max-w-sm">
           <input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
@@ -273,7 +273,7 @@ export function OrdersTab({
         </div>
 
         {/* Pagination Controls */}
-        <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 text-xs text-muted-foreground">
           <span>
             Showing {orders.length} of {totalCount} total orders (Page {currentPage} of {totalPages}
             )

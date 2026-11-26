@@ -412,7 +412,7 @@ function ProductPage() {
           </div>
         </div>
 
-        <div className="font-sans">
+        <div className="min-w-0 font-sans">
           <p className="font-heading text-xs uppercase tracking-brand text-electric">CAVENHUSRT</p>
           <h1 className="mt-2 font-heading text-3xl sm:text-5xl lg:text-6xl font-bold uppercase tracking-tight leading-none text-foreground">
             {p.name}
@@ -467,34 +467,36 @@ function ProductPage() {
                 <DialogTrigger className="underline text-silver hover:text-foreground">
                   Size guide
                 </DialogTrigger>
-                <DialogContent className="bg-background">
+                <DialogContent className="w-[calc(100vw-2rem)] max-w-md bg-background">
                   <DialogTitle className="font-heading text-2xl font-bold uppercase tracking-tight">
                     Size guide (inches)
                   </DialogTitle>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-silver">
-                        <th className="py-2">Size</th>
-                        <th>Chest</th>
-                        <th>Length</th>
-                        <th>Shoulder</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {SIZES.map((s, i) => (
-                        <tr key={s} className="border-t border-border">
-                          <td className="py-2">{s}</td>
-                          <td>{38 + i * 2}</td>
-                          <td>{27 + i}</td>
-                          <td>{18 + i}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-silver">
+                          <th className="py-2">Size</th>
+                          <th>Chest</th>
+                          <th>Length</th>
+                          <th>Shoulder</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {SIZES.map((s, i) => (
+                          <tr key={s} className="border-t border-border">
+                            <td className="py-2">{s}</td>
+                            <td>{38 + i * 2}</td>
+                            <td>{27 + i}</td>
+                            <td>{18 + i}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </DialogContent>
               </Dialog>
             </div>
-            <div className="mt-2 grid grid-cols-6 gap-2">
+            <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">
               {SIZES.map((s) => {
                 const out = (p.stock[s] ?? 0) <= 0;
                 return (
@@ -578,13 +580,13 @@ function ProductPage() {
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 inputMode="numeric"
                 placeholder="Enter PIN code"
-                className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none"
+                className="min-w-0 flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none"
               />
               <button
                 type="button"
                 onClick={checkPin}
                 disabled={checkingPin}
-                className="rounded-md bg-secondary px-4 text-sm font-bold disabled:opacity-50"
+                className="shrink-0 rounded-md bg-secondary px-4 text-sm font-bold disabled:opacity-50"
               >
                 {checkingPin ? "Checking..." : "Check"}
               </button>
