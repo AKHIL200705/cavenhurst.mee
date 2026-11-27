@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { buildSeoHead, type BuildSeoHeadOptions } from "@/lib/seo";
 
 export function InfoPage({
   eyebrow,
@@ -22,13 +23,13 @@ export function InfoPage({
   );
 }
 
-export const meta = (title: string, description: string) => ({
-  meta: [
-    { title: `${title} | CAVENHUSRT` },
-    { name: "description", content: description },
-    { property: "og:title", content: `${title} | CAVENHUSRT` },
-    { property: "og:description", content: description },
-    { property: "og:type", content: "website" },
-    { name: "twitter:card", content: "summary_large_image" },
-  ],
-});
+export const meta = (
+  title: string,
+  description: string,
+  options?: Omit<BuildSeoHeadOptions, "title" | "description">,
+) =>
+  buildSeoHead({
+    title,
+    description,
+    ...options,
+  });

@@ -29,7 +29,11 @@ import {
 import fabric from "@/assets/fabric-navy.jpg";
 
 export const Route = createFileRoute("/login")({
-  head: () => meta("Login / Sign Up", "Sign in to CAVENHUSRT to shop, track orders and more."),
+  head: () =>
+    meta("Login / Sign Up", "Sign in to CAVENHUSRT to shop, track orders and more.", {
+      path: "/login",
+      noIndex: true,
+    }),
   component: Login,
 });
 
@@ -244,13 +248,7 @@ function Login() {
     }
   }, [handleGoogleSuccess]);
 
-  const signInWithGoogleDirect = () => {
-    if (!googleClientId) {
-      toast.error("Google Client ID is not configured.");
-      return;
-    }
-
-    setGoogleLoading(true);
+  const signInWithGoogleRedirectFallback = () => {
     const state =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -261,7 +259,10 @@ function Login() {
       window.sessionStorage.setItem("cavenhusrt_google_return_to", returnTo);
     }
 
-    const redirectUri = `${window.location.origin}/login`;
+    const configuredRedirectUri = (
+      (import.meta.env["VITE_GOOGLE_REDIRECT_URI"] || "") as string
+    ).trim();
+    const redirectUri = configuredRedirectUri || `${window.location.origin}/login`;
     const params = new URLSearchParams({
       client_id: googleClientId,
       redirect_uri: redirectUri,
@@ -272,6 +273,197 @@ function Login() {
     });
 
     window.location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`);
+  };
+
+  const ensureGoogleGsiLoaded = (): Promise<{
+    oauth2?: {
+      initTokenClient: (config: {
+        client_id: string;
+        scope: string;
+        prompt?: string;
+        callback: (res: {
+          access_token?: string;
+          error?: string;
+          error_description?: string;
+        }) => void;
+        error_callback?: (err: { type?: string; message?: string }) => void;
+      }) => { requestAccessToken: (overrideConfig?: { prompt?: string }) => void };
+    };
+    id?: {
+      initialize: (config: {
+        client_id: string;
+        callback: (res: { credential?: string }) => void;
+        auto_select?: boolean;
+      }) => void;
+      prompt: () => void;
+    };
+  } | null> =>
+    new Promise((resolve) => {
+      interface GoogleAccounts {
+        oauth2?: {
+          initTokenClient: (config: {
+            client_id: string;
+            scope: string;
+            prompt?: string;
+            callback: (res: {
+              access_token?: string;
+              error?: string;
+              error_description?: string;
+            }) => void;
+            error_callback?: (err: { type?: string; message?: string }) => void;
+          }) => { requestAccessToken: (overrideConfig?: { prompt?: string }) => void };
+        };
+        id?: {
+          initialize: (config: {
+            client_id: string;
+            callback: (res: { credential?: string }) => void;
+            auto_select?: boolean;
+          }) => void;
+          prompt: () => void;
+        };
+      }
+      interface GoogleWindow extends Window {
+        google?: { accounts?: GoogleAccounts };
+      }
+
+      const existingAccounts = (window as GoogleWindow).google?.accounts;
+      if (existingAccounts?.oauth2 || existingAccounts?.id) {
+        resolve(existingAccounts);
+        return;
+      }
+
+      const finish = () => resolve((window as GoogleWindow).google?.accounts ?? null);
+      let script = document.querySelector<HTMLScriptElement>(
+        'script[src*="accounts.google.com/gsi/client"]',
+      );
+      if (!script) {
+        script = document.createElement("script");
+        script.src = "https://accounts.google.com/gsi/client";
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+
+      const timeout = window.setTimeout(finish, 4000);
+      script.addEventListener(
+        "load",
+        () => {
+          window.clearTimeout(timeout);
+          finish();
+        },
+        { once: true },
+      );
+      script.addEventListener(
+        "error",
+        () => {
+          window.clearTimeout(timeout);
+          finish();
+        },
+        { once: true },
+      );
+    });
+
+  const startGisTokenPopup = (
+    accounts: NonNullable<Awaited<ReturnType<typeof ensureGoogleGsiLoaded>>>,
+  ): boolean => {
+    if (accounts.oauth2) {
+      try {
+        const tokenClient = accounts.oauth2.initTokenClient({
+          client_id: googleClientId,
+          scope: "openid email profile",
+          prompt: "select_account",
+          callback: (tokenResponse) => {
+            if (tokenResponse.error) {
+              setGoogleLoading(false);
+              if (
+                tokenResponse.error !== "access_denied" &&
+                tokenResponse.error !== "popup_closed_by_user"
+              ) {
+                toast.error(
+                  tokenResponse.error_description ||
+                    `Google authentication error: ${tokenResponse.error}`,
+                );
+              }
+              return;
+            }
+            if (tokenResponse.access_token) {
+              void handleGoogleSuccess({ accessToken: tokenResponse.access_token });
+            } else {
+              setGoogleLoading(false);
+            }
+          },
+          error_callback: (err) => {
+            setGoogleLoading(false);
+            if (err?.type === "popup_failed_to_open") {
+              toast.error("Popup was blocked. Please allow popups for this site and try again.");
+            }
+          },
+        });
+        tokenClient.requestAccessToken({ prompt: "select_account" });
+        return true;
+      } catch (err) {
+        console.warn("[Google Auth] GIS OAuth2 popup failed, checking fallback:", err);
+      }
+    }
+
+    if (accounts.id) {
+      try {
+        accounts.id.initialize({
+          client_id: googleClientId,
+          callback: (res) => {
+            if (res.credential) {
+              void handleGoogleSuccess({ idToken: res.credential });
+            } else {
+              setGoogleLoading(false);
+            }
+          },
+          auto_select: false,
+        });
+        accounts.id.prompt();
+        setGoogleLoading(false);
+        return true;
+      } catch (err) {
+        console.warn("[Google Auth] GIS ID prompt failed:", err);
+      }
+    }
+
+    return false;
+  };
+
+  const signInWithGoogleDirect = () => {
+    if (!googleClientId) {
+      toast.error("Google Client ID is not configured.");
+      return;
+    }
+
+    setGoogleLoading(true);
+    const configuredRedirectUri = (
+      (import.meta.env["VITE_GOOGLE_REDIRECT_URI"] || "") as string
+    ).trim();
+    if (configuredRedirectUri) {
+      signInWithGoogleRedirectFallback();
+      return;
+    }
+
+    // Synchronous fast-path preserves user gesture activation across Safari/Firefox/Chrome
+    const syncAccounts = (
+      window as unknown as {
+        google?: { accounts?: Awaited<ReturnType<typeof ensureGoogleGsiLoaded>> };
+      }
+    ).google?.accounts;
+    if (syncAccounts && startGisTokenPopup(syncAccounts)) {
+      return;
+    }
+
+    void ensureGoogleGsiLoaded().then((accounts) => {
+      if (accounts && startGisTokenPopup(accounts)) {
+        return;
+      }
+      setGoogleLoading(false);
+      toast.error(
+        "Could not load Google Sign-In services. Please check your network or popup settings.",
+      );
+    });
   };
 
   // ---------------------------------------------------------------------------

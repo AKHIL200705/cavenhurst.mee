@@ -24,11 +24,18 @@ import {
 } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProductCard } from "@/components/site/ProductCard";
-import { SIZES, imageFor, type Size, type Product } from "@/lib/products";
+import {
+  SIZES,
+  imageFor,
+  inStock,
+  resolveProductAsset,
+  type Size,
+  type Product,
+} from "@/lib/products";
 import { discountPercent, formatINR } from "@/lib/pricing";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { meta } from "@/components/site/InfoPage";
+import { breadcrumbJsonLd, buildSeoHead, productJsonLd } from "@/lib/seo";
 import {
   getProductBySlugServerFn,
   getProductReviewsServerFn,
@@ -80,18 +87,43 @@ export const Route = createFileRoute("/product/$slug")({
 
     return { product: p, reviews, related };
   },
-  head: ({ loaderData }) => ({
-    meta: loaderData?.product
-      ? [
-          { title: `${loaderData.product.name} | CAVENHUSRT` },
-          { name: "description", content: loaderData.product.description },
-          { property: "og:title", content: `${loaderData.product.name} | CAVENHUSRT` },
-          { property: "og:description", content: loaderData.product.description },
-          { property: "og:type", content: "product" },
-          { name: "twitter:card", content: "summary_large_image" },
-        ]
-      : meta("Product", "Discover CAVENHUSRT premium everyday apparel.").meta,
-  }),
+  head: ({ loaderData }) =>
+    loaderData?.product
+      ? buildSeoHead({
+          title: loaderData.product.name,
+          description: `${loaderData.product.description} ${loaderData.product.fabric} — ${loaderData.product.fit} fit by CAVENHUSRT.`,
+          path: `/product/${loaderData.product.slug}`,
+          type: "product",
+          image: resolveProductAsset(loaderData.product.images[0]) || loaderData.product.images[0],
+          imageAlt: `${loaderData.product.name} — CAVENHUSRT`,
+          extraMeta: [
+            { property: "product:price:amount", content: String(loaderData.product.price) },
+            { property: "product:price:currency", content: "INR" },
+            {
+              property: "og:availability",
+              content: inStock(loaderData.product) ? "instock" : "oos",
+            },
+          ],
+          jsonLd: [
+            productJsonLd({
+              product: loaderData.product,
+              reviews: loaderData.reviews,
+            }),
+            breadcrumbJsonLd([
+              { name: "Home", path: "/" },
+              {
+                name: loaderData.product.category === "hoodies" ? "Hoodies" : "T-Shirts",
+                path: `/collections/${loaderData.product.category}`,
+              },
+              { name: loaderData.product.name, path: `/product/${loaderData.product.slug}` },
+            ]),
+          ],
+        })
+      : buildSeoHead({
+          title: "Product",
+          description: "Discover CAVENHUSRT premium everyday apparel.",
+          path: "/shop",
+        }),
   pendingComponent: () => <RouteLoadingSkeleton variant="product" />,
   component: ProductPage,
 });
@@ -379,9 +411,10 @@ function ProductPage() {
             <img
               key={`${color}-${img}`}
               src={gallery[img]}
-              alt={`${p.name} perspective ${img + 1}`}
+              alt={`CAVENHUSRT ${p.name} in ${color} - View ${img + 1}`}
               width={800}
               height={1000}
+              fetchPriority="high"
               decoding="async"
               draggable={false}
               className={cn(
@@ -415,7 +448,7 @@ function ProductPage() {
               >
                 <img
                   src={g}
-                  alt={`${p.name} thumbnail ${i + 1}`}
+                  alt={`${p.name} in ${color} thumbnail ${i + 1}`}
                   loading="lazy"
                   decoding="async"
                   className={cn("h-full w-full object-cover", i % 2 && "scale-x-[-1]")}

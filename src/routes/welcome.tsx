@@ -13,6 +13,7 @@ export const Route = createFileRoute("/welcome")({
     meta(
       "Welcome to CAVENHUSRT",
       "Where timeless style meets modern elegance. Your personal welcome to CAVENHUSRT.",
+      { path: "/welcome", noIndex: true },
     ),
   component: Welcome,
 });

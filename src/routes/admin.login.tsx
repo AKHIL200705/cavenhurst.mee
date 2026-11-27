@@ -9,7 +9,11 @@ import { verifyGoogleAuthServerFn } from "@/server/auth";
 import { adminLoginServerFn } from "@/server/admin";
 
 export const Route = createFileRoute("/admin/login")({
-  head: () => meta("Admin Portal Login", "Restricted access for CAVENHUSRT executive management."),
+  head: () =>
+    meta("Admin Portal Login", "Restricted access for CAVENHUSRT executive management.", {
+      path: "/admin/login",
+      noIndex: true,
+    }),
   component: AdminLogin,
 });
 

@@ -53,9 +53,9 @@ export function Footer() {
             </button>
           </form>
           <div className="mt-6 flex gap-4 text-silver">
-            <Instagram className="h-5 w-5" />
-            <Facebook className="h-5 w-5" />
-            <Youtube className="h-5 w-5" />
+            <Instagram className="h-5 w-5" aria-hidden="true" />
+            <Facebook className="h-5 w-5" aria-hidden="true" />
+            <Youtube className="h-5 w-5" aria-hidden="true" />
           </div>
         </div>
         <FooterCol
@@ -106,15 +106,15 @@ export function Footer() {
 function FooterCol({ title, links }: { title: string; links: string[][] }) {
   return (
     <div className="min-w-0">
-      <h4 className="mb-4 font-heading text-sm font-bold uppercase tracking-[0.16em] text-silver">
+      <h2 className="mb-4 font-heading text-sm font-bold uppercase tracking-[0.16em] text-silver">
         {title}
-      </h4>
+      </h2>
       <ul className="space-y-2 text-xs font-medium text-muted-foreground">
         {links.map(([to, l]) => (
           <li key={to}>
-            <a href={to} className="hover:text-foreground transition-colors">
+            <Link to={to as "/shop"} className="hover:text-foreground transition-colors">
               {l}
-            </a>
+            </Link>
           </li>
         ))}
       </ul>

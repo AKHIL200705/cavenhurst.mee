@@ -17,7 +17,11 @@ export const Route = createFileRoute("/wishlist")({
       return { products: [] };
     }
   },
-  head: () => meta("Wishlist", "Your saved CAVENHUSRT pieces."),
+  head: () =>
+    meta("Wishlist", "Your saved CAVENHUSRT pieces.", {
+      path: "/wishlist",
+      noIndex: true,
+    }),
   pendingComponent: () => <RouteLoadingSkeleton variant="wishlist" />,
   component: Wishlist,
 });

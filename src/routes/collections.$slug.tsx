@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { CollectionView } from "@/components/site/CollectionView";
 import { COLLECTIONS, type CollectionSlug, type Product } from "@/lib/products";
-import { meta } from "@/components/site/InfoPage";
+import { breadcrumbJsonLd, buildSeoHead, collectionJsonLd } from "@/lib/seo";
 import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 
@@ -25,21 +25,33 @@ export const Route = createFileRoute("/collections/$slug")({
     const filtered = allProducts.filter(c.filter);
     return { slug: params.slug, title: c.title, tagline: c.tagline, products: filtered };
   },
-  head: ({ loaderData }) => ({
-    meta: loaderData
-      ? [
-          { title: `${loaderData.title} | CAVENHUSRT` },
-          {
-            name: "description",
-            content: `${loaderData.tagline} Shop CAVENHUSRT ${loaderData.title}.`,
-          },
-          { property: "og:title", content: `${loaderData.title} | CAVENHUSRT` },
-          { property: "og:description", content: loaderData.tagline },
-          { property: "og:type", content: "website" },
-          { name: "twitter:card", content: "summary_large_image" },
-        ]
-      : meta("Collection", "Explore CAVENHUSRT premium apparel collections.").meta,
-  }),
+  head: ({ loaderData }) =>
+    loaderData
+      ? buildSeoHead({
+          title: loaderData.title,
+          description: `${loaderData.tagline} Shop CAVENHUSRT ${loaderData.title} in premium heavyweight fits across India.`,
+          path: `/collections/${loaderData.slug}`,
+          image: loaderData.products[0]?.images[0],
+          imageAlt: `CAVENHUSRT ${loaderData.title} collection`,
+          jsonLd: [
+            collectionJsonLd({
+              title: `${loaderData.title} | CAVENHUSRT`,
+              description: loaderData.tagline,
+              path: `/collections/${loaderData.slug}`,
+              products: loaderData.products,
+            }),
+            breadcrumbJsonLd([
+              { name: "Home", path: "/" },
+              { name: "Shop All", path: "/shop" },
+              { name: loaderData.title, path: `/collections/${loaderData.slug}` },
+            ]),
+          ],
+        })
+      : buildSeoHead({
+          title: "Collection",
+          description: "Explore CAVENHUSRT premium apparel collections.",
+          path: "/shop",
+        }),
   pendingComponent: () => <RouteLoadingSkeleton variant="collection" />,
   component: Collection,
 });

@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InfoPage, meta } from "@/components/site/InfoPage";
 
 export const Route = createFileRoute("/about")({
-  head: () => meta("About CAVENHUSRT", "A unisex clothing brand rooted in simplicity."),
+  head: () =>
+    meta(
+      "About CAVENHUSRT",
+      "Discover CAVENHUSRT — a unisex Indian apparel brand rooted in heavyweight cottons, boxy fits, and everyday wear.",
+      { path: "/about" },
+    ),
   component: () => (
     <InfoPage eyebrow="OUR STORY" title="Rooted in simplicity">
       <p>

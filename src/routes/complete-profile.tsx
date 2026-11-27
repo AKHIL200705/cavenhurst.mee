@@ -21,6 +21,7 @@ export const Route = createFileRoute("/complete-profile")({
     meta(
       "Complete Your Profile — CAVENHUSRT",
       "Welcome to CAVENHUSRT. Complete your profile details to unlock your bespoke shopping experience.",
+      { path: "/complete-profile", noIndex: true },
     ),
   validateSearch: (search: Record<string, unknown>) => {
     return {

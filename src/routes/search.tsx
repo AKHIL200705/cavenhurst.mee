@@ -10,6 +10,9 @@ import { getStoreCatalogServerFn } from "@/server/catalog";
 import { formatINR } from "@/lib/pricing";
 
 export const Route = createFileRoute("/search")({
+  validateSearch: (search: Record<string, unknown>): { q?: string | undefined } => ({
+    q: typeof search["q"] === "string" ? search["q"] : undefined,
+  }),
   loader: async (): Promise<{ products: Product[] }> => {
     try {
       const catalog = await getStoreCatalogServerFn();
@@ -18,14 +21,20 @@ export const Route = createFileRoute("/search")({
       return { products: [] };
     }
   },
-  head: () => meta("Search", "Search CAVENHUSRT premium apparel."),
+  head: () =>
+    meta("Search", "Search CAVENHUSRT premium apparel.", {
+      path: "/search",
+      noIndex: true,
+      followLinks: true,
+    }),
   pendingComponent: () => <RouteLoadingSkeleton variant="search" />,
   component: SearchPage,
 });
 
 function SearchPage() {
   const { products } = Route.useLoaderData();
-  const [q, setQ] = useState("");
+  const search = Route.useSearch();
+  const [q, setQ] = useState(search.q ?? "");
   const term = q.trim().toLowerCase();
   const results = term
     ? products.filter((p) =>

@@ -9,7 +9,10 @@ export const Route = createFileRoute("/track-order")({
   validateSearch: (search: Record<string, unknown>): { order?: string | undefined } => ({
     order: typeof search["order"] === "string" ? search["order"] : undefined,
   }),
-  head: () => meta("Track Order", "Track your CAVENHUSRT shipment across India via ShipMaxx360."),
+  head: () =>
+    meta("Track Order", "Track your CAVENHUSRT shipment across India via ShipMaxx360.", {
+      path: "/track-order",
+    }),
   component: Track,
 });
 

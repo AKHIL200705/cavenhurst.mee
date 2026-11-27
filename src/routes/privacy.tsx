@@ -2,7 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InfoPage, meta } from "@/components/site/InfoPage";
 
 export const Route = createFileRoute("/privacy")({
-  head: () => meta("Privacy Policy", "How CAVENHUSRT collects and protects your information."),
+  head: () =>
+    meta("Privacy Policy", "How CAVENHUSRT collects and protects your information.", {
+      path: "/privacy",
+    }),
   component: () => (
     <InfoPage eyebrow="LEGAL" title="Privacy Policy">
       <p>

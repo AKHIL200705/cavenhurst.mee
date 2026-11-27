@@ -53,7 +53,11 @@ export const Route = createFileRoute("/checkout")({
   validateSearch: (search: Record<string, unknown>): { mode?: "direct" | "cart" | undefined } => ({
     mode: search["mode"] === "direct" ? "direct" : search["mode"] === "cart" ? "cart" : undefined,
   }),
-  head: () => meta("Checkout", "Secure checkout for CAVENHUSRT orders across India."),
+  head: () =>
+    meta("Checkout", "Secure checkout for CAVENHUSRT orders across India.", {
+      path: "/checkout",
+      noIndex: true,
+    }),
   component: Checkout,
 });
 

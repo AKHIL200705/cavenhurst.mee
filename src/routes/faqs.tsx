@@ -6,6 +6,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { InfoPage, meta } from "@/components/site/InfoPage";
+import { faqJsonLd } from "@/lib/seo";
 
 const faqs: [string, string][] = [
   ["How long does delivery take?", "Orders are delivered across India in 3–7 business days."],
@@ -23,7 +24,10 @@ const faqs: [string, string][] = [
 
 export const Route = createFileRoute("/faqs")({
   head: () =>
-    meta("FAQs", "Answers to common questions about CAVENHUSRT orders, shipping and returns."),
+    meta("FAQs", "Answers to common questions about CAVENHUSRT orders, shipping and returns.", {
+      path: "/faqs",
+      jsonLd: faqJsonLd(faqs),
+    }),
   component: () => (
     <InfoPage eyebrow="HELP" title="FAQs">
       <Accordion type="single" collapsible className="text-foreground">

@@ -12,7 +12,11 @@ import { useStore } from "@/lib/store";
 import { validateCouponServerFn } from "@/server/orders";
 
 export const Route = createFileRoute("/cart")({
-  head: () => meta("Shopping Bag", "Review your CAVENHUSRT shopping bag."),
+  head: () =>
+    meta("Shopping Bag", "Review your CAVENHUSRT shopping bag.", {
+      path: "/cart",
+      noIndex: true,
+    }),
   component: Cart,
 });
 

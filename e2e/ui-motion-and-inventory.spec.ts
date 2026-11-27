@@ -196,4 +196,72 @@ test.describe("Reduced Motion Accessibility & Admin Variant Inventory", () => {
     });
     expect(adminRedViolations).toEqual([]);
   });
+
+  test("serves dynamic sitemap.xml, robots.txt, canonical links, JSON-LD schema, and noindex tags", async ({
+    page,
+    request,
+  }) => {
+    const sitemapRes = await request.get("/sitemap.xml");
+    expect(sitemapRes.status()).toBe(200);
+    expect(sitemapRes.headers()["content-type"]).toContain("xml");
+    const sitemapXml = await sitemapRes.text();
+    expect(sitemapXml).toContain("<urlset");
+    expect(sitemapXml).toContain("/shop</loc>");
+    expect(sitemapXml).toContain("/collections/t-shirts</loc>");
+    expect(sitemapXml).toContain("/product/signature-oversized-tee</loc>");
+
+    const robotsRes = await request.get("/robots.txt");
+    expect(robotsRes.status()).toBe(200);
+    const robotsTxt = await robotsRes.text();
+    expect(robotsTxt).toContain("Disallow: /admin");
+    expect(robotsTxt).toContain("Sitemap:");
+
+    // Homepage canonical, OG image, and WebSite / OnlineStore JSON-LD
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    const homeSeo = await page.evaluate(() => {
+      const canonical = document.querySelector('link[rel="canonical"]')?.getAttribute("href");
+      const ogImage = document.querySelector('meta[property="og:image"]')?.getAttribute("content");
+      const jsonLdTypes = Array.from(
+        document.querySelectorAll('script[type="application/ld+json"]'),
+      ).map((s) => {
+        try {
+          return JSON.parse(s.textContent || "{}")["@type"];
+        } catch {
+          return "INVALID";
+        }
+      });
+      return { canonical, ogImage, jsonLdTypes };
+    });
+    expect(homeSeo.canonical).toMatch(/\/$/);
+    expect(homeSeo.ogImage).toContain("og-cover.jpg");
+    expect(homeSeo.jsonLdTypes).toContain("WebSite");
+    expect(homeSeo.jsonLdTypes).not.toContain("INVALID");
+
+    // Product detail Product + BreadcrumbList JSON-LD
+    await page.goto("/product/signature-oversized-tee");
+    await page.waitForLoadState("networkidle");
+    const pdpSchemas = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('script[type="application/ld+json"]')).map((s) =>
+        JSON.parse(s.textContent || "{}"),
+      ),
+    );
+    const productSchema = pdpSchemas.find((s) => s["@type"] === "Product");
+    expect(productSchema).toBeTruthy();
+    expect(productSchema?.offers?.priceCurrency).toBe("INR");
+    expect(pdpSchemas.some((s) => s["@type"] === "BreadcrumbList")).toBe(true);
+
+    // Search URL query param + noindex, follow
+    await page.goto("/search?q=Signature");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByPlaceholder(/Search tees/i)).toHaveValue("Signature");
+    const searchRobots = await page.locator('meta[name="robots"]').getAttribute("content");
+    expect(searchRobots).toBe("noindex, follow");
+
+    // Private/transactional noindex, nofollow
+    await page.goto("/cart");
+    await page.waitForLoadState("networkidle");
+    const cartRobots = await page.locator('meta[name="robots"]').getAttribute("content");
+    expect(cartRobots).toBe("noindex, nofollow");
+  });
 });

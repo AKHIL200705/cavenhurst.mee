@@ -1,0 +1,21 @@
+{
+  "name": "CAVENHUSRT",
+  "short_name": "CAVENHUSRT",
+  "description": "Premium Indian unisex apparel crafted for everyday movement. Oversized tees, hoodies, and fan edition essentials.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#031323",
+  "theme_color": "#031323",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

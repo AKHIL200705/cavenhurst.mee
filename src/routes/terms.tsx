@@ -2,7 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { InfoPage, meta } from "@/components/site/InfoPage";
 
 export const Route = createFileRoute("/terms")({
-  head: () => meta("Terms and Conditions", "Terms of use for shopping at CAVENHUSRT."),
+  head: () =>
+    meta("Terms and Conditions", "Terms of use for shopping at CAVENHUSRT.", {
+      path: "/terms",
+    }),
   component: () => (
     <InfoPage eyebrow="LEGAL" title="Terms & Conditions">
       <p>

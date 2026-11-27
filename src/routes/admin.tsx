@@ -130,6 +130,7 @@ export const Route = createFileRoute("/admin")({
     meta(
       "Operations & Fulfillment Console",
       "CAVENHUSRT Admin Portal — End-to-end e-commerce management system.",
+      { path: "/admin", noIndex: true },
     ),
   component: AdminDashboard,
 });

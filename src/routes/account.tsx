@@ -20,7 +20,11 @@ import {
 import { verifyCurrentAdminServerFn } from "@/server/admin";
 
 export const Route = createFileRoute("/account")({
-  head: () => meta("My Account", "Your CAVENHUSRT saved bag, wishlist and order history."),
+  head: () =>
+    meta("My Account", "Your CAVENHUSRT saved bag, wishlist and order history.", {
+      path: "/account",
+      noIndex: true,
+    }),
   component: Account,
 });
 

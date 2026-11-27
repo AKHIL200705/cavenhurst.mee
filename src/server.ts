@@ -10,6 +10,7 @@ import {
   processVerifyOtpApi,
   processResendOtpApi,
 } from "./server/auth-api.server";
+import { generateRobotsTxt, generateSitemapXml } from "./server/seo";
 
 // h3 swallows in-handler throws into a normal 500 Response with body
 // {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
@@ -200,10 +201,49 @@ async function handleAuthApiRoute(request: Request, url: URL): Promise<Response 
   return null;
 }
 
+async function handleSeoRoute(request: Request, url: URL): Promise<Response | null> {
+  if (request.method !== "GET" && request.method !== "HEAD") return null;
+  const pathname = url.pathname.replace(/\/+$/, "") || "/";
+  const proto =
+    request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "") || "https";
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
+  const origin = host ? `${proto}://${host}` : url.origin;
+
+  if (pathname === "/sitemap.xml") {
+    const xml = await generateSitemapXml(origin);
+    return new Response(request.method === "HEAD" ? null : xml, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+      },
+    });
+  }
+
+  if (pathname === "/robots.txt") {
+    const txt = generateRobotsTxt(origin);
+    return new Response(request.method === "HEAD" ? null : txt, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "public, max-age=3600, s-maxage=3600",
+      },
+    });
+  }
+
+  return null;
+}
+
 export default createServerEntry({
   async fetch(request, opts) {
     try {
       const url = new URL(request.url);
+
+      // Dynamic sitemap.xml & robots.txt for search engines
+      const seoResponse = await handleSeoRoute(request, url);
+      if (seoResponse) {
+        return seoResponse;
+      }
 
       // Webhook route interceptor (handles raw body extraction before framework parser)
       const webhookResponse = await handleWebhookRoute(request, url);

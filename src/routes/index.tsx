@@ -4,6 +4,7 @@ import { ProductCard } from "@/components/site/ProductCard";
 import { WingMark } from "@/components/site/Logo";
 import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import type { Product } from "@/lib/products";
+import { buildSeoHead, websiteJsonLd } from "@/lib/seo";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 import hero from "@/assets/hero-urban-motion.jpg";
 import teeCream from "@/assets/tee-cream.jpg";
@@ -23,20 +24,15 @@ export const Route = createFileRoute("/")({
       return { products: [] };
     }
   },
-  head: () => ({
-    meta: [
-      { title: "CAVENHUSRT — Urban Motion | Premium Apparel" },
-      {
-        name: "description",
-        content:
-          "Modern fits. Premium comfort. Designed for the city. Shop premium tees, hoodies and fan edition from CAVENHUSRT.",
-      },
-      { property: "og:title", content: "CAVENHUSRT — Urban Motion" },
-      { property: "og:description", content: "Premium apparel for everyday movement." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
+  head: () =>
+    buildSeoHead({
+      title: "CAVENHUSRT — Urban Motion | Heavyweight Streetwear & Essentials",
+      description:
+        "Modern fits. Premium comfort. Designed for the city. Shop heavyweight oversized tees, brushed fleece hoodies, graphic prints, and fan edition drops from CAVENHUSRT across India.",
+      path: "/",
+      rawTitle: true,
+      jsonLd: websiteJsonLd(),
+    }),
   component: Home,
   pendingComponent: () => <RouteLoadingSkeleton variant="home" />,
 });
@@ -123,7 +119,7 @@ function Home() {
             >
               <img
                 src={c.img}
-                alt={c.title}
+                alt={`CAVENHUSRT ${c.title} apparel collection`}
                 loading="lazy"
                 decoding="async"
                 className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
@@ -163,6 +159,7 @@ function Home() {
         <img
           src={fabric}
           alt=""
+          aria-hidden="true"
           loading="lazy"
           decoding="async"
           className="absolute inset-0 h-full w-full object-cover"
@@ -198,7 +195,7 @@ function Home() {
         <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-16 md:grid-cols-2">
           <img
             src={hero}
-            alt="CAVENHUSRT campaign"
+            alt="CAVENHUSRT Urban Motion heavyweight streetwear campaign"
             loading="lazy"
             decoding="async"
             className="aspect-[16/10] w-full rounded-xl object-cover"

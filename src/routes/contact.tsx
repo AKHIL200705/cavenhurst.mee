@@ -6,7 +6,12 @@ import { useAuth } from "@/lib/auth";
 import { submitContactMessageServerFn } from "@/server/customers";
 
 export const Route = createFileRoute("/contact")({
-  head: () => meta("Contact Us", "Get in touch with CAVENHUSRT customer care."),
+  head: () =>
+    meta(
+      "Contact Us",
+      "Get in touch with CAVENHUSRT customer care for orders, sizing, shipping, and support.",
+      { path: "/contact" },
+    ),
   component: Contact,
 });
 
