@@ -1,4 +1,5 @@
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import type { Json } from "@/integrations/supabase/types";
 
 export interface AdminAuditLogItem {
@@ -65,12 +66,7 @@ export function AuditLogsTab({ logs, errorLogs = [], loading, onRefresh }: Audit
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={6} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Querying audit history...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={6} rows={6} />
               ) : logs.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-muted-foreground italic">

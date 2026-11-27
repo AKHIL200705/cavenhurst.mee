@@ -45,7 +45,6 @@ function AdminLogin() {
           result.user as unknown as Parameters<typeof setGoogleSession>[0],
           result.sessionToken,
         );
-        localStorage.setItem("cavenhusrt_admin_token", result.sessionToken);
         toast.success(`Welcome back, ${result.user.user_metadata?.full_name || "Admin"}!`);
         void navigate({ to: "/admin", replace: true });
       } catch (err) {
@@ -144,7 +143,6 @@ function AdminLogin() {
         throw new Error("Unauthorized: Your account does not have admin permissions.");
       }
 
-      localStorage.setItem("cavenhusrt_admin_token", data.session.access_token);
       toast.success(`Welcome to CAVENHUSRT Admin Portal, ${verification.user.name}!`);
       void navigate({ to: "/admin", replace: true });
     } catch (err) {

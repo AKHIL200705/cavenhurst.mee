@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, Grid2x2, Home, List, SlidersHorizontal } from "lucide-react";
+import { ChevronRight, Grid2x2, Home, List, PackageSearch, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Slider } from "@/components/ui/slider";
+import { EmptyState } from "@/components/ui/empty-state";
 import { SIZES, inStock, type Product } from "@/lib/products";
 import { formatINR } from "@/lib/pricing";
 import { ProductCard } from "./ProductCard";
@@ -252,19 +253,34 @@ export function CollectionView({
         </div>
 
         {products.length === 0 ? (
-          <div className="py-24 text-center space-y-3">
-            <p className="font-heading text-2xl font-bold uppercase tracking-tight text-foreground">
-              No Products Available
-            </p>
-            <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              Our artisans are currently preparing new silhouettes in the workshop. Please check
-              back shortly or visit our collections.
-            </p>
-          </div>
+          <EmptyState
+            icon={PackageSearch}
+            title="No Products Available"
+            description="Our artisans are currently preparing new silhouettes in the workshop. Please check back shortly or visit our collections."
+            className="my-10"
+          />
         ) : list.length === 0 ? (
-          <p className="py-20 text-center text-muted-foreground">
-            No products match these filters.
-          </p>
+          <EmptyState
+            icon={PackageSearch}
+            title="No matching pieces"
+            description="No silhouettes matched your active size, color, or price filters."
+            className="my-10"
+            action={
+              <button
+                type="button"
+                onClick={() => {
+                  setSizes([]);
+                  setColors([]);
+                  setCats([]);
+                  setOnlyStock(false);
+                  setPrice([0, 5000]);
+                }}
+                className="rounded-md bg-primary px-5 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                Reset Filters
+              </button>
+            }
+          />
         ) : (
           <div
             className={cn(

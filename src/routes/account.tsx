@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Truck, Shield, Plus, Trash2, Edit2, Check, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import { useAuth } from "@/lib/auth";
 import { useStore } from "@/lib/store";
 import { getProduct, imageFor, resolveProductAsset } from "@/lib/products";
@@ -320,7 +321,7 @@ function Account() {
     }
   };
 
-  if (!ready) return <div className="py-28 text-center text-muted-foreground">Loading…</div>;
+  if (!ready) return <RouteLoadingSkeleton variant="account" />;
   if (!user)
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 font-sans">
@@ -760,7 +761,7 @@ function Account() {
                   </button>
                   <button
                     onClick={() => handleDeleteAddress(a.id)}
-                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-sale"
+                    className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
                   >
                     <Trash2 className="h-3 w-3" /> Delete
                   </button>
@@ -838,7 +839,7 @@ function Account() {
                             o.payment_status === "paid"
                               ? "bg-emerald-500/15 text-emerald-400"
                               : o.status === "cancelled"
-                                ? "bg-rose-500/15 text-rose-400"
+                                ? "bg-amber-500/15 text-amber-300"
                                 : "bg-secondary text-muted-foreground"
                           }`}
                         >

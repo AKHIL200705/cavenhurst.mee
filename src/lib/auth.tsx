@@ -7,7 +7,7 @@ import {
   completeWelcomeServerFn,
   getWelcomeStatusServerFn,
 } from "@/server/customers";
-import { checkGoogleSessionServerFn } from "@/server/auth";
+import { checkGoogleSessionServerFn, logoutSessionServerFn } from "@/server/auth";
 
 export interface AuthUser {
   id: string;
@@ -85,6 +85,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const verifyStoredGoogleSession = async (): Promise<boolean> => {
       try {
+        // 1. Prefer server HttpOnly session cookie (no sensitive token exposure to JS)
+        const cookieCheck = await checkGoogleSessionServerFn({ data: {} });
+        if (!active) return true;
+        if (cookieCheck.valid && cookieCheck.user) {
+          setUser(cookieCheck.user as unknown as AuthUser);
+          setSessionToken(null);
+          setReady(true);
+          return true;
+        }
+
+        // 2. Fallback to stored customer session token if present
         const stored =
           typeof window !== "undefined" ? localStorage.getItem(GOOGLE_SESSION_STORAGE_KEY) : null;
         if (!stored) return false;
@@ -255,11 +266,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const setGoogleSession = (newUser: AuthUser, newSessionToken: string) => {
+    const isAdminAccount = Boolean(newUser?.app_metadata?.["is_admin"]);
     try {
-      localStorage.setItem(
-        GOOGLE_SESSION_STORAGE_KEY,
-        JSON.stringify({ user: newUser, sessionToken: newSessionToken }),
-      );
+      if (isAdminAccount) {
+        localStorage.removeItem(GOOGLE_SESSION_STORAGE_KEY);
+      } else {
+        localStorage.setItem(
+          GOOGLE_SESSION_STORAGE_KEY,
+          JSON.stringify({ user: newUser, sessionToken: newSessionToken }),
+        );
+      }
     } catch {
       /* ignore */
     }
@@ -291,6 +307,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignore */
     }
+
+    await logoutSessionServerFn({}).catch(() => {});
 
     // Disable Google GIS One-Tap auto-selection
     try {

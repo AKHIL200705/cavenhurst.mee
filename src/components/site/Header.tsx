@@ -87,27 +87,27 @@ export function Header() {
             </SheetContent>
           </Sheet>
           <nav className="hidden lg:flex gap-8 text-xs font-bold uppercase tracking-[0.18em] text-silver font-sans">
-            <Link to="/shop" className="hover:text-foreground transition-colors">
+            <Link to="/shop" className="nav-link-underline hover:text-foreground transition-colors">
               Shop All
             </Link>
             <Link
               to="/collections/$slug"
               params={{ slug: "t-shirts" }}
-              className="hover:text-foreground transition-colors"
+              className="nav-link-underline hover:text-foreground transition-colors"
             >
               Tees
             </Link>
             <Link
               to="/collections/$slug"
               params={{ slug: "hoodies" }}
-              className="hover:text-foreground transition-colors"
+              className="nav-link-underline hover:text-foreground transition-colors"
             >
               Hoodies
             </Link>
             <Link
               to="/collections/$slug"
               params={{ slug: "oversized" }}
-              className="hover:text-foreground transition-colors"
+              className="nav-link-underline hover:text-foreground transition-colors"
             >
               Oversized
             </Link>
@@ -135,7 +135,7 @@ export function Header() {
             <ShoppingBag className="h-5 w-5" />
             <span
               key={count}
-              className="absolute -right-2 -top-2 grid h-4 min-w-4 animate-in zoom-in place-items-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground"
+              className="cart-bump absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground"
             >
               {count}
             </span>

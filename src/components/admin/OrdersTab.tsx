@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
 import { cn } from "@/lib/utils";
-import { Search, Filter, Eye, Loader2, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Filter, Eye, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import {
   OrderDetailsDialog,
   type OrderDetailsOrder,
@@ -164,12 +165,7 @@ export function OrdersTab({
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Querying orders database...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={8} rows={6} />
               ) : orders.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground italic">

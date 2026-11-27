@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { formatINR } from "@/lib/pricing";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import {
   Search,
   RefreshCw,
@@ -254,12 +255,7 @@ export function CustomersTab({ customers, loading, onRefresh, authToken }: Custo
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={10} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Querying customer records...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={10} rows={6} />
               ) : paginatedCustomers.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="p-8 text-center text-muted-foreground italic">

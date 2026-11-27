@@ -20,6 +20,7 @@ import { BottomNav, Footer } from "@/components/site/Footer";
 import { Toaster } from "@/components/ui/sonner";
 import { IntroAnimation } from "@/components/site/IntroAnimation";
 import { Button } from "@/components/ui/button";
+import { PageTransition } from "@/components/ui/page-transition";
 import { accountDestination, gateNeedsRedirect } from "@/lib/welcome";
 
 /** Set while the welcome screen is on screen, so the gate never skips it. */
@@ -240,9 +241,9 @@ function AuthGate() {
   if (path === "/welcome") return <Outlet />;
   if (path === "/admin") {
     return (
-      <div key={path} className="page-transition min-h-screen bg-[#031323]">
+      <PageTransition transitionKey={path} className="min-h-screen bg-[#031323]">
         <Outlet />
-      </div>
+      </PageTransition>
     );
   }
   return (
@@ -250,9 +251,9 @@ function AuthGate() {
       <AnnouncementBar />
       <Header />
       <main className="min-h-[60vh]">
-        <div key={path} className="page-transition">
+        <PageTransition transitionKey={path}>
           <Outlet />
-        </div>
+        </PageTransition>
       </main>
       <Footer />
       <BottomNav />

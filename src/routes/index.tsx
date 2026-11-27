@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Gem, RefreshCw, ShieldCheck, Truck } from "lucide-react";
 import { ProductCard } from "@/components/site/ProductCard";
 import { WingMark } from "@/components/site/Logo";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import type { Product } from "@/lib/products";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 import hero from "@/assets/hero-urban-motion.jpg";
@@ -37,6 +38,7 @@ export const Route = createFileRoute("/")({
     ],
   }),
   component: Home,
+  pendingComponent: () => <RouteLoadingSkeleton variant="home" />,
 });
 
 const collections = [

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
-import { Loader2, Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { saveAdminCouponServerFn, deleteAdminCouponServerFn } from "@/server/admin";
 
@@ -108,11 +108,22 @@ export function CouponsTab({ coupons, loading, authToken, onRefresh }: CouponsTa
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {loading && coupons.length === 0 && (
-          <div className="col-span-full flex items-center justify-center gap-2 rounded-xl border border-border bg-card p-8 text-xs text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-electric" /> Loading coupons...
-          </div>
-        )}
+        {loading &&
+          coupons.length === 0 &&
+          [1, 2, 3].map((n) => (
+            <div
+              key={n}
+              aria-hidden="true"
+              className="h-44 animate-pulse rounded-xl border border-border bg-card/70 p-5 motion-reduce:animate-none"
+            >
+              <div className="h-5 w-28 rounded bg-[#0d223a]" />
+              <div className="mt-4 space-y-2.5">
+                <div className="h-3.5 w-32 rounded bg-[#0d223a]" />
+                <div className="h-3.5 w-24 rounded bg-[#0d223a]" />
+                <div className="h-3.5 w-28 rounded bg-[#0d223a]" />
+              </div>
+            </div>
+          ))}
         {coupons.map((c) => (
           <div
             key={c.id}

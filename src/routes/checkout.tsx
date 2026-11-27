@@ -713,7 +713,7 @@ function Checkout() {
               )}
               {shippingInfo.serviceable === false &&
                 shippingInfo.providerStatus !== "pending_credentials" && (
-                  <p className="mt-2 text-xs font-semibold text-rose-500">
+                  <p className="mt-2 text-xs font-semibold text-amber-300">
                     {shippingInfo.message ||
                       "This delivery pincode is not serviceable by ShipMaxx360."}
                   </p>
@@ -841,7 +841,7 @@ function Checkout() {
                           remove(idx);
                         }
                       }}
-                      className="text-muted-foreground transition hover:text-sale"
+                      className="text-muted-foreground transition hover:text-foreground"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

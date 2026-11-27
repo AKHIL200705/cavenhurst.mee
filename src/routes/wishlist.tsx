@@ -1,6 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ProductCard } from "@/components/site/ProductCard";
 import { meta } from "@/components/site/InfoPage";
+import { EmptyState } from "@/components/ui/empty-state";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
+import { Heart } from "lucide-react";
 import type { Product } from "@/lib/products";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 import { useStore } from "@/lib/store";
@@ -15,6 +18,7 @@ export const Route = createFileRoute("/wishlist")({
     }
   },
   head: () => meta("Wishlist", "Your saved CAVENHUSRT pieces."),
+  pendingComponent: () => <RouteLoadingSkeleton variant="wishlist" />,
   component: Wishlist,
 });
 
@@ -28,12 +32,20 @@ function Wishlist() {
         Wishlist
       </h1>
       {items.length === 0 ? (
-        <div className="py-20 text-center text-muted-foreground">
-          Nothing saved yet.{" "}
-          <Link to="/shop" className="underline text-foreground">
-            Start exploring
-          </Link>
-        </div>
+        <EmptyState
+          icon={Heart}
+          title="Your wishlist is empty"
+          description="Save signature silhouettes and essentials to revisit anytime."
+          className="mt-8"
+          action={
+            <Link
+              to="/shop"
+              className="inline-block rounded-md bg-primary px-6 py-3 text-xs font-bold uppercase tracking-[0.16em] text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Start Exploring
+            </Link>
+          }
+        />
       ) : (
         <div className="mt-8 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
           {items.map((p) => (

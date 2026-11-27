@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Plus, Edit2, Trash2, RefreshCw, FolderTree, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import { saveAdminCategoryServerFn, deleteAdminCategoryServerFn } from "@/server/admin";
 
 export interface AdminCategoryItem {
@@ -126,12 +127,7 @@ export function CategoriesTab({ categories, loading, onRefresh, authToken }: Cat
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Loading categories...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={5} rows={4} />
               ) : categories.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-muted-foreground italic">

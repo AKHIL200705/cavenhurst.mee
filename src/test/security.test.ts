@@ -435,4 +435,25 @@ describe("Step 3-5 Data Integrity, RLS Draft & Checkout Hardening Tests", () => 
       }
     }
   });
+
+  it("sets HttpOnly session cookies and does not write admin tokens into browser localStorage", () => {
+    const authHelpers = fs.readFileSync(path.resolve("src/server/auth-helpers.ts"), "utf8");
+    expect(authHelpers).toContain("httpOnly: true");
+    expect(authHelpers).toContain('sameSite: "lax"');
+    expect(authHelpers).toContain("cavenhusrt_admin_session");
+
+    const loginFiles = [
+      "src/routes/admin.login.tsx",
+      "src/components/admin/AdminAuthGate.tsx",
+      "src/routes/admin.tsx",
+    ];
+    for (const rel of loginFiles) {
+      const src = fs.readFileSync(path.resolve(rel), "utf8");
+      expect(src).not.toMatch(/localStorage\.setItem\(["']cavenhusrt_admin_token["']/);
+    }
+
+    const adminServer = fs.readFileSync(path.resolve("src/server/admin.ts"), "utf8");
+    expect(adminServer).toContain("setSessionCookie(ADMIN_SESSION_COOKIE_NAME");
+    expect(adminServer).toContain("adminLogoutServerFn");
+  });
 });

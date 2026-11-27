@@ -2,6 +2,7 @@ import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
 import { Plus, Edit2, Trash2, RefreshCw, Layers, X, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import { saveAdminVariantServerFn, deleteAdminVariantServerFn } from "@/server/admin";
 
 export interface AdminVariantItem {
@@ -209,12 +210,7 @@ export function VariantsTab({
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Querying product variants...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={8} rows={6} />
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground italic">

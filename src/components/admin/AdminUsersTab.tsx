@@ -10,6 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import { saveAdminUserServerFn, toggleAdminUserStatusServerFn } from "@/server/admin";
 
 export interface AdminUserRecord {
@@ -155,12 +156,7 @@ export function AdminUsersTab({ adminUsers, loading, onRefresh, authToken }: Adm
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Loading administrative users...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={7} rows={4} />
               ) : adminUsers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground italic">

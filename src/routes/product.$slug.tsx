@@ -1,5 +1,6 @@
 import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
 import {
+  Check,
   ChevronRight,
   Heart,
   Minus,
@@ -11,8 +12,10 @@ import {
   ZoomOut,
   Sparkles,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { LoadingButton } from "@/components/ui/loading-button";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import {
   Accordion,
   AccordionContent,
@@ -89,6 +92,7 @@ export const Route = createFileRoute("/product/$slug")({
         ]
       : meta("Product", "Discover CAVENHUSRT premium everyday apparel.").meta,
   }),
+  pendingComponent: () => <RouteLoadingSkeleton variant="product" />,
   component: ProductPage,
 });
 
@@ -111,15 +115,25 @@ function ProductPage() {
   const [reviewText, setReviewText] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
 
-  // 3D Multi-Angle Viewer & Zoom State
+  // Multi-Angle Viewer & Zoom State
   const [isDragging, setIsDragging] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);
   const [zoomActive, setZoomActive] = useState(false);
   const [zoomPos, setZoomPos] = useState({ x: 50, y: 50 });
-  const [specular, setSpecular] = useState({ x: 50, y: 50, opacity: 0 });
+  const [addedToBag, setAddedToBag] = useState(false);
+  const [buyingNow, setBuyingNow] = useState(false);
+  const addedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (addedTimerRef.current) clearTimeout(addedTimerRef.current);
+    };
+  }, []);
 
   const off = discountPercent(p.price, p.mrp);
   const stock = size ? (p.stock[size] ?? 0) : 0;
+  const allOut = SIZES.every((s) => (p.stock[s] ?? 0) <= 0);
+  const isSelectedOut = allOut || (Boolean(size) && stock <= 0);
   const main = imageFor(p, color);
   const gallery = [main, ...p.images.filter((i) => i !== main), main, main].slice(0, 4);
 
@@ -148,7 +162,6 @@ function ProductPage() {
       }
     } else {
       setZoomPos({ x, y });
-      setSpecular({ x, y, opacity: 0.65 });
     }
   };
 
@@ -163,7 +176,6 @@ function ProductPage() {
 
   const handlePointerLeave = () => {
     setIsDragging(false);
-    setSpecular((prev) => ({ ...prev, opacity: 0 }));
   };
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
@@ -225,9 +237,13 @@ function ProductPage() {
       return;
     }
     toast.success(`Added to bag — ${p.name}, ${color}, ${size}`);
+    setAddedToBag(true);
+    if (addedTimerRef.current) clearTimeout(addedTimerRef.current);
+    addedTimerRef.current = setTimeout(() => setAddedToBag(false), 1800);
   };
 
   const buyNow = () => {
+    if (buyingNow) return;
     if (!size) {
       toast.error("Please select a size");
       return;
@@ -236,6 +252,7 @@ function ProductPage() {
       toast.error("This size is out of stock");
       return;
     }
+    setBuyingNow(true);
     if (
       !startDirectBuy({
         slug: p.slug,
@@ -249,10 +266,11 @@ function ProductPage() {
         maxStock: stock,
       })
     ) {
+      setBuyingNow(false);
       toast.error(`Only ${stock} left in ${size}`);
       return;
     }
-    navigate({ to: "/checkout", search: { mode: "direct" } });
+    void navigate({ to: "/checkout", search: { mode: "direct" } });
   };
 
   const checkPin = async () => {
@@ -316,26 +334,21 @@ function ProductPage() {
               "group relative aspect-[4/5] overflow-hidden rounded-2xl bg-paper select-none shadow-card touch-none",
               isDragging ? "cursor-grabbing" : zoomActive ? "cursor-zoom-out" : "cursor-grab",
             )}
-            title="Drag horizontally to rotate 360° | Click zoom to inspect texture"
+            title="Drag horizontally to switch angles | Click zoom to inspect texture"
           >
-            {/* Specular lighting surface sheen */}
-            <div
-              className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-300"
-              style={{
-                background: `radial-gradient(circle at ${specular.x}% ${specular.y}%, rgba(255,255,255,0.28) 0%, rgba(199,209,223,0.08) 35%, transparent 70%)`,
-                opacity: specular.opacity,
-                mixBlendMode: "overlay",
-              }}
-            />
-
-            {/* Floating Luxury Product Badge */}
-            <div className="absolute top-4 left-4 z-20 pointer-events-none animate-float-badge">
+            {/* Editorial Heritage Label */}
+            <div className="pointer-events-none absolute top-4 left-4 z-20">
               <div className="flex items-center gap-2 rounded-full border border-silver/30 bg-black/60 px-3.5 py-1.5 text-[10px] font-mono tracking-widest text-silver backdrop-blur-md shadow-xl">
-                <span className="h-1.5 w-1.5 rounded-full bg-electric animate-ping" />
-                <Sparkles className="h-3 w-3 text-gold" />
+                <Sparkles className="h-3 w-3 text-silver" />
                 <span>HERITAGE CRAFT • 260 GSM</span>
               </div>
             </div>
+
+            {allOut && (
+              <div className="pointer-events-none absolute top-4 right-4 z-20 rounded border border-red-500/85 bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-white shadow-sm">
+                Out of Stock
+              </div>
+            )}
 
             {/* Rotation Control Indicator */}
             <div className="absolute bottom-4 right-4 z-20 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/55 px-3 py-1.5 text-[11px] text-white/90 backdrop-blur-md pointer-events-none shadow-md">
@@ -350,6 +363,8 @@ function ProductPage() {
                 e.stopPropagation();
                 setZoomActive((v) => !v);
               }}
+              aria-pressed={zoomActive}
+              aria-label={zoomActive ? "Reset zoom" : "Zoom in on product image"}
               className="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 rounded-full border border-white/20 bg-black/55 px-3 py-1.5 text-[11px] text-white/90 backdrop-blur-md hover:bg-black/75 transition shadow-md"
             >
               {zoomActive ? (
@@ -360,16 +375,17 @@ function ProductPage() {
               <span>{zoomActive ? "Reset Zoom" : "2x Zoom"}</span>
             </button>
 
-            {/* Dynamic Interactive Product Image */}
+            {/* Smooth Crossfade Product Image */}
             <img
               key={`${color}-${img}`}
               src={gallery[img]}
               alt={`${p.name} perspective ${img + 1}`}
               width={800}
               height={1000}
+              decoding="async"
               draggable={false}
               className={cn(
-                "h-full w-full object-cover transition-transform duration-300 ease-out",
+                "h-full w-full object-cover animate-in fade-in duration-300 transition-transform ease-out motion-reduce:animate-none",
                 zoomActive ? "scale-[2.2]" : "scale-100",
               )}
               style={
@@ -426,7 +442,7 @@ function ProductPage() {
                 <span className="text-base font-medium text-muted-foreground line-through">
                   {formatINR(p.mrp)}
                 </span>
-                <span className="rounded bg-sale px-2.5 py-0.5 font-heading text-xs font-bold uppercase tracking-wider text-destructive-foreground">
+                <span className="rounded border border-border bg-secondary px-2.5 py-0.5 font-heading text-xs font-bold uppercase tracking-wider text-foreground">
                   {off}% OFF
                 </span>
               </>
@@ -502,15 +518,22 @@ function ProductPage() {
                 return (
                   <button
                     key={s}
+                    type="button"
                     disabled={out}
+                    aria-pressed={size === s}
+                    aria-label={out ? `Size ${s} out of stock` : undefined}
+                    title={out ? `${s} — Out of stock` : `Select size ${s}`}
                     onClick={() => {
                       setSize(s);
                       setQty(1);
                     }}
                     className={cn(
-                      "rounded-md border border-border py-2.5 text-sm transition",
-                      size === s && "bg-primary font-bold text-primary-foreground",
-                      out && "cursor-not-allowed opacity-30 line-through",
+                      "rounded-md border border-border py-2.5 text-sm transition-all duration-150",
+                      size === s &&
+                        "border-foreground bg-primary font-bold text-primary-foreground shadow-sm",
+                      !out && size !== s && "hover:border-silver/70 hover:bg-card",
+                      out &&
+                        "cursor-not-allowed border-red-500/50 bg-red-500/10 text-red-400 line-through opacity-80",
                     )}
                   >
                     {s}
@@ -518,10 +541,18 @@ function ProductPage() {
                 );
               })}
             </div>
+            {allOut && (
+              <p className="mt-2 inline-flex items-center rounded border border-red-500/75 bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-400">
+                Out of Stock
+              </p>
+            )}
             {size && stock > 0 && stock <= 5 && (
-              <p className="mt-2 text-xs text-sale">
+              <p className="mt-2 text-xs text-silver">
                 Only {stock} left in {size}
               </p>
+            )}
+            {size && stock > 5 && (
+              <p className="mt-2 text-xs text-muted-foreground">In stock — Ready to ship</p>
             )}
           </div>
 
@@ -544,30 +575,65 @@ function ProductPage() {
               </button>
             </div>
             <button
+              type="button"
               onClick={() =>
                 toast(toggleWish(p.slug) ? "Saved to wishlist" : "Removed from wishlist")
               }
-              className="rounded-md border border-border p-3"
+              className="rounded-md border border-border p-3 transition-transform duration-150 hover:border-foreground/50 active:scale-95"
               aria-label="Wishlist"
+              aria-pressed={wishlist.includes(p.slug)}
             >
               <Heart
-                className={cn("h-5 w-5", wishlist.includes(p.slug) && "fill-sale text-sale")}
+                className={cn(
+                  "h-5 w-5 transition-colors",
+                  wishlist.includes(p.slug)
+                    ? "fill-foreground text-foreground"
+                    : "text-muted-foreground",
+                )}
               />
             </button>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <button
-              onClick={addToBag}
-              className="rounded-md border border-foreground py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] hover:bg-foreground/10 transition-colors"
-            >
-              Add to Cart
-            </button>
-            <button
-              onClick={buyNow}
-              className="rounded-md bg-primary py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground hover:bg-primary/90 transition-opacity"
-            >
-              Buy Now
-            </button>
+            {isSelectedOut ? (
+              <button
+                type="button"
+                disabled
+                className="col-span-2 cursor-not-allowed rounded-md border border-red-500/80 bg-red-500/15 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-red-400"
+              >
+                Out of Stock
+              </button>
+            ) : (
+              <>
+                <LoadingButton
+                  type="button"
+                  variant="outline"
+                  aria-label="Add to Cart"
+                  onClick={addToBag}
+                  className={cn(
+                    "h-auto rounded-md border border-foreground bg-transparent py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-foreground transition-all hover:bg-foreground/10 active:scale-[0.99]",
+                    addedToBag && "bg-foreground/10",
+                  )}
+                >
+                  {addedToBag ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Check className="h-4 w-4" aria-hidden="true" />
+                      Added!
+                    </span>
+                  ) : (
+                    "Add to Cart"
+                  )}
+                </LoadingButton>
+                <LoadingButton
+                  type="button"
+                  loading={buyingNow}
+                  loadingText="Proceeding..."
+                  onClick={buyNow}
+                  className="h-auto rounded-md bg-primary py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground transition-all hover:bg-primary/90 active:scale-[0.99]"
+                >
+                  Buy Now
+                </LoadingButton>
+              </>
+            )}
           </div>
 
           <div className="mt-6 rounded-xl border border-border p-4">

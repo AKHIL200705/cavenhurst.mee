@@ -6,7 +6,15 @@ import { PRODUCTS } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment } from "./shipmaxx";
 import { releaseOrderInventoryReservations, syncProductAggregateStock } from "./inventory";
-import { verifyGoogleSessionOrToken, signSessionToken } from "./auth-helpers";
+import {
+  ADMIN_SESSION_COOKIE_NAME,
+  SESSION_COOKIE_NAME,
+  clearSessionCookies,
+  readSessionCookieToken,
+  setSessionCookie,
+  signSessionToken,
+  verifyGoogleSessionOrToken,
+} from "./auth-helpers";
 import type { Json, Database, Tables } from "@/integrations/supabase/types";
 
 type OrderUpdate = Database["public"]["Tables"]["orders"]["Update"];
@@ -17,6 +25,20 @@ interface InventoryProductRow {
   name: string;
   stock: Json;
   colors: Json;
+}
+
+export interface InventoryVariantStatusRow {
+  id: string;
+  product_id: string;
+  product_name: string;
+  product_slug: string;
+  color: string;
+  color_hex: string | null;
+  size: string;
+  physical_quantity: number;
+  reserved_quantity: number;
+  available_quantity: number;
+  stock_status: "in_stock" | "low_stock" | "out_of_stock";
 }
 
 export interface AdminAuthResult {
@@ -161,14 +183,17 @@ function extractBearerToken(providedToken?: string | undefined): string | null {
     if (authHeader && authHeader.startsWith("Bearer ")) {
       token = authHeader.replace(/^Bearer\s+/i, "").trim();
     } else {
-      const cookieHeader = request?.headers?.get("cookie") || "";
-      const match = cookieHeader.match(/sb-[a-z0-9]+-auth-token=([^;]+)/i);
-      if (match && match[1]) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(match[1]));
-          token = Array.isArray(parsed) ? parsed[0] : parsed?.access_token || parsed;
-        } catch {
-          token = decodeURIComponent(match[1]);
+      token = readSessionCookieToken(true);
+      if (!token) {
+        const cookieHeader = request?.headers?.get("cookie") || "";
+        const match = cookieHeader.match(/sb-[a-z0-9]+-auth-token=([^;]+)/i);
+        if (match && match[1]) {
+          try {
+            const parsed = JSON.parse(decodeURIComponent(match[1]));
+            token = Array.isArray(parsed) ? parsed[0] : parsed?.access_token || parsed;
+          } catch {
+            token = decodeURIComponent(match[1]);
+          }
         }
       }
     }
@@ -1733,6 +1758,12 @@ export const deleteAdminProductServerFn = createServerFn({ method: "POST" })
 // 6. INVENTORY MANAGEMENT
 // -----------------------------------------------------------------------------
 
+function computeStockStatus(available: number): "in_stock" | "low_stock" | "out_of_stock" {
+  if (available <= 0) return "out_of_stock";
+  if (available <= 5) return "low_stock";
+  return "in_stock";
+}
+
 export const getAdminInventoryServerFn = createServerFn({ method: "POST" })
   .validator((params?: AdminAuthParams | undefined) => params || {})
   .handler(async ({ data }) => {
@@ -1741,18 +1772,64 @@ export const getAdminInventoryServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const [prods, movements] = await Promise.all([
+        interface VariantJoinSqlRow {
+          id: string;
+          product_id: string;
+          product_name: string;
+          product_slug: string;
+          color: string | null;
+          color_hex: string | null;
+          size: string;
+          physical_quantity: number;
+          reserved_quantity: number;
+        }
+        const [prods, movements, rawVariantRows] = await Promise.all([
           sql<
             InventoryProductRow[]
           >`SELECT id, slug, name, stock, colors FROM products ORDER BY name ASC`,
           sql<
             Tables<"inventory_movements">[]
           >`SELECT * FROM inventory_movements ORDER BY created_at DESC LIMIT 50`.catch(() => []),
+          sql<VariantJoinSqlRow[]>`
+            SELECT
+              v.id,
+              v.product_id,
+              p.name AS product_name,
+              p.slug AS product_slug,
+              v.color,
+              v.color_hex,
+              v.size,
+              COALESCE(i.stock_quantity, v.stock_quantity, 0)::int AS physical_quantity,
+              COALESCE(i.reserved_quantity, 0)::int AS reserved_quantity
+            FROM public.product_variants v
+            JOIN public.products p ON p.id = v.product_id
+            LEFT JOIN public.inventory i ON i.variant_id = v.id
+            ORDER BY p.name ASC, v.color ASC, v.size ASC
+          `.catch(() => [] as VariantJoinSqlRow[]),
         ]);
         if (prods && prods.length > 0) {
+          const variantRows: InventoryVariantStatusRow[] = (rawVariantRows || []).map((r) => {
+            const physical = Math.max(0, Number(r.physical_quantity) || 0);
+            const reserved = Math.max(0, Number(r.reserved_quantity) || 0);
+            const available = Math.max(0, physical - reserved);
+            return {
+              id: r.id,
+              product_id: r.product_id,
+              product_name: r.product_name,
+              product_slug: r.product_slug,
+              color: r.color || "Standard",
+              color_hex: r.color_hex,
+              size: r.size,
+              physical_quantity: physical,
+              reserved_quantity: reserved,
+              available_quantity: available,
+              stock_status: computeStockStatus(available),
+            };
+          });
           return {
             inventory: prods,
             recentMovements: movements || [],
+            variantRows,
           };
         }
       } catch (dbErr) {
@@ -1761,23 +1838,65 @@ export const getAdminInventoryServerFn = createServerFn({ method: "POST" })
     }
 
     try {
-      const [productsRes, movementsRes] = await Promise.all([
+      const [productsRes, movementsRes, variantsRes, invRes] = await Promise.all([
         supabaseAdmin.from("products").select("id, slug, name, stock, colors").order("name"),
         supabaseAdmin
           .from("inventory_movements")
           .select("*")
           .order("created_at", { ascending: false })
           .limit(50),
+        supabaseAdmin
+          .from("product_variants")
+          .select("id, product_id, size, color, color_hex, stock_quantity"),
+        supabaseAdmin.from("inventory").select("variant_id, stock_quantity, reserved_quantity"),
       ]);
 
+      const prodsList = productsRes.data || (PRODUCTS as unknown as InventoryProductRow[]) || [];
+      const prodById = new Map<string, InventoryProductRow>();
+      for (const p of prodsList) {
+        if (p.id) prodById.set(p.id, p);
+      }
+      const invByVariant = new Map<string, { stock_quantity: number; reserved_quantity: number }>();
+      for (const inv of invRes.data || []) {
+        if (inv.variant_id) {
+          invByVariant.set(inv.variant_id, {
+            stock_quantity: Number(inv.stock_quantity) || 0,
+            reserved_quantity: Number(inv.reserved_quantity) || 0,
+          });
+        }
+      }
+
+      const variantRows: InventoryVariantStatusRow[] = (variantsRes.data || []).map((v) => {
+        const prod = prodById.get(v.product_id);
+        const inv = invByVariant.get(v.id);
+        const physical = Math.max(0, inv ? inv.stock_quantity : Number(v.stock_quantity) || 0);
+        const reserved = Math.max(0, inv ? inv.reserved_quantity : 0);
+        const available = Math.max(0, physical - reserved);
+        return {
+          id: v.id,
+          product_id: v.product_id,
+          product_name: prod?.name || "Garment",
+          product_slug: prod?.slug || "",
+          color: v.color || "Standard",
+          color_hex: v.color_hex,
+          size: v.size,
+          physical_quantity: physical,
+          reserved_quantity: reserved,
+          available_quantity: available,
+          stock_status: computeStockStatus(available),
+        };
+      });
+
       return {
-        inventory: productsRes.data || (PRODUCTS as unknown as InventoryProductRow[]) || [],
+        inventory: prodsList,
         recentMovements: movementsRes.data || [],
+        variantRows,
       };
     } catch {
       return {
         inventory: (PRODUCTS as unknown as InventoryProductRow[]) || [],
         recentMovements: [],
+        variantRows: [] as InventoryVariantStatusRow[],
       };
     }
   });
@@ -3192,6 +3311,9 @@ export const adminLoginServerFn = createServerFn({ method: "POST" })
       24 * 3600,
     );
 
+    setSessionCookie(ADMIN_SESSION_COOKIE_NAME, sessionToken, 24 * 3600);
+    setSessionCookie(SESSION_COOKIE_NAME, sessionToken, 24 * 3600);
+
     return {
       success: true,
       sessionToken,
@@ -3202,6 +3324,11 @@ export const adminLoginServerFn = createServerFn({ method: "POST" })
       },
     };
   });
+
+export const adminLogoutServerFn = createServerFn({ method: "POST" }).handler(async () => {
+  clearSessionCookies();
+  return { success: true };
+});
 
 // -----------------------------------------------------------------------------
 // 19. EMAIL DELIVERY DIAGNOSTICS (ADMIN)

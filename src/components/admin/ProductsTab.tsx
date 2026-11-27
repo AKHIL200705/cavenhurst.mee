@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { formatINR } from "@/lib/pricing";
-import { Plus, Edit, Trash2, Search, Eye, EyeOff, RefreshCw } from "lucide-react";
+import { Plus, Edit, Trash2, Search, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import { ProductDialog } from "./ProductDialog";
 import { deleteAdminProductServerFn, saveAdminProductServerFn } from "@/server/admin";
 
@@ -166,12 +167,7 @@ export function ProductsTab({ products, loading, authToken, onRefresh }: Product
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Loading catalog items...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={7} rows={6} />
               ) : filteredProducts.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground italic">

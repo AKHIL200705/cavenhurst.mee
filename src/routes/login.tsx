@@ -898,7 +898,7 @@ function Login() {
                     <span
                       className={cn(
                         "font-mono font-bold",
-                        otpTimerSec < 60 ? "text-red-400" : "text-foreground",
+                        otpTimerSec < 60 ? "text-amber-300" : "text-foreground",
                       )}
                     >
                       {formatTimer(otpTimerSec)}

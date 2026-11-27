@@ -1,8 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Loader2, Minus, Plus, Trash2 } from "lucide-react";
+import { Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { meta } from "@/components/site/InfoPage";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LoadingButton } from "@/components/ui/loading-button";
 import { SIZES, getProduct, imageFor, resolveProductAsset, type Size } from "@/lib/products";
 import { calculateOrderPricingPaise, FREE_SHIPPING_THRESHOLD, formatINR } from "@/lib/pricing";
 import { Summary } from "@/components/site/Summary";
@@ -22,16 +24,20 @@ function Cart() {
 
   if (cart.length === 0)
     return (
-      <div className="py-28 text-center font-sans">
-        <h1 className="font-heading text-4xl sm:text-6xl font-bold uppercase tracking-tight text-foreground">
-          Your bag is empty
-        </h1>
-        <Link
-          to="/shop"
-          className="mt-6 inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
-        >
-          Continue shopping
-        </Link>
+      <div className="mx-auto max-w-4xl px-4 py-16">
+        <EmptyState
+          icon={ShoppingBag}
+          title="Your bag is empty"
+          description="Explore CAVENHUSRT apparel and add pieces to your shopping bag."
+          action={
+            <Link
+              to="/shop"
+              className="inline-block rounded-md bg-primary px-8 py-3.5 font-sans text-xs sm:text-sm font-bold uppercase tracking-[0.16em] text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
+            >
+              Continue shopping
+            </Link>
+          }
+        />
       </div>
     );
 
@@ -153,7 +159,7 @@ function Cart() {
                     <button
                       aria-label="Remove"
                       onClick={() => remove(i)}
-                      className="text-muted-foreground hover:text-sale"
+                      className="text-muted-foreground transition-colors hover:text-foreground"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -203,12 +209,15 @@ function Cart() {
             disabled={applyingCoupon}
             className="flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-xs uppercase font-bold tracking-wider outline-none focus:border-electric disabled:opacity-60"
           />
-          <button
-            disabled={applyingCoupon}
-            className="flex items-center justify-center rounded-md bg-secondary px-4 text-xs font-bold uppercase tracking-wider hover:bg-secondary/80 transition-colors disabled:opacity-60"
+          <LoadingButton
+            type="submit"
+            variant="secondary"
+            loading={applyingCoupon}
+            loadingText="Applying"
+            className="px-4 text-xs font-bold uppercase tracking-wider"
           >
-            {applyingCoupon ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Apply"}
-          </button>
+            Apply
+          </LoadingButton>
         </form>
         {coupon && (
           <button

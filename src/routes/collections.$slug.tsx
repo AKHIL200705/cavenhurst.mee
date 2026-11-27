@@ -2,6 +2,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { CollectionView } from "@/components/site/CollectionView";
 import { COLLECTIONS, type CollectionSlug, type Product } from "@/lib/products";
 import { meta } from "@/components/site/InfoPage";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 
 export const Route = createFileRoute("/collections/$slug")({
@@ -39,6 +40,7 @@ export const Route = createFileRoute("/collections/$slug")({
         ]
       : meta("Collection", "Explore CAVENHUSRT premium apparel collections.").meta,
   }),
+  pendingComponent: () => <RouteLoadingSkeleton variant="collection" />,
   component: Collection,
 });
 

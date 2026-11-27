@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { CollectionView } from "@/components/site/CollectionView";
 import type { Product } from "@/lib/products";
 import { meta } from "@/components/site/InfoPage";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 
 export const Route = createFileRoute("/shop")({
@@ -14,6 +15,7 @@ export const Route = createFileRoute("/shop")({
       return { products: [] };
     }
   },
+  pendingComponent: () => <RouteLoadingSkeleton variant="collection" />,
   component: ShopPage,
 });
 

@@ -3,6 +3,8 @@ import { Search } from "lucide-react";
 import { useState } from "react";
 import { ProductCard } from "@/components/site/ProductCard";
 import { meta } from "@/components/site/InfoPage";
+import { EmptyState } from "@/components/ui/empty-state";
+import { RouteLoadingSkeleton } from "@/components/ui/skeletons";
 import { resolveProductAsset, type Product } from "@/lib/products";
 import { getStoreCatalogServerFn } from "@/server/catalog";
 import { formatINR } from "@/lib/pricing";
@@ -17,6 +19,7 @@ export const Route = createFileRoute("/search")({
     }
   },
   head: () => meta("Search", "Search CAVENHUSRT premium apparel."),
+  pendingComponent: () => <RouteLoadingSkeleton variant="search" />,
   component: SearchPage,
 });
 
@@ -85,11 +88,29 @@ function SearchPage() {
           <span className="font-bold text-foreground">{results.length}</span> results for “{q}”
         </p>
       )}
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
-        {results.map((p) => (
-          <ProductCard key={p.slug} p={p} />
-        ))}
-      </div>
+      {term && results.length === 0 ? (
+        <EmptyState
+          icon={Search}
+          title="No matches found"
+          description={`No apparel matched "${q}". Try searching tees, hoodies, oversized, or navy.`}
+          className="mt-8"
+          action={
+            <button
+              type="button"
+              onClick={() => setQ("")}
+              className="rounded-md border border-border px-5 py-2 text-xs font-bold uppercase tracking-wider text-foreground hover:bg-secondary transition-colors"
+            >
+              Clear Search
+            </button>
+          }
+        />
+      ) : (
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
+          {results.map((p) => (
+            <ProductCard key={p.slug} p={p} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Star, CheckCircle2, XCircle, Trash2, RefreshCw, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 import { updateAdminReviewStatusServerFn, deleteAdminReviewServerFn } from "@/server/admin";
 
 export interface AdminReviewItem {
@@ -109,12 +110,7 @@ export function ReviewsTab({ reviews, loading, onRefresh, authToken }: ReviewsTa
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Loading customer reviews...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={7} rows={5} />
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-muted-foreground italic">

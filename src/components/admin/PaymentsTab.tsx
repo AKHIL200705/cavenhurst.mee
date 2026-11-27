@@ -1,5 +1,6 @@
 import { formatINR } from "@/lib/pricing";
 import { RefreshCw, RotateCcw } from "lucide-react";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 
 export interface AdminPaymentItem {
   id: string;
@@ -58,12 +59,7 @@ export function PaymentsTab({ payments, loading, onRefresh, onInitiateRefund }: 
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Querying payment records...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={8} rows={5} />
               ) : payments.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground italic">

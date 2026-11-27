@@ -1,4 +1,5 @@
 import { ExternalLink, RefreshCw } from "lucide-react";
+import { TableSkeletonRows } from "@/components/ui/skeletons";
 
 export interface AdminShipmentItem {
   id: string;
@@ -58,12 +59,7 @@ export function ShipmentsTab({ shipments, loading, onRefresh }: ShipmentsTabProp
             </thead>
             <tbody className="divide-y divide-border">
               {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-silver">
-                    <RefreshCw className="mx-auto h-5 w-5 animate-spin mb-2" />
-                    Querying shipment records...
-                  </td>
-                </tr>
+                <TableSkeletonRows cols={8} rows={5} />
               ) : shipments.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="p-8 text-center text-muted-foreground italic">

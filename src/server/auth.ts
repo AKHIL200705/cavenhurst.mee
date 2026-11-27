@@ -14,7 +14,12 @@ import {
   type GoogleSessionPayload,
   type GoogleUserMetadata,
   type GoogleAuthUser,
+  SESSION_COOKIE_NAME,
+  ADMIN_SESSION_COOKIE_NAME,
+  clearSessionCookies,
   isWhitelistedAdminEmail,
+  readSessionCookieToken,
+  setSessionCookie,
   signSessionToken,
   verifyGoogleIdToken,
   verifyGoogleAccessToken,
@@ -305,6 +310,11 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
       isAdmin,
     });
 
+    setSessionCookie(SESSION_COOKIE_NAME, sessionToken);
+    if (isAdmin) {
+      setSessionCookie(ADMIN_SESSION_COOKIE_NAME, sessionToken, 24 * 3600);
+    }
+
     const user = formatAuthUser({
       sub: authUserId,
       email: googleUser.email,
@@ -328,13 +338,14 @@ export interface GoogleCheckSessionResult {
 }
 
 export const checkGoogleSessionServerFn = createServerFn({ method: "POST" })
-  .validator((input: { sessionToken?: string | undefined }) => input)
+  .validator((input?: { sessionToken?: string | undefined }) => input || {})
   .handler(async ({ data }): Promise<GoogleCheckSessionResult> => {
-    if (!data.sessionToken) {
+    const token = data?.sessionToken || readSessionCookieToken(false);
+    if (!token) {
       return { valid: false, user: null, isAdmin: false };
     }
 
-    const session = await verifyGoogleSessionOrToken(data.sessionToken);
+    const session = await verifyGoogleSessionOrToken(token);
     if (!session) {
       return { valid: false, user: null, isAdmin: false };
     }
@@ -353,6 +364,11 @@ export const checkGoogleSessionServerFn = createServerFn({ method: "POST" })
       isAdmin: session.isAdmin,
     };
   });
+
+export const logoutSessionServerFn = createServerFn({ method: "POST" }).handler(async () => {
+  clearSessionCookies();
+  return { success: true };
+});
 
 // -----------------------------------------------------------------------------
 // CAVENHUSRT OTP REGISTRATION & PHONE/EMAIL LOGIN
@@ -386,7 +402,14 @@ export const verifyRegistrationOtpServerFn = createServerFn({ method: "POST" })
   .validator((input: VerifyRegistrationOtpInput) => input)
   .handler(async ({ data }) => {
     const { executeVerifyRegistrationOtp } = await import("./auth-api.server");
-    return executeVerifyRegistrationOtp(data);
+    const result = await executeVerifyRegistrationOtp(data);
+    if (result?.sessionToken) {
+      setSessionCookie(SESSION_COOKIE_NAME, result.sessionToken);
+      if (result.isAdmin) {
+        setSessionCookie(ADMIN_SESSION_COOKIE_NAME, result.sessionToken, 24 * 3600);
+      }
+    }
+    return result;
   });
 
 export interface ResendRegistrationOtpInput {
@@ -551,6 +574,11 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
       picture: null,
       isAdmin,
     });
+
+    setSessionCookie(SESSION_COOKIE_NAME, sessionToken);
+    if (isAdmin) {
+      setSessionCookie(ADMIN_SESSION_COOKIE_NAME, sessionToken, 24 * 3600);
+    }
 
     const user = formatAuthUser({
       sub: userId,

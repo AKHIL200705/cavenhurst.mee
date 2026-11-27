@@ -9,6 +9,7 @@ import {
   getAuthenticatedCustomerId,
   verifyGoogleSessionOrToken,
   isWhitelistedAdminEmail,
+  readSessionCookieToken,
 } from "./auth-helpers";
 import {
   createRazorpayOrder,
@@ -66,11 +67,14 @@ async function getServerSessionUser(): Promise<{
 } | null> {
   try {
     const request = getRequest();
-    if (!request?.headers) return null;
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-
-    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const authHeader = request?.headers?.get("authorization");
+    let token =
+      authHeader && authHeader.startsWith("Bearer ")
+        ? authHeader.replace(/^Bearer\s+/i, "").trim()
+        : undefined;
+    if (!token) {
+      token = readSessionCookieToken(false);
+    }
     if (!token || token.split(".").length !== 3) return null;
 
     // Check Google session first

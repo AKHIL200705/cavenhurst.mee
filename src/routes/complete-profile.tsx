@@ -202,7 +202,7 @@ function CompleteProfilePage() {
             {errorMessage && (
               <div
                 role="alert"
-                className="flex items-start gap-2.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-400 animate-in fade-in slide-in-from-top-1"
+                className="flex items-start gap-2.5 rounded-lg border border-amber-400/30 bg-amber-400/10 p-3 text-xs text-amber-200 animate-in fade-in slide-in-from-top-1"
               >
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <p className="leading-snug">{errorMessage}</p>

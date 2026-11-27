@@ -52,12 +52,9 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
     }
     setLoading(true);
     try {
-      const res = await adminLoginServerFn({
+      await adminLoginServerFn({
         data: { email: user.email.toLowerCase().trim(), authToken: sessionToken },
       });
-      if (res.sessionToken) {
-        localStorage.setItem("cavenhusrt_admin_token", res.sessionToken);
-      }
       toast.success("Administrator session verified from active account.");
       onAuthenticated();
     } catch (err) {
@@ -106,7 +103,6 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
         return;
       }
 
-      localStorage.setItem("cavenhusrt_admin_token", serverAuth.sessionToken);
       toast.success("Administrator session verified.");
       onAuthenticated();
     } catch (err) {

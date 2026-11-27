@@ -38,7 +38,13 @@ import type { AdminOrderItem } from "@/components/admin/OrdersTab";
 import type { AdminProductListItem } from "@/components/admin/ProductsTab";
 import type { AdminCategoryItem } from "@/components/admin/CategoriesTab";
 import type { AdminVariantItem } from "@/components/admin/VariantsTab";
-import type { AdminInventoryItem, AdminInventoryMovement } from "@/components/admin/InventoryTab";
+import type {
+  AdminInventoryItem,
+  AdminInventoryMovement,
+  AdminInventoryVariantRow,
+} from "@/components/admin/InventoryTab";
+import { PageTransition } from "@/components/ui/page-transition";
+import { DashboardSkeleton, TableSkeleton } from "@/components/ui/skeletons";
 import type { AdminPaymentItem } from "@/components/admin/PaymentsTab";
 import type { AdminShipmentItem } from "@/components/admin/ShipmentsTab";
 import type { AdminReturnItem } from "@/components/admin/ReturnsTab";
@@ -116,6 +122,7 @@ import {
   getAdminSettingsServerFn,
   getSystemErrorLogsServerFn,
   verifyCurrentAdminServerFn,
+  adminLogoutServerFn,
 } from "@/server/admin";
 
 export const Route = createFileRoute("/admin")({
@@ -270,6 +277,7 @@ function AdminDashboard() {
   const [categories, setCategories] = useState<AdminCategoryItem[]>([]);
   const [variants, setVariants] = useState<AdminVariantItem[]>([]);
   const [inventory, setInventory] = useState<AdminInventoryItem[]>([]);
+  const [inventoryVariantRows, setInventoryVariantRows] = useState<AdminInventoryVariantRow[]>([]);
   const [inventoryMovements, setInventoryMovements] = useState<AdminInventoryMovement[]>([]);
 
   // Payments, Shipments & Returns state
@@ -286,16 +294,34 @@ function AdminDashboard() {
   const [systemErrorLogs, setSystemErrorLogs] = useState<SystemErrorLogItem[]>([]);
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
 
-  // 1. Check admin authorization strictly via server-verified cryptographic token
+  // 1. Check admin authorization strictly via HttpOnly cookie or server-verified cryptographic token
   const verifyAdmin = useCallback(async () => {
     setAuthChecking(true);
     try {
+      // Prefer HttpOnly session cookie verification first (no JS token storage needed)
+      try {
+        const cookieCheck = await verifyCurrentAdminServerFn({ data: {} });
+        if (cookieCheck?.isAdmin) {
+          setAuthToken(undefined);
+          setIsAdmin(true);
+          return;
+        }
+      } catch {
+        // Fallback to candidate token checks
+      }
+
       const candidateTokens: string[] = [];
 
-      if (typeof window !== "undefined") {
-        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
-        if (adminTok) candidateTokens.push(adminTok);
+      if (sessionToken) candidateTokens.push(sessionToken);
 
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        candidateTokens.push(session.access_token);
+      }
+
+      if (typeof window !== "undefined") {
         const stored = localStorage.getItem("cavenhusrt_google_session");
         if (stored) {
           try {
@@ -307,15 +333,9 @@ function AdminDashboard() {
             /* ignore */
           }
         }
-      }
 
-      if (sessionToken) candidateTokens.push(sessionToken);
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        candidateTokens.push(session.access_token);
+        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
+        if (adminTok) candidateTokens.push(adminTok);
       }
 
       for (const candidate of candidateTokens) {
@@ -346,16 +366,21 @@ function AdminDashboard() {
     }
   }, [ready, user, verifyAdmin]);
 
-  // 2. Fetch tab-specific data
+  // 2. Fetch tab-specific data (uses optional token OR HttpOnly admin session cookie)
   const loadActiveTabData = useCallback(async () => {
     if (!isAdmin) return;
     setLoading(true);
 
     try {
       let token = authToken;
-      if (!token && typeof window !== "undefined") {
-        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
-        if (adminTok) token = adminTok;
+      if (!token && sessionToken) {
+        token = sessionToken;
+      }
+      if (!token) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        token = session?.access_token;
       }
       if (!token && typeof window !== "undefined") {
         try {
@@ -367,20 +392,10 @@ function AdminDashboard() {
         } catch {
           /* ignore */
         }
-      }
-      if (!token && sessionToken) {
-        token = sessionToken;
-      }
-      if (!token) {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        token = session?.access_token;
-      }
-
-      if (!token) {
-        setIsAdmin(false);
-        return;
+        if (!token) {
+          const adminTok = localStorage.getItem("cavenhusrt_admin_token");
+          if (adminTok) token = adminTok;
+        }
       }
 
       setAuthToken(token);
@@ -430,6 +445,7 @@ function AdminDashboard() {
         case "inventory": {
           const res = await getAdminInventoryServerFn({ data: { authToken: token } });
           setInventory(res.inventory as AdminInventoryItem[]);
+          setInventoryVariantRows((res.variantRows as AdminInventoryVariantRow[]) || []);
           setInventoryMovements(res.recentMovements as AdminInventoryMovement[]);
           break;
         }
@@ -596,6 +612,7 @@ function AdminDashboard() {
     } catch {
       /* ignore */
     }
+    await adminLogoutServerFn({}).catch(() => {});
     await signOut();
     setIsAdmin(false);
     setAuthToken(undefined);
@@ -618,14 +635,11 @@ function AdminDashboard() {
   // Auth Checking Loading State
   if (authChecking || !ready) {
     return (
-      <div className="min-h-screen bg-[#031323]">
+      <div className="min-h-screen bg-[#031323] text-white">
         <AdminTopBar showSidebarToggle={false} />
-        <div className="flex min-h-[65vh] flex-col items-center justify-center gap-3">
-          <RefreshCw className="h-6 w-6 animate-spin text-white" />
-          <p className="font-mono text-xs uppercase tracking-brand text-[#9fb2c9]">
-            Authenticating Administrator...
-          </p>
-        </div>
+        <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8 lg:py-7">
+          <DashboardSkeleton />
+        </main>
       </div>
     );
   }
@@ -811,178 +825,178 @@ function AdminDashboard() {
 
             <Suspense
               fallback={
-                <div className="h-64 w-full animate-pulse rounded-xl border border-[#1d344e] bg-[#06182c]" />
+                activeTab === "overview" || activeTab === "analytics" ? (
+                  <DashboardSkeleton />
+                ) : (
+                  <TableSkeleton cols={6} rows={6} />
+                )
               }
             >
-              {activeTab === "overview" &&
-                (overviewData ? (
-                  <OverviewTab
-                    data={overviewData}
+              <PageTransition transitionKey={activeTab}>
+                {activeTab === "overview" &&
+                  (overviewData ? (
+                    <OverviewTab
+                      data={overviewData}
+                      variants={variants}
+                      onNavigateTab={(t) => handleSelectTab(t as AdminTab)}
+                    />
+                  ) : (
+                    <DashboardSkeleton />
+                  ))}
+
+                {activeTab === "analytics" &&
+                  (overviewData ? (
+                    <AnalyticsTab
+                      data={overviewData}
+                      onNavigateTab={(t) => handleSelectTab(t as AdminTab)}
+                    />
+                  ) : (
+                    <DashboardSkeleton />
+                  ))}
+
+                {activeTab === "orders" && (
+                  <OrdersTab
+                    orders={orders}
+                    totalCount={totalOrdersCount}
+                    currentPage={orderPage}
+                    limit={25}
+                    loading={loading}
+                    filter={orderFilter}
+                    search={orderSearch}
+                    authToken={authToken}
+                    onFilterChange={(f) => {
+                      setOrderFilter(f);
+                      setOrderPage(1);
+                    }}
+                    onSearchChange={(s) => {
+                      setOrderSearch(s);
+                      setOrderPage(1);
+                    }}
+                    onPageChange={(p) => setOrderPage(p)}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
+
+                {activeTab === "products" && (
+                  <ProductsTab
+                    products={products}
+                    loading={loading}
+                    authToken={authToken}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
+
+                {activeTab === "categories" && (
+                  <CategoriesTab
+                    categories={categories}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                    authToken={authToken}
+                  />
+                )}
+
+                {activeTab === "variants" && (
+                  <VariantsTab
                     variants={variants}
-                    onNavigateTab={(t) => handleSelectTab(t as AdminTab)}
+                    products={products
+                      .filter((p): p is typeof p & { id: string } => Boolean(p.id))
+                      .map((p) => ({ id: p.id, name: p.name }))}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                    authToken={authToken}
                   />
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    {[1, 2, 3, 4].map((k) => (
-                      <div
-                        key={k}
-                        className="h-32 animate-pulse rounded-xl border border-[#1d344e] bg-[#06182c]"
-                      />
-                    ))}
-                  </div>
-                ))}
+                )}
 
-              {activeTab === "analytics" &&
-                (overviewData ? (
-                  <AnalyticsTab
-                    data={overviewData}
-                    onNavigateTab={(t) => handleSelectTab(t as AdminTab)}
+                {activeTab === "inventory" && (
+                  <InventoryTab
+                    inventory={inventory}
+                    variantRows={inventoryVariantRows}
+                    movements={inventoryMovements}
+                    loading={loading}
+                    authToken={authToken}
+                    onRefresh={() => void loadActiveTabData()}
                   />
-                ) : (
-                  <div className="h-80 w-full animate-pulse rounded-xl border border-[#1d344e] bg-[#06182c]" />
-                ))}
+                )}
 
-              {activeTab === "orders" && (
-                <OrdersTab
-                  orders={orders}
-                  totalCount={totalOrdersCount}
-                  currentPage={orderPage}
-                  limit={25}
-                  loading={loading}
-                  filter={orderFilter}
-                  search={orderSearch}
-                  authToken={authToken}
-                  onFilterChange={(f) => {
-                    setOrderFilter(f);
-                    setOrderPage(1);
-                  }}
-                  onSearchChange={(s) => {
-                    setOrderSearch(s);
-                    setOrderPage(1);
-                  }}
-                  onPageChange={(p) => setOrderPage(p)}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
+                {activeTab === "payments" && (
+                  <PaymentsTab
+                    payments={payments}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                    onInitiateRefund={() => handleSelectTab("orders")}
+                  />
+                )}
 
-              {activeTab === "products" && (
-                <ProductsTab
-                  products={products}
-                  loading={loading}
-                  authToken={authToken}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
+                {activeTab === "shipments" && (
+                  <ShipmentsTab
+                    shipments={shipments}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
 
-              {activeTab === "categories" && (
-                <CategoriesTab
-                  categories={categories}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                  authToken={authToken}
-                />
-              )}
+                {activeTab === "returns" && (
+                  <ReturnsTab
+                    returns={returns}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                    authToken={authToken}
+                  />
+                )}
 
-              {activeTab === "variants" && (
-                <VariantsTab
-                  variants={variants}
-                  products={products
-                    .filter((p): p is typeof p & { id: string } => Boolean(p.id))
-                    .map((p) => ({ id: p.id, name: p.name }))}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                  authToken={authToken}
-                />
-              )}
+                {activeTab === "customers" && (
+                  <CustomersTab
+                    customers={customers}
+                    loading={loading}
+                    authToken={authToken}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
 
-              {activeTab === "inventory" && (
-                <InventoryTab
-                  inventory={inventory}
-                  movements={inventoryMovements}
-                  loading={loading}
-                  authToken={authToken}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
+                {activeTab === "coupons" && (
+                  <CouponsTab
+                    coupons={coupons}
+                    loading={loading}
+                    authToken={authToken}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
 
-              {activeTab === "payments" && (
-                <PaymentsTab
-                  payments={payments}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                  onInitiateRefund={() => handleSelectTab("orders")}
-                />
-              )}
+                {activeTab === "reviews" && (
+                  <ReviewsTab
+                    reviews={reviews}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                    authToken={authToken}
+                  />
+                )}
 
-              {activeTab === "shipments" && (
-                <ShipmentsTab
-                  shipments={shipments}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
+                {activeTab === "admin_users" && (
+                  <AdminUsersTab
+                    adminUsers={adminUsers}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                    authToken={authToken}
+                  />
+                )}
 
-              {activeTab === "returns" && (
-                <ReturnsTab
-                  returns={returns}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                  authToken={authToken}
-                />
-              )}
+                {activeTab === "audit" && (
+                  <AuditLogsTab
+                    logs={auditLogs}
+                    errorLogs={systemErrorLogs}
+                    loading={loading}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
 
-              {activeTab === "customers" && (
-                <CustomersTab
-                  customers={customers}
-                  loading={loading}
-                  authToken={authToken}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
-
-              {activeTab === "coupons" && (
-                <CouponsTab
-                  coupons={coupons}
-                  loading={loading}
-                  authToken={authToken}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
-
-              {activeTab === "reviews" && (
-                <ReviewsTab
-                  reviews={reviews}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                  authToken={authToken}
-                />
-              )}
-
-              {activeTab === "admin_users" && (
-                <AdminUsersTab
-                  adminUsers={adminUsers}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                  authToken={authToken}
-                />
-              )}
-
-              {activeTab === "audit" && (
-                <AuditLogsTab
-                  logs={auditLogs}
-                  errorLogs={systemErrorLogs}
-                  loading={loading}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
-
-              {activeTab === "settings" && (
-                <SettingsTab
-                  settings={settings}
-                  authToken={authToken}
-                  onRefresh={() => void loadActiveTabData()}
-                />
-              )}
+                {activeTab === "settings" && (
+                  <SettingsTab
+                    settings={settings}
+                    authToken={authToken}
+                    onRefresh={() => void loadActiveTabData()}
+                  />
+                )}
+              </PageTransition>
             </Suspense>
           </div>
         </main>

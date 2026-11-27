@@ -1,7 +1,78 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getRequest } from "@tanstack/react-start/server";
+import {
+  deleteCookie,
+  getCookie,
+  getRequest,
+  getRequestProtocol,
+  setCookie,
+} from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
+
+export const SESSION_COOKIE_NAME = "cavenhusrt_session";
+export const ADMIN_SESSION_COOKIE_NAME = "cavenhusrt_admin_session";
+
+function isHttpsRequest(): boolean {
+  try {
+    return getRequestProtocol({ xForwardedProto: true }) === "https";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes an HttpOnly, SameSite=Lax signed session cookie when inside an active HTTP request context.
+ */
+export function setSessionCookie(name: string, token: string, maxAgeSeconds = 7 * 24 * 3600): void {
+  if (!token) return;
+  try {
+    setCookie(name, token, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: isHttpsRequest(),
+      maxAge: maxAgeSeconds,
+    });
+  } catch {
+    // Non-HTTP execution (unit tests / CLI scripts) cleanly ignores cookie headers
+  }
+}
+
+/**
+ * Clears HttpOnly session cookies across customer and admin scopes.
+ */
+export function clearSessionCookies(): void {
+  const secure = isHttpsRequest();
+  try {
+    deleteCookie(ADMIN_SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure,
+    });
+    deleteCookie(SESSION_COOKIE_NAME, {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure,
+    });
+  } catch {
+    // Safe fallback when executed outside HTTP request lifecycle
+  }
+}
+
+/**
+ * Reads an authenticated session JWT from HttpOnly cookies (preferring admin scope when requested).
+ */
+export function readSessionCookieToken(preferAdmin = false): string | undefined {
+  try {
+    const primary = preferAdmin ? ADMIN_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
+    const secondary = preferAdmin ? SESSION_COOKIE_NAME : ADMIN_SESSION_COOKIE_NAME;
+    return getCookie(primary) || getCookie(secondary) || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface GoogleSessionPayload {
   sub: string;
@@ -342,6 +413,9 @@ export async function getAuthenticatedCustomerId(passedToken?: string | null): P
           token = authHeader.replace(/^Bearer\s+/i, "").trim();
         }
       }
+    }
+    if (!token) {
+      token = readSessionCookieToken(false);
     }
     if (!token || token.split(".").length !== 3) return null;
 
