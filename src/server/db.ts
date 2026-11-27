@@ -54,11 +54,15 @@ export function getDb(): ReturnType<typeof postgres> | null {
   }
 
   try {
+    const isTransactionPooler = /:6543\b/.test(dbUrl) || /[?&]pgbouncer=true\b/i.test(dbUrl);
+    const poolMax = process.env["VERCEL"] ? 2 : 4;
     _sql = postgres(dbUrl, {
       ssl: { rejectUnauthorized: false },
       connect_timeout: 10,
-      max: 5,
+      max: poolMax,
       idle_timeout: 20,
+      max_lifetime: 300,
+      ...(isTransactionPooler ? { prepare: false } : {}),
     });
     return _sql;
   } catch (err) {

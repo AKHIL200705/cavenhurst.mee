@@ -18,6 +18,7 @@ import {
   ADMIN_SESSION_COOKIE_NAME,
   clearSessionCookies,
   isWhitelistedAdminEmail,
+  resolveIsActiveAdmin,
   readSessionCookieToken,
   setSessionCookie,
   signSessionToken,
@@ -58,7 +59,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
       throw new Error("Missing Google credentials (idToken or accessToken required)");
     }
 
-    const isAdmin = isWhitelistedAdminEmail(googleUser.email);
+    const mayBeWhitelistedAdmin = isWhitelistedAdminEmail(googleUser.email);
     const emailLower = googleUser.email.toLowerCase().trim();
     let authUserId: string = googleUser.sub;
 
@@ -77,7 +78,9 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             UPDATE auth.users SET
               last_sign_in_at = now(),
               updated_at = now(),
-              raw_user_meta_data = raw_user_meta_data || ${sql.json({
+              raw_user_meta_data = (
+                CASE WHEN pg_catalog.jsonb_typeof(raw_user_meta_data) = 'object' THEN raw_user_meta_data ELSE '{}'::jsonb END
+              ) || ${sql.json({
                 sub: googleUser.sub,
                 full_name: googleUser.name || "Customer",
                 avatar_url: googleUser.picture,
@@ -229,8 +232,8 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             updated_at = now()
         `;
 
-        // If user is admin, ensure admin_users has an active record
-        if (isAdmin) {
+        // If email is an initial bootstrap admin, link auth_user_id without re-enabling explicitly deactivated admins
+        if (mayBeWhitelistedAdmin) {
           await sql`
             INSERT INTO public.admin_users (
               auth_user_id, email, full_name, role, permissions, is_active, last_login, created_at, updated_at
@@ -240,7 +243,7 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
             ON CONFLICT (email) DO UPDATE SET
               auth_user_id = EXCLUDED.auth_user_id,
               full_name = COALESCE(EXCLUDED.full_name, public.admin_users.full_name),
-              is_active = true,
+              is_active = public.admin_users.is_active,
               last_login = now(),
               updated_at = now()
           `;
@@ -285,22 +288,42 @@ export const verifyGoogleAuthServerFn = createServerFn({ method: "POST" })
           updated_at: new Date().toISOString(),
         });
 
-        if (isAdmin) {
-          await supabaseAdmin.from("admin_users").upsert({
-            auth_user_id: authUserId,
-            email: emailLower,
-            full_name: googleUser.name || "Admin",
-            role: "admin",
-            permissions: ["*"],
-            is_active: true,
-            last_login: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
+        if (mayBeWhitelistedAdmin) {
+          const { data: existingAdmin } = await supabaseAdmin
+            .from("admin_users")
+            .select("id, is_active")
+            .ilike("email", emailLower)
+            .maybeSingle();
+
+          if (existingAdmin) {
+            await supabaseAdmin
+              .from("admin_users")
+              .update({
+                auth_user_id: authUserId,
+                full_name: googleUser.name || "Admin",
+                last_login: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", existingAdmin.id);
+          } else {
+            await supabaseAdmin.from("admin_users").insert({
+              auth_user_id: authUserId,
+              email: emailLower,
+              full_name: googleUser.name || "Admin",
+              role: "admin",
+              permissions: ["*"],
+              is_active: true,
+              last_login: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          }
         }
       } catch (fallbackErr) {
         console.error("[Google Auth Supabase Fallback Error]:", fallbackErr);
       }
     }
+
+    const isAdmin = await resolveIsActiveAdmin(authUserId, emailLower);
 
     const sessionToken = await signSessionToken({
       sub: authUserId,
@@ -350,18 +373,22 @@ export const checkGoogleSessionServerFn = createServerFn({ method: "POST" })
       return { valid: false, user: null, isAdmin: false };
     }
 
+    const activeAdmin = session.isAdmin
+      ? await resolveIsActiveAdmin(session.sub, session.email)
+      : false;
+
     const user = formatAuthUser({
       sub: session.sub,
       email: session.email,
       name: session.name,
       picture: session.picture,
-      isAdmin: session.isAdmin,
+      isAdmin: activeAdmin,
     });
 
     return {
       valid: true,
       user,
-      isAdmin: session.isAdmin,
+      isAdmin: activeAdmin,
     };
   });
 
@@ -565,7 +592,7 @@ export const loginWithPhoneEmailServerFn = createServerFn({ method: "POST" })
     }
 
     const userId = authUserId;
-    const isAdmin = isWhitelistedAdminEmail(cleanEmail);
+    const isAdmin = await resolveIsActiveAdmin(userId, cleanEmail);
 
     const sessionToken = await signSessionToken({
       sub: userId,

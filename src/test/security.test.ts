@@ -456,4 +456,30 @@ describe("Step 3-5 Data Integrity, RLS Draft & Checkout Hardening Tests", () => 
     expect(adminServer).toContain("setSessionCookie(ADMIN_SESSION_COOKIE_NAME");
     expect(adminServer).toContain("adminLogoutServerFn");
   });
+
+  it("enforces fail-closed admin checks, strict order ownership, and audit hardening migration invariants", async () => {
+    const ordersSrc = fs.readFileSync(path.resolve("src/server/orders.ts"), "utf8");
+    expect(ordersSrc).toContain("resolveIsActiveAdmin");
+    expect(ordersSrc).not.toMatch(/if \(email && isWhitelistedAdminEmail\(email\)\) return true;/);
+
+    const customersSrc = fs.readFileSync(path.resolve("src/server/customers.ts"), "utf8");
+    expect(customersSrc).not.toMatch(/customer_email\.eq\./);
+    expect(customersSrc).toMatch(/pg_catalog\.jsonb_typeof\(raw_user_meta_data\)\s*=\s*'object'/);
+
+    const authSrc = fs.readFileSync(path.resolve("src/server/auth.ts"), "utf8");
+    expect(authSrc).toContain("resolveIsActiveAdmin");
+    expect(authSrc).toContain("is_active = public.admin_users.is_active");
+    expect(authSrc).toMatch(/pg_catalog\.jsonb_typeof\(raw_user_meta_data\)\s*=\s*'object'/);
+
+    const migrationPath = path.resolve(
+      "supabase/migrations/20261127000001_production_audit_hardening_and_indexes.sql",
+    );
+    expect(fs.existsSync(migrationPath)).toBe(true);
+    const sql = fs.readFileSync(migrationPath, "utf8");
+    expect(sql).toMatch(/^BEGIN;/m);
+    expect(sql).toMatch(/^COMMIT;/m);
+    expect(sql).not.toMatch(/DROP TABLE|TRUNCATE TABLE|DELETE FROM/i);
+    expect(sql).toContain("SET search_path = ''");
+    expect(sql).toContain("idx_orders_idempotency_key");
+  });
 });

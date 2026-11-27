@@ -8,7 +8,7 @@ import { logStructuredServerError } from "./logger";
 import {
   getAuthenticatedCustomerId,
   verifyGoogleSessionOrToken,
-  isWhitelistedAdminEmail,
+  resolveIsActiveAdmin,
   readSessionCookieToken,
 } from "./auth-helpers";
 import {
@@ -35,9 +35,12 @@ export interface CheckoutCustomerInput {
   phone: string;
   email: string;
   address: string;
+  landmark?: string | undefined;
   city: string;
   state: string;
   pin: string;
+  selectedAddressId?: string | undefined;
+  saveAddress?: boolean | undefined;
 }
 
 export interface CheckoutCartItemInput {
@@ -106,57 +109,10 @@ async function getServerSessionUser(): Promise<{
 }
 
 /**
- * Checks if a user has administrator privileges in user_roles, admin_users, or whitelist.
+ * Checks if a user currently holds active administrator privileges (fail-closed on deactivated admins).
  */
 async function checkIsUserAdmin(userId: string, email?: string | null): Promise<boolean> {
-  if (email && isWhitelistedAdminEmail(email)) return true;
-  try {
-    const cleanEmail = email?.toLowerCase().trim();
-    const { data: roleByUid } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", userId)
-      .eq("role", "admin")
-      .maybeSingle();
-    if (roleByUid) return true;
-
-    if (cleanEmail) {
-      const { data: roleByEmail } = await supabaseAdmin
-        .from("user_roles")
-        .select("role")
-        .ilike("user_id", cleanEmail)
-        .eq("role", "admin")
-        .maybeSingle();
-      if (roleByEmail) return true;
-
-      const { data: adminByEmail } = await supabaseAdmin
-        .from("admin_users")
-        .select("id")
-        .ilike("email", cleanEmail)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (adminByEmail) return true;
-
-      const { data: whitelist } = await supabaseAdmin
-        .from("admin_whitelist")
-        .select("email")
-        .ilike("email", cleanEmail)
-        .maybeSingle();
-      if (whitelist) return true;
-    }
-
-    const { data: adminByUid } = await supabaseAdmin
-      .from("admin_users")
-      .select("id")
-      .eq("auth_user_id", userId)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (adminByUid) return true;
-
-    return false;
-  } catch {
-    return false;
-  }
+  return await resolveIsActiveAdmin(userId, email);
 }
 
 function generateOrderNumber(): string {
@@ -599,6 +555,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         shipment_status: "unfulfilled",
         shipping: {
           address: customer.address.trim(),
+          ...(customer.landmark?.trim() ? { landmark: customer.landmark.trim() } : {}),
           city: customer.city.trim(),
           state: customer.state.trim(),
           pincode: customer.pin.trim(),
@@ -651,6 +608,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       phone: customer.phone.replace(/\D/g, ""),
       email: customer.email.trim(),
       address_line1: customer.address.trim(),
+      address_line2: customer.landmark?.trim() || null,
       city: customer.city.trim(),
       state: customer.state.trim(),
       postal_code: customer.pin.trim(),
@@ -669,6 +627,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       phone: customer.phone.replace(/\D/g, ""),
       email: customer.email.trim(),
       address_line1: customer.address.trim(),
+      address_line2: customer.landmark?.trim() || null,
       city: customer.city.trim(),
       state: customer.state.trim(),
       pincode: customer.pin.trim(),
@@ -678,24 +637,44 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
       console.warn("[Shipping Address Snapshot] Write warning:", saErr.message);
     }
 
-    // Save to customer account address book strictly when authenticated (never for guest orders!)
-    if (verifiedUserId && customerUuid) {
+    // Save to customer account address book strictly when authenticated, requested, and non-duplicate
+    if (
+      verifiedUserId &&
+      customerUuid &&
+      !customer.selectedAddressId &&
+      customer.saveAddress !== false
+    ) {
       try {
-        await supabaseAdmin.from("customer_addresses").insert({
-          customer_id: customerUuid,
-          customer_auth_uid: verifiedUserId,
-          address_type: "shipping",
-          is_default: false,
-          full_name: customer.name.trim(),
-          phone: customer.phone.replace(/\D/g, ""),
-          address_line1: customer.address.trim(),
-          city: customer.city.trim(),
-          state: customer.state.trim(),
-          postal_code: customer.pin.trim(),
-          country: "India",
-        });
+        const cleanPhone = customer.phone.replace(/\D/g, "").slice(-10);
+        const cleanLine1 = customer.address.trim();
+        const cleanPin = customer.pin.trim();
+        const { data: existingDup } = await supabaseAdmin
+          .from("customer_addresses")
+          .select("id")
+          .eq("customer_id", customerUuid)
+          .eq("postal_code", cleanPin)
+          .ilike("address_line1", cleanLine1)
+          .limit(1)
+          .maybeSingle();
+
+        if (!existingDup) {
+          await supabaseAdmin.from("customer_addresses").insert({
+            customer_id: customerUuid,
+            customer_auth_uid: verifiedUserId,
+            address_type: "shipping",
+            is_default: false,
+            full_name: customer.name.trim(),
+            phone: cleanPhone,
+            address_line1: cleanLine1,
+            address_line2: customer.landmark?.trim() || null,
+            city: customer.city.trim(),
+            state: customer.state.trim(),
+            postal_code: cleanPin,
+            country: "India",
+          });
+        }
       } catch (addrErr) {
-        console.warn("[Customer Address Book] Note: could not save address duplicate:", addrErr);
+        console.warn("[Customer Address Book] Note: could not save address:", addrErr);
       }
     }
 
@@ -863,6 +842,14 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         .eq("id", orderId);
       if (ordRzpErr) {
         await releaseOrderInventoryReservations(orderId);
+        if (redeemedCouponId) {
+          const sql = getDb();
+          if (sql) {
+            await sql`UPDATE public.coupons SET times_used = GREATEST(0, times_used - 1) WHERE id = ${redeemedCouponId}::uuid`;
+          }
+          await supabaseAdmin.from("coupon_redemptions").delete().eq("order_id", orderId);
+        }
+        await supabaseAdmin.from("orders").delete().eq("id", orderId);
         throw new Error("Failed to bind payment order reference. Please retry checkout.");
       }
 
@@ -903,6 +890,7 @@ export const placeOrderServerFn = createServerFn({ method: "POST" })
         customerEmail: customer.email.trim(),
         address: {
           line1: customer.address.trim(),
+          ...(customer.landmark?.trim() ? { line2: customer.landmark.trim() } : {}),
           city: customer.city.trim(),
           state: customer.state.trim(),
           pincode: customer.pin.trim(),
@@ -1017,6 +1005,9 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
         customerEmail: order.customer_email || "",
         address: {
           line1: address.address || "",
+          ...((address as { landmark?: string }).landmark
+            ? { line2: (address as { landmark?: string }).landmark }
+            : {}),
           city: address.city || "",
           state: address.state || "",
           pincode: address.pincode || "521212",
@@ -1053,6 +1044,99 @@ export const verifyPaymentServerFn = createServerFn({ method: "POST" })
       success: true,
       orderNumber: verification.orderNumber || data.orderId,
     };
+  });
+
+/**
+ * Releases reserved inventory and coupon claim if an unpaid Razorpay checkout fails or is abandoned.
+ * Strictly guards against touching paid, COD, or cross-account orders.
+ */
+export const abandonPendingOnlineOrderServerFn = createServerFn({ method: "POST" })
+  .validator(
+    (input: {
+      authToken?: string | undefined;
+      orderId: string;
+      razorpayOrderId?: string | undefined;
+      reason?: string | undefined;
+    }) => input,
+  )
+  .handler(async ({ data }) => {
+    if (!data.orderId) return { released: false };
+    const authUser =
+      (await getAuthenticatedCustomerId(data.authToken)) || (await getServerSessionUser());
+
+    const { data: order } = await supabaseAdmin
+      .from("orders")
+      .select("id, user_id, status, payment_method, payment_status, razorpay_order_id")
+      .eq("id", data.orderId)
+      .maybeSingle();
+
+    if (!order) return { released: false };
+    if (order.user_id && (!authUser || authUser.id !== order.user_id)) {
+      throw new Error("Unauthorized: This order belongs to another account.");
+    }
+    if (
+      data.razorpayOrderId &&
+      order.razorpay_order_id &&
+      order.razorpay_order_id !== data.razorpayOrderId
+    ) {
+      throw new Error("Razorpay order reference mismatch.");
+    }
+    if (
+      order.status !== "pending_payment" ||
+      order.payment_method !== "online" ||
+      order.payment_status !== "pending"
+    ) {
+      return { released: false };
+    }
+
+    await releaseOrderInventoryReservations(order.id);
+
+    const { data: redemption } = await supabaseAdmin
+      .from("coupon_redemptions")
+      .select("id, coupon_id")
+      .eq("order_id", order.id)
+      .maybeSingle();
+    if (redemption) {
+      const { data: cp } = await supabaseAdmin
+        .from("coupons")
+        .select("id, times_used")
+        .eq("id", redemption.coupon_id)
+        .maybeSingle();
+      if (cp) {
+        await supabaseAdmin
+          .from("coupons")
+          .update({ times_used: Math.max(0, (cp.times_used || 0) - 1) })
+          .eq("id", cp.id);
+      }
+      await supabaseAdmin.from("coupon_redemptions").delete().eq("id", redemption.id);
+    }
+
+    await supabaseAdmin
+      .from("payments")
+      .update({ status: "failed", updated_at: new Date().toISOString() })
+      .eq("order_id", order.id)
+      .eq("status", "pending");
+
+    await supabaseAdmin
+      .from("orders")
+      .update({
+        status: "cancelled",
+        payment_status: "failed",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", order.id)
+      .eq("status", "pending_payment");
+
+    await supabaseAdmin.from("order_status_history").insert({
+      order_id: order.id,
+      status: "cancelled",
+      comment:
+        data.reason?.trim() ||
+        "Online payment failed or cancelled before completion. Stock reservation released.",
+      changed_by: authUser?.id || "customer_checkout",
+    });
+
+    return { released: true };
   });
 
 /**

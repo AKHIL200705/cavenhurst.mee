@@ -19,7 +19,10 @@ import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as FaqsRouteImport } from './routes/faqs'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as MensRouteImport } from './routes/mens'
+import { Route as NewArrivalsRouteImport } from './routes/new-arrivals'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as SaleRouteImport } from './routes/sale'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as ShippingReturnsRouteImport } from './routes/shipping-returns'
 import { Route as ShopRouteImport } from './routes/shop'
@@ -81,9 +84,24 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MensRoute = MensRouteImport.update({
+  id: '/mens',
+  path: '/mens',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewArrivalsRoute = NewArrivalsRouteImport.update({
+  id: '/new-arrivals',
+  path: '/new-arrivals',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SaleRoute = SaleRouteImport.update({
+  id: '/sale',
+  path: '/sale',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SearchRoute = SearchRouteImport.update({
@@ -148,7 +166,10 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/faqs': typeof FaqsRoute
   '/login': typeof LoginRoute
+  '/mens': typeof MensRoute
+  '/new-arrivals': typeof NewArrivalsRoute
   '/privacy': typeof PrivacyRoute
+  '/sale': typeof SaleRoute
   '/search': typeof SearchRoute
   '/shipping-returns': typeof ShippingReturnsRoute
   '/shop': typeof ShopRoute
@@ -171,7 +192,10 @@ export interface FileRoutesByTo {
   '/contact': typeof ContactRoute
   '/faqs': typeof FaqsRoute
   '/login': typeof LoginRoute
+  '/mens': typeof MensRoute
+  '/new-arrivals': typeof NewArrivalsRoute
   '/privacy': typeof PrivacyRoute
+  '/sale': typeof SaleRoute
   '/search': typeof SearchRoute
   '/shipping-returns': typeof ShippingReturnsRoute
   '/shop': typeof ShopRoute
@@ -195,7 +219,10 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/faqs': typeof FaqsRoute
   '/login': typeof LoginRoute
+  '/mens': typeof MensRoute
+  '/new-arrivals': typeof NewArrivalsRoute
   '/privacy': typeof PrivacyRoute
+  '/sale': typeof SaleRoute
   '/search': typeof SearchRoute
   '/shipping-returns': typeof ShippingReturnsRoute
   '/shop': typeof ShopRoute
@@ -220,7 +247,10 @@ export interface FileRouteTypes {
     | '/contact'
     | '/faqs'
     | '/login'
+    | '/mens'
+    | '/new-arrivals'
     | '/privacy'
+    | '/sale'
     | '/search'
     | '/shipping-returns'
     | '/shop'
@@ -243,7 +273,10 @@ export interface FileRouteTypes {
     | '/contact'
     | '/faqs'
     | '/login'
+    | '/mens'
+    | '/new-arrivals'
     | '/privacy'
+    | '/sale'
     | '/search'
     | '/shipping-returns'
     | '/shop'
@@ -266,7 +299,10 @@ export interface FileRouteTypes {
     | '/contact'
     | '/faqs'
     | '/login'
+    | '/mens'
+    | '/new-arrivals'
     | '/privacy'
+    | '/sale'
     | '/search'
     | '/shipping-returns'
     | '/shop'
@@ -290,7 +326,10 @@ export interface RootRouteChildren {
   ContactRoute: typeof ContactRoute
   FaqsRoute: typeof FaqsRoute
   LoginRoute: typeof LoginRoute
+  MensRoute: typeof MensRoute
+  NewArrivalsRoute: typeof NewArrivalsRoute
   PrivacyRoute: typeof PrivacyRoute
+  SaleRoute: typeof SaleRoute
   SearchRoute: typeof SearchRoute
   ShippingReturnsRoute: typeof ShippingReturnsRoute
   ShopRoute: typeof ShopRoute
@@ -374,11 +413,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mens': {
+      id: '/mens'
+      path: '/mens'
+      fullPath: '/mens'
+      preLoaderRoute: typeof MensRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/new-arrivals': {
+      id: '/new-arrivals'
+      path: '/new-arrivals'
+      fullPath: '/new-arrivals'
+      preLoaderRoute: typeof NewArrivalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy': {
       id: '/privacy'
       path: '/privacy'
       fullPath: '/privacy'
       preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sale': {
+      id: '/sale'
+      path: '/sale'
+      fullPath: '/sale'
+      preLoaderRoute: typeof SaleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/search': {
@@ -475,7 +535,10 @@ const rootRouteChildren: RootRouteChildren = {
   ContactRoute: ContactRoute,
   FaqsRoute: FaqsRoute,
   LoginRoute: LoginRoute,
+  MensRoute: MensRoute,
+  NewArrivalsRoute: NewArrivalsRoute,
   PrivacyRoute: PrivacyRoute,
+  SaleRoute: SaleRoute,
   SearchRoute: SearchRoute,
   ShippingReturnsRoute: ShippingReturnsRoute,
   ShopRoute: ShopRoute,

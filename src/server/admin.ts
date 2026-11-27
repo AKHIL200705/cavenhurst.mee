@@ -4,8 +4,12 @@ import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
 import { PRODUCTS } from "@/lib/products";
 import { refundRazorpayPayment } from "./razorpay";
-import { createShipMaxxShipment } from "./shipmaxx";
-import { releaseOrderInventoryReservations, syncProductAggregateStock } from "./inventory";
+import { createShipMaxxShipment, cancelShipMaxxShipment } from "./shipmaxx";
+import {
+  releaseOrderInventoryReservations,
+  restockOrderInventory,
+  syncProductAggregateStock,
+} from "./inventory";
 import {
   ADMIN_SESSION_COOKIE_NAME,
   SESSION_COOKIE_NAME,
@@ -1107,108 +1111,37 @@ export const getAdminOrderDetailsServerFn = createServerFn({ method: "POST" })
     };
   });
 
-/**
- * Restocks all three inventory tiers for a cancelled order with color-accurate variant matching:
- * 1. product_variants.stock_quantity
- * 2. inventory.stock_quantity
- * 3. products.stock (aggregate JSONB synced across variants)
- * 4. inventory_movements (audit log)
- */
-async function restockCancelledOrderItems(
-  order: { id: string; order_number?: string | null; items?: unknown },
-  adminUserId: string,
-) {
-  const items = (order.items || []) as Array<{
-    slug: string;
-    size: string;
-    qty: number;
-    color?: string;
-    productId?: string;
-    variantId?: string;
-  }>;
-
-  for (const item of items) {
-    try {
-      const { data: prod } = await supabaseAdmin
-        .from("products")
-        .select("id")
-        .eq("slug", item.slug)
-        .maybeSingle();
-
-      if (prod) {
-        let variantId = item.variantId;
-        if (!variantId) {
-          const vq = supabaseAdmin
-            .from("product_variants")
-            .select("id")
-            .eq("product_id", prod.id)
-            .eq("size", item.size);
-          if (item.color?.trim()) {
-            vq.ilike("color", item.color.trim());
-          }
-          const { data: matchedVariants } = await vq.limit(1);
-          if (matchedVariants && matchedVariants[0]?.id) {
-            variantId = matchedVariants[0].id;
-          }
-        }
-
-        let newQty = item.qty;
-        if (variantId) {
-          const { data: currentVar } = await supabaseAdmin
-            .from("product_variants")
-            .select("stock_quantity")
-            .eq("id", variantId)
-            .maybeSingle();
-
-          const currentVarQty = currentVar?.stock_quantity ?? 0;
-          newQty = currentVarQty + item.qty;
-
-          await supabaseAdmin
-            .from("product_variants")
-            .update({
-              stock_quantity: newQty,
-              is_available: true,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", variantId);
-
-          const { data: currentInv } = await supabaseAdmin
-            .from("inventory")
-            .select("stock_quantity")
-            .eq("variant_id", variantId)
-            .maybeSingle();
-
-          if (currentInv) {
-            newQty = (currentInv.stock_quantity ?? 0) + item.qty;
-            await supabaseAdmin
-              .from("inventory")
-              .update({
-                stock_quantity: newQty,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("variant_id", variantId);
-          }
-        }
-
-        await syncProductAggregateStock(prod.id);
-
-        await supabaseAdmin.from("inventory_movements").insert({
-          product_id: prod.id,
-          product_slug: item.slug,
-          size: item.size,
-          color: item.color || null,
-          change_qty: item.qty,
-          new_stock: newQty,
-          reason: "order_cancelled",
-          reference_id: order.order_number || order.id,
-          admin_user_id: adminUserId,
-        });
-      }
-    } catch (err) {
-      console.error("[Restock Error for item]", item.slug, err);
-    }
-  }
-}
+const ALLOWED_ADMIN_ORDER_TRANSITIONS: Record<string, string[]> = {
+  pending: ["pending", "pending_payment", "confirmed", "processing", "cancelled"],
+  pending_payment: ["pending_payment", "confirmed", "processing", "cancelled"],
+  confirmed: [
+    "confirmed",
+    "processing",
+    "shipped",
+    "in_transit",
+    "out_for_delivery",
+    "delivered",
+    "cancelled",
+    "refunded",
+  ],
+  processing: [
+    "processing",
+    "shipped",
+    "in_transit",
+    "out_for_delivery",
+    "delivered",
+    "cancelled",
+    "refunded",
+  ],
+  shipped: ["shipped", "in_transit", "out_for_delivery", "delivered", "cancelled", "refunded"],
+  in_transit: ["in_transit", "out_for_delivery", "delivered", "cancelled", "refunded"],
+  out_for_delivery: ["out_for_delivery", "delivered", "cancelled", "refunded"],
+  delivered: ["delivered", "return_requested", "returned", "refunded"],
+  return_requested: ["return_requested", "returned", "refunded", "delivered"],
+  returned: ["returned", "refunded"],
+  cancelled: ["cancelled", "refunded"],
+  refunded: ["refunded"],
+};
 
 export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
   .validator(
@@ -1249,23 +1182,34 @@ export const updateAdminOrderStatusServerFn = createServerFn({ method: "POST" })
       };
     }
 
-    // Terminal state validation
+    // Order lifecycle transition validation
+    const allowedTargets = ALLOWED_ADMIN_ORDER_TRANSITIONS[currentOrder.status];
+    if (allowedTargets && !allowedTargets.includes(data.status)) {
+      throw new Error(
+        `Invalid order status transition from '${currentOrder.status}' to '${data.status}'.`,
+      );
+    }
     if (
       ["cancelled", "refunded"].includes(currentOrder.status) &&
-      currentOrder.status !== data.status
+      currentOrder.status !== data.status &&
+      !(currentOrder.status === "cancelled" && data.status === "refunded")
     ) {
       throw new Error(
         `Order is in terminal state '${currentOrder.status}' and cannot be transitioned to '${data.status}'.`,
       );
     }
 
-    // If transitioning to cancelled, trigger restock / reservation release
+    // If transitioning to cancelled, trigger restock / reservation release / shipment cancellation
     if (data.status === "cancelled" && currentOrder.status !== "cancelled") {
       if (currentOrder.status === "pending_payment") {
         await releaseOrderInventoryReservations(currentOrder.id);
       } else {
-        await restockCancelledOrderItems(currentOrder, admin.userId);
+        await restockOrderInventory(currentOrder, admin.userId, "order_cancelled");
       }
+      await cancelShipMaxxShipment({
+        orderId: currentOrder.id,
+        reason: data.notes?.trim() || "Cancelled by administrator",
+      });
     }
 
     const updatePayload: OrderUpdate = {
@@ -1344,8 +1288,33 @@ export const cancelAdminOrderServerFn = createServerFn({ method: "POST" })
     if (order.status === "pending_payment") {
       await releaseOrderInventoryReservations(order.id);
     } else {
-      // Confirmed or processing: restock across all three inventory tiers
-      await restockCancelledOrderItems(order, admin.userId);
+      // Confirmed or processing: restock across all inventory tiers
+      await restockOrderInventory(order, admin.userId, "order_cancelled");
+    }
+
+    await cancelShipMaxxShipment({
+      orderId: order.id,
+      reason: data.reason || "Order cancelled by administrator",
+    });
+
+    const { data: redemption } = await supabaseAdmin
+      .from("coupon_redemptions")
+      .select("id, coupon_id")
+      .eq("order_id", order.id)
+      .maybeSingle();
+    if (redemption) {
+      const { data: cp } = await supabaseAdmin
+        .from("coupons")
+        .select("id, times_used")
+        .eq("id", redemption.coupon_id)
+        .maybeSingle();
+      if (cp) {
+        await supabaseAdmin
+          .from("coupons")
+          .update({ times_used: Math.max(0, (cp.times_used || 0) - 1) })
+          .eq("id", cp.id);
+      }
+      await supabaseAdmin.from("coupon_redemptions").delete().eq("id", redemption.id);
     }
 
     const { error: updateError } = await supabaseAdmin
@@ -2969,6 +2938,33 @@ export const updateAdminReturnStatusServerFn = createServerFn({ method: "POST" }
       .select()
       .single();
     if (error) throw new Error(error.message);
+
+    if (updated?.order_id) {
+      const nextOrderStatus =
+        data.status === "refunded"
+          ? "refunded"
+          : data.status === "received"
+            ? "returned"
+            : data.status === "rejected"
+              ? "delivered"
+              : "return_requested";
+
+      await supabaseAdmin
+        .from("orders")
+        .update({
+          status: nextOrderStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", updated.order_id);
+
+      await supabaseAdmin.from("order_status_history").insert({
+        order_id: updated.order_id,
+        status: nextOrderStatus,
+        comment: `Return #${updated.return_number} updated to '${data.status}'.${data.adminNotes ? ` Note: ${data.adminNotes}` : ""}`,
+        changed_by: admin.email || admin.userId,
+      });
+    }
+
     await recordAdminAuditLog(admin, "return_status_update", "return", data.returnId, {
       status: data.status,
     });

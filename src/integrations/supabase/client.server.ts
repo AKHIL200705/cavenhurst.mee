@@ -5,6 +5,10 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "./types";
 
+function isNewSupabaseApiKey(value: string): boolean {
+  return value.startsWith("sb_publishable_") || value.startsWith("sb_secret_");
+}
+
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
   return (input, init) => {
     const headers = new Headers(
@@ -15,10 +19,16 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
       new Headers(init.headers).forEach((value, key) => headers.set(key, value));
     }
 
-    headers.set("apikey", supabaseKey);
-    if (!headers.has("Authorization")) {
+    // New Supabase opaque API keys (sb_secret_ / sb_publishable_) are not bearer JWTs.
+    if (isNewSupabaseApiKey(supabaseKey)) {
+      if (headers.get("Authorization") === `Bearer ${supabaseKey}`) {
+        headers.delete("Authorization");
+      }
+    } else if (!headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${supabaseKey}`);
     }
+
+    headers.set("apikey", supabaseKey);
 
     return fetch(input, { ...init, headers });
   };

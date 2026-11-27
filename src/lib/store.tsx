@@ -207,10 +207,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     );
 
     // Persist to Supabase if authenticated
-    if (user && sessionToken) {
+    if (user) {
       void updateCartItemServerFn({
         data: {
-          authToken: sessionToken,
+          authToken: sessionToken || undefined,
           action: "add",
           item,
         },
@@ -229,10 +229,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCart((c) => c.map((x, j) => (j === i ? { ...x, qty: finalQty } : x)));
 
     // Persist to Supabase if authenticated
-    if (user && sessionToken) {
+    if (user) {
       void updateCartItemServerFn({
         data: {
-          authToken: sessionToken,
+          authToken: sessionToken || undefined,
           action: "setQty",
           item: { ...targetItem, qty: finalQty },
         },
@@ -279,10 +279,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       );
     });
 
-    if (user && sessionToken) {
+    if (user) {
       void updateCartItemServerFn({
         data: {
-          authToken: sessionToken,
+          authToken: sessionToken || undefined,
           action: "updateVariant",
           prevSize: targetItem.size,
           prevColor: targetItem.color,
@@ -304,10 +304,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCart((c) => c.filter((_, j) => j !== i));
 
     // Persist to Supabase if authenticated
-    if (user && sessionToken && targetItem) {
+    if (user && targetItem) {
       void updateCartItemServerFn({
         data: {
-          authToken: sessionToken,
+          authToken: sessionToken || undefined,
           action: "remove",
           item: targetItem,
         },
@@ -319,10 +319,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCart([]);
     setCouponState(null);
     setCouponRule(null);
-    if (user && sessionToken) {
+    if (user) {
       void updateCartItemServerFn({
         data: {
-          authToken: sessionToken,
+          authToken: sessionToken || undefined,
           action: "clear",
         },
       }).catch((e) => console.error("[Store] Clear cart server sync error:", e));
@@ -382,10 +382,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setWishlist((w) => (has ? w.filter((s) => s !== slug) : [...w, slug]));
 
     // Persist to Supabase if authenticated
-    if (user && sessionToken) {
+    if (user) {
       void toggleWishlistServerFn({
         data: {
-          authToken: sessionToken,
+          authToken: sessionToken || undefined,
           productSlug: slug,
         },
       }).catch((e) => console.error("[Store] Toggle wishlist server sync error:", e));

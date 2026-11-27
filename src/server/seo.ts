@@ -61,6 +61,24 @@ export async function generateSitemapXml(originOverride?: string): Promise<strin
   const entries: SitemapEntry[] = [
     { loc: absoluteUrl("/", siteUrl), lastmod: today, changefreq: "daily", priority: "1.0" },
     { loc: absoluteUrl("/shop", siteUrl), lastmod: today, changefreq: "daily", priority: "0.9" },
+    {
+      loc: absoluteUrl("/new-arrivals", siteUrl),
+      lastmod: today,
+      changefreq: "daily",
+      priority: "0.9",
+    },
+    {
+      loc: absoluteUrl("/sale", siteUrl),
+      lastmod: today,
+      changefreq: "daily",
+      priority: "0.85",
+    },
+    {
+      loc: absoluteUrl("/mens", siteUrl),
+      lastmod: today,
+      changefreq: "daily",
+      priority: "0.85",
+    },
     ...Object.keys(COLLECTIONS).map((slug) => ({
       loc: absoluteUrl(`/collections/${slug}`, siteUrl),
       lastmod: today,

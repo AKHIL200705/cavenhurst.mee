@@ -140,7 +140,7 @@ function Home() {
             NEW ARRIVALS
           </h2>
           <Link
-            to="/shop"
+            to="/new-arrivals"
             className="flex items-center gap-2 font-sans text-xs sm:text-sm font-bold uppercase tracking-wider text-silver hover:text-foreground transition-all"
           >
             View All <ArrowRight className="h-4 w-4" />

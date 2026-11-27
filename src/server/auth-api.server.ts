@@ -8,7 +8,7 @@ import {
   deleteRegistrationSession,
   sendEmailJsOtp,
 } from "./otp";
-import { isWhitelistedAdminEmail, signSessionToken, formatAuthUser } from "./auth-helpers";
+import { resolveIsActiveAdmin, signSessionToken, formatAuthUser } from "./auth-helpers";
 
 export interface SendRegistrationOtpData {
   fullName: string;
@@ -283,24 +283,40 @@ export async function executeVerifyRegistrationOtp(data: VerifyRegistrationOtpDa
           account_status = 'active',
           updated_at = now()
       `;
-      await sql`
-        INSERT INTO public.customers (
-          id, auth_provider_uid, full_name, email, phone, account_status, last_login, created_at, updated_at
-        ) VALUES (
-          ${userId}, ${userId}, ${fullName}, ${verifiedEmail}, ${phone}, 'active', now(), now(), now()
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          phone = EXCLUDED.phone,
-          full_name = EXCLUDED.full_name,
-          account_status = 'active',
-          updated_at = now()
+      const [existingCust] = await sql<{ id: string }[]>`
+        SELECT id FROM public.customers
+        WHERE id = ${userId}::uuid
+           OR auth_provider_uid = ${userId}
+           OR lower(email) = ${verifiedEmail}
+        LIMIT 1
       `;
+      if (existingCust) {
+        await sql`
+          UPDATE public.customers SET
+            phone = ${phone},
+            full_name = ${fullName},
+            email = ${verifiedEmail},
+            account_status = 'active',
+            last_login = now(),
+            updated_at = now()
+          WHERE id = ${existingCust.id}::uuid
+        `;
+      } else {
+        await sql`
+          INSERT INTO public.customers (
+            id, auth_provider_uid, full_name, email, phone, account_status, last_login, created_at, updated_at
+          ) VALUES (
+            ${userId}, ${userId}, ${fullName}, ${verifiedEmail}, ${phone}, 'active', now(), now(), now()
+          )
+          ON CONFLICT DO NOTHING
+        `;
+      }
     } catch (syncErr) {
       console.warn("[Profile Sync Warning]:", syncErr);
     }
   }
 
-  const isAdmin = isWhitelistedAdminEmail(verifiedEmail);
+  const isAdmin = await resolveIsActiveAdmin(userId, verifiedEmail);
   const sessionToken = await signSessionToken({
     sub: userId,
     email: verifiedEmail,

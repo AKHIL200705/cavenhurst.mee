@@ -163,6 +163,94 @@ export async function syncProductAggregateStock(
     .eq("id", productId);
 }
 
+let lastExpiredSweepMs = 0;
+
+/**
+ * Automatically expires stale active inventory reservations (>30 min abandoned checkouts)
+ * so uncompleted online payments never permanently lock variant stock.
+ */
+export async function releaseExpiredInventoryReservations(force = false): Promise<number> {
+  const nowMs = Date.now();
+  if (!force && nowMs - lastExpiredSweepMs < 30_000) {
+    return 0;
+  }
+  lastExpiredSweepMs = nowMs;
+
+  const sql = getDb();
+  if (sql) {
+    try {
+      return await sql.begin(async (tx) => {
+        const expiredRows = await tx<{ order_id: string; variant_id: string; quantity: number }[]>`
+          UPDATE public.inventory_reservations
+          SET status = 'expired', updated_at = NOW()
+          WHERE status = 'active' AND expires_at < NOW()
+          RETURNING order_id, variant_id, quantity
+        `;
+
+        if (!expiredRows || expiredRows.length === 0) return 0;
+
+        const qtyByVariant = new Map<string, number>();
+        const expiredOrderIds = new Set<string>();
+        for (const r of expiredRows) {
+          if (r.variant_id) {
+            qtyByVariant.set(
+              r.variant_id,
+              (qtyByVariant.get(r.variant_id) || 0) + Number(r.quantity || 0),
+            );
+          }
+          if (r.order_id) expiredOrderIds.add(r.order_id);
+        }
+
+        for (const [variantId, releaseQty] of qtyByVariant.entries()) {
+          if (releaseQty <= 0) continue;
+          await tx`
+            UPDATE public.inventory
+            SET reserved_quantity = GREATEST(0, reserved_quantity - ${releaseQty}), updated_at = NOW()
+            WHERE variant_id = ${variantId}::uuid
+          `;
+        }
+
+        for (const orderId of expiredOrderIds) {
+          const [cancelledOrd] = await tx<{ id: string }[]>`
+            UPDATE public.orders
+            SET
+              status = 'cancelled',
+              payment_status = CASE WHEN payment_status = 'pending' THEN 'failed' ELSE payment_status END,
+              updated_at = NOW()
+            WHERE id = ${orderId}::uuid
+              AND status = 'pending_payment'
+              AND payment_status = 'pending'
+            RETURNING id
+          `;
+          if (cancelledOrd) {
+            await tx`
+              UPDATE public.payments
+              SET status = 'failed', updated_at = NOW()
+              WHERE order_id = ${orderId}::uuid AND status = 'pending'
+            `;
+            await tx`
+              INSERT INTO public.order_status_history (order_id, status, comment, changed_by)
+              VALUES (
+                ${orderId}::uuid,
+                'cancelled',
+                'Checkout payment window expired. Reserved inventory and coupon hold released.',
+                'inventory_expiry_sweep'
+              )
+            `;
+          }
+        }
+
+        return expiredRows.length;
+      });
+    } catch (err) {
+      console.warn("[Inventory] Expired reservation sweep notice:", err);
+      return 0;
+    }
+  }
+
+  return 0;
+}
+
 /**
  * Checks available stock for a specific variant (stock_quantity - reserved_quantity).
  */
@@ -171,6 +259,7 @@ export async function getVariantAvailableStock(
   size: string,
   color?: string | undefined,
 ): Promise<{ variantId: string | null; available: number; totalStock: number }> {
+  await releaseExpiredInventoryReservations(false);
   const cleanColor = color?.trim();
   const sql = getDb();
   if (sql) {
@@ -244,6 +333,7 @@ export async function reserveOrderInventory(
   orderId: string,
   items: InventoryOrderItem[],
 ): Promise<{ success: boolean; error?: string }> {
+  await releaseExpiredInventoryReservations(true);
   const sql = getDb();
   const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
 
@@ -682,5 +772,109 @@ export async function releaseOrderInventoryReservations(
     return { success: true };
   } catch {
     return { success: false };
+  }
+}
+
+/**
+ * Restocks all inventory tiers atomically when a confirmed/processing order is cancelled:
+ * product_variants.stock_quantity, inventory.stock_quantity, products.stock JSONB, and inventory_movements.
+ */
+export async function restockOrderInventory(
+  order: { id: string; order_number?: string | null; items?: unknown },
+  actorId: string,
+  reason = "order_cancelled",
+): Promise<void> {
+  const items = (Array.isArray(order.items) ? order.items : []) as Array<{
+    slug?: string;
+    size?: string;
+    qty?: number;
+    color?: string;
+    productId?: string;
+    variantId?: string;
+  }>;
+
+  for (const item of items) {
+    const qty = Math.max(0, Math.floor(Number(item.qty) || 0));
+    if (!item.slug || !item.size || qty <= 0) continue;
+
+    try {
+      const { data: prod } = await supabaseAdmin
+        .from("products")
+        .select("id")
+        .eq("slug", item.slug)
+        .maybeSingle();
+
+      if (!prod) continue;
+
+      let variantId = item.variantId;
+      if (!variantId) {
+        const vq = supabaseAdmin
+          .from("product_variants")
+          .select("id")
+          .eq("product_id", prod.id)
+          .eq("size", item.size);
+        if (item.color?.trim()) {
+          vq.ilike("color", item.color.trim());
+        }
+        const { data: matchedVariants } = await vq.limit(1);
+        if (matchedVariants && matchedVariants[0]?.id) {
+          variantId = matchedVariants[0].id;
+        }
+      }
+
+      let newQty = qty;
+      if (variantId) {
+        const { data: currentVar } = await supabaseAdmin
+          .from("product_variants")
+          .select("stock_quantity")
+          .eq("id", variantId)
+          .maybeSingle();
+
+        const currentVarQty = currentVar?.stock_quantity ?? 0;
+        newQty = currentVarQty + qty;
+
+        await supabaseAdmin
+          .from("product_variants")
+          .update({
+            stock_quantity: newQty,
+            is_available: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", variantId);
+
+        const { data: currentInv } = await supabaseAdmin
+          .from("inventory")
+          .select("stock_quantity")
+          .eq("variant_id", variantId)
+          .maybeSingle();
+
+        if (currentInv) {
+          newQty = (currentInv.stock_quantity ?? 0) + qty;
+          await supabaseAdmin
+            .from("inventory")
+            .update({
+              stock_quantity: newQty,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("variant_id", variantId);
+        }
+      }
+
+      await syncProductAggregateStock(prod.id);
+
+      await supabaseAdmin.from("inventory_movements").insert({
+        product_id: prod.id,
+        product_slug: item.slug,
+        size: item.size,
+        color: item.color || null,
+        change_qty: qty,
+        new_stock: newQty,
+        reason,
+        reference_id: order.order_number || order.id,
+        admin_user_id: actorId,
+      });
+    } catch (err) {
+      console.error("[Restock Error for item]", item.slug, err);
+    }
   }
 }

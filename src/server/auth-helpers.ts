@@ -129,6 +129,113 @@ export function isWhitelistedAdminEmail(email?: string | null | undefined): bool
   return envAdmins.includes(normalized);
 }
 
+/**
+ * Authoritative fail-closed server-side administrator privilege check.
+ * Checks public.admin_users FIRST so an explicitly deactivated admin (is_active = false)
+ * cannot regain access via fallback role/whitelist checks.
+ */
+export async function resolveIsActiveAdmin(
+  userId?: string | null,
+  email?: string | null,
+): Promise<boolean> {
+  const cleanEmail = email?.toLowerCase().trim() || null;
+  const cleanUid = userId?.trim() || null;
+  if (!cleanUid && !cleanEmail) return false;
+
+  const sql = getDb();
+  if (sql) {
+    try {
+      const [adminRow] = await sql<{ is_active: boolean }[]>`
+        SELECT is_active FROM public.admin_users
+        WHERE (${cleanUid ? sql`auth_user_id = ${cleanUid}` : sql`false`})
+           OR (${cleanEmail ? sql`lower(email) = ${cleanEmail}` : sql`false`})
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+      `;
+      if (adminRow) {
+        return Boolean(adminRow.is_active);
+      }
+
+      if (cleanEmail && isWhitelistedAdminEmail(cleanEmail)) {
+        return true;
+      }
+
+      const [roleRow] = await sql<{ role: string }[]>`
+        SELECT role FROM public.user_roles
+        WHERE ((${cleanUid ? sql`user_id = ${cleanUid}` : sql`false`})
+            OR (${cleanEmail ? sql`lower(user_id) = ${cleanEmail}` : sql`false`}))
+          AND role IN ('admin', 'superadmin')
+        LIMIT 1
+      `;
+      if (roleRow) return true;
+
+      if (cleanEmail) {
+        const [wl] = await sql<{ email: string }[]>`
+          SELECT email FROM public.admin_whitelist WHERE lower(email) = ${cleanEmail} LIMIT 1
+        `;
+        if (wl) return true;
+      }
+
+      return false;
+    } catch {
+      // Fall through to PostgREST client lookup
+    }
+  }
+
+  try {
+    if (cleanUid) {
+      const { data: byUid } = await supabaseAdmin
+        .from("admin_users")
+        .select("is_active")
+        .eq("auth_user_id", cleanUid)
+        .maybeSingle();
+      if (byUid) return Boolean(byUid.is_active);
+    }
+
+    if (cleanEmail) {
+      const { data: byEmail } = await supabaseAdmin
+        .from("admin_users")
+        .select("is_active")
+        .ilike("email", cleanEmail)
+        .maybeSingle();
+      if (byEmail) return Boolean(byEmail.is_active);
+
+      if (isWhitelistedAdminEmail(cleanEmail)) return true;
+    }
+
+    if (cleanUid) {
+      const { data: roleByUid } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", cleanUid)
+        .in("role", ["admin", "superadmin"])
+        .maybeSingle();
+      if (roleByUid) return true;
+    }
+
+    if (cleanEmail) {
+      const { data: roleByEmail } = await supabaseAdmin
+        .from("user_roles")
+        .select("role")
+        .ilike("user_id", cleanEmail)
+        .in("role", ["admin", "superadmin"])
+        .maybeSingle();
+      if (roleByEmail) return true;
+
+      const { data: whitelist } = await supabaseAdmin
+        .from("admin_whitelist")
+        .select("email")
+        .ilike("email", cleanEmail)
+        .maybeSingle();
+      if (whitelist) return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function getSessionSecret(): string {
   const explicit = (process.env["SESSION_SECRET"] || "").replace(/^["']|["']$/g, "").trim();
   if (explicit) return explicit;

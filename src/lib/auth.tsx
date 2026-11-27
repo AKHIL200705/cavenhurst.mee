@@ -192,7 +192,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     const userId = user.id;
 
-    getWelcomeStatusServerFn({ data: { authToken: sessionToken ?? undefined } })
+    // Welcome check: retry once on failure. If the server is unreachable after
+    // retry, assume welcome was seen so users are never blocked from shopping
+    // by a transient DB / network error (welcome is UX-only, not a security gate).
+    const fetchWelcome = () =>
+      getWelcomeStatusServerFn({ data: { authToken: sessionToken ?? undefined } });
+
+    fetchWelcome()
+      .catch(() => {
+        // Single automatic retry after 1.5 s
+        return new Promise<void>((resolve) => setTimeout(resolve, 1500)).then(fetchWelcome);
+      })
       .then((res) => {
         if (active) {
           setWelcome({
@@ -203,11 +213,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch(() => {
+        // Both attempts failed — degrade gracefully: treat welcome as seen so
+        // users can continue shopping. The error screen is never shown for a
+        // transient backend issue.
+        console.warn("[AuthProvider] Welcome status unavailable — degrading gracefully.");
         if (active) {
           setWelcome({
             userId,
-            seen: false,
-            error: true,
+            seen: true, // assume seen → user reaches the store, not a dead-end
+            error: false, // suppress the error screen
           });
         }
       });

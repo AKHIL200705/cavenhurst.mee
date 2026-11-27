@@ -417,6 +417,119 @@ export async function createShipMaxxShipment(
 }
 
 /**
+ * Cancels an un-picked-up shipment in ShipMaxx360 and records cancellation in Supabase.
+ * Fails honestly without faking live carrier cancellation if merchant credentials are absent.
+ */
+export async function cancelShipMaxxShipment(params: {
+  orderId: string;
+  reason?: string | undefined;
+}): Promise<{
+  success: boolean;
+  alreadyCancelled?: boolean | undefined;
+  providerStatus: "connected" | "pending_credentials";
+  message: string;
+}> {
+  const { data: shipment } = await supabaseAdmin
+    .from("shipments")
+    .select("id, awb_number, status")
+    .eq("order_id", params.orderId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!shipment) {
+    return {
+      success: true,
+      alreadyCancelled: true,
+      providerStatus: isShipMaxxConfigured() ? "connected" : "pending_credentials",
+      message: "No external shipment booked for this order.",
+    };
+  }
+
+  if (shipment.status === "cancelled") {
+    return {
+      success: true,
+      alreadyCancelled: true,
+      providerStatus: isShipMaxxConfigured() ? "connected" : "pending_credentials",
+      message: "Shipment was already cancelled.",
+    };
+  }
+
+  const config = getShipMaxxConfig();
+  let carrierMessage =
+    "Shipment marked cancelled in store ledger (live ShipMaxx360 carrier AWB cancellation pending merchant credentials).";
+
+  if (isShipMaxxConfigured() && config.apiKey && shipment.awb_number) {
+    try {
+      const response = await fetch(`${config.baseUrl}/v1/shipments/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.apiKey}`,
+          ...(config.apiSecret ? { "X-API-Secret": config.apiSecret } : {}),
+        },
+        body: JSON.stringify({
+          awb_number: shipment.awb_number,
+          reason: params.reason || "Order cancelled",
+        }),
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        console.warn("[ShipMaxx360] Carrier cancel returned error:", response.status, errText);
+        return {
+          success: false,
+          providerStatus: "connected",
+          message: `ShipMaxx360 rejected cancellation (${response.status}): ${errText || "Carrier cancellation failed"}`,
+        };
+      }
+      carrierMessage = `Shipment cancelled with ShipMaxx360 (AWB: ${shipment.awb_number}).`;
+    } catch (err) {
+      return {
+        success: false,
+        providerStatus: "connected",
+        message:
+          err instanceof Error
+            ? `ShipMaxx360 cancel network error: ${err.message}`
+            : "Failed to contact ShipMaxx360 cancel API.",
+      };
+    }
+  }
+
+  await supabaseAdmin
+    .from("shipments")
+    .update({
+      status: "cancelled",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", shipment.id);
+
+  await supabaseAdmin
+    .from("orders")
+    .update({
+      shipment_status: "cancelled",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", params.orderId);
+
+  if (shipment.awb_number) {
+    await supabaseAdmin.from("shipment_tracking_events").insert({
+      shipment_id: shipment.id,
+      order_id: params.orderId,
+      awb_number: shipment.awb_number,
+      status: "CANCELLED",
+      location: "Store Operations",
+      details: carrierMessage,
+    });
+  }
+
+  return {
+    success: true,
+    providerStatus: isShipMaxxConfigured() ? "connected" : "pending_credentials",
+    message: carrierMessage,
+  };
+}
+
+/**
  * Tracks shipment by AWB number or Order ID safely without raw .or() string interpolation.
  */
 export async function trackShipMaxxShipment(identifier: string) {

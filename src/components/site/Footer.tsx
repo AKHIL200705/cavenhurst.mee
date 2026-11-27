@@ -62,6 +62,9 @@ export function Footer() {
           title="Shop"
           links={[
             ["/shop", "Shop All"],
+            ["/new-arrivals", "New Arrivals"],
+            ["/sale", "Sale"],
+            ["/mens", "Men's Collection"],
             ["/collections/t-shirts", "T-Shirts"],
             ["/collections/hoodies", "Hoodies"],
             ["/collections/oversized", "Oversized"],

@@ -4,8 +4,8 @@ import { InfoPage, meta } from "@/components/site/InfoPage";
 export const Route = createFileRoute("/shipping-returns")({
   head: () =>
     meta(
-      "Shipping and Returns",
-      "CAVENHUSRT shipping across India (free above ₹1,999) and our 7-day returns & exchange policy.",
+      "Shipping, Return & Refund Policy",
+      "CAVENHUSRT India shipping policy (free above ₹1,999, flat ₹99 below, 3–7 business days), 7-day return & exchange policy, and 5–7 day refund timeline.",
       { path: "/shipping-returns" },
     ),
   component: () => (

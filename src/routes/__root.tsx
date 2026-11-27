@@ -98,48 +98,63 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  head: () => ({
-    meta: [
-      { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { name: "theme-color", content: "#031323" },
-      { title: "CAVENHUSRT — Premium Apparel for Everyday Movement" },
-      { name: "description", content: DEFAULT_SITE_DESCRIPTION },
-      { name: "robots", content: "index, follow, max-image-preview:large" },
-      { property: "og:site_name", content: SITE_NAME },
-      { property: "og:locale", content: "en_IN" },
-      { property: "og:type", content: "website" },
-      { property: "og:image", content: absoluteUrl(DEFAULT_OG_IMAGE_PATH) },
-      { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:image", content: absoluteUrl(DEFAULT_OG_IMAGE_PATH) },
-    ],
-    links: [
-      { rel: "preconnect", href: "https://fonts.googleapis.com" },
-      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-      {
-        rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Montserrat:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=IBM+Plex+Mono:wght@400;500;600;700&family=Parisienne&display=swap",
-      },
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
-      { rel: "icon", href: "/favicon.png", type: "image/png" },
-      { rel: "apple-touch-icon", href: "/favicon.png" },
-      { rel: "manifest", href: "/site.webmanifest" },
-    ],
-    scripts: [
-      {
-        type: "application/ld+json",
-        children: serializeJsonLd(organizationJsonLd()),
-      },
-      {
-        src: "https://accounts.google.com/gsi/client",
-        async: true,
-        defer: true,
-      },
-    ],
-  }),
+  head: () => {
+    const gscVerification = (
+      (import.meta.env["VITE_GOOGLE_SITE_VERIFICATION"] as string | undefined) ||
+      (typeof process !== "undefined"
+        ? process.env["GOOGLE_SITE_VERIFICATION"] || process.env["VITE_GOOGLE_SITE_VERIFICATION"]
+        : undefined) ||
+      ""
+    )
+      .replace(/^["']|["']$/g, "")
+      .trim();
+
+    return {
+      meta: [
+        { charSet: "utf-8" },
+        { name: "viewport", content: "width=device-width, initial-scale=1" },
+        { name: "theme-color", content: "#031323" },
+        ...(gscVerification
+          ? [{ name: "google-site-verification", content: gscVerification }]
+          : []),
+        { title: "CAVENHUSRT — Premium Apparel for Everyday Movement" },
+        { name: "description", content: DEFAULT_SITE_DESCRIPTION },
+        { name: "robots", content: "index, follow, max-image-preview:large" },
+        { property: "og:site_name", content: SITE_NAME },
+        { property: "og:locale", content: "en_IN" },
+        { property: "og:type", content: "website" },
+        { property: "og:image", content: absoluteUrl(DEFAULT_OG_IMAGE_PATH) },
+        { name: "twitter:card", content: "summary_large_image" },
+        { name: "twitter:image", content: absoluteUrl(DEFAULT_OG_IMAGE_PATH) },
+      ],
+      links: [
+        { rel: "preconnect", href: "https://fonts.googleapis.com" },
+        { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+        {
+          rel: "stylesheet",
+          href: "https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Montserrat:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=IBM+Plex+Mono:wght@400;500;600;700&family=Parisienne&display=swap",
+        },
+        {
+          rel: "stylesheet",
+          href: appCss,
+        },
+        { rel: "icon", href: "/favicon.png", type: "image/png" },
+        { rel: "apple-touch-icon", href: "/favicon.png" },
+        { rel: "manifest", href: "/site.webmanifest" },
+      ],
+      scripts: [
+        {
+          type: "application/ld+json",
+          children: serializeJsonLd(organizationJsonLd()),
+        },
+        {
+          src: "https://accounts.google.com/gsi/client",
+          async: true,
+          defer: true,
+        },
+      ],
+    };
+  },
   shellComponent: RootShell,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,

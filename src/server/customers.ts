@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
-import { getAuthenticatedCustomerId, isWhitelistedAdminEmail } from "./auth-helpers";
+import { getAuthenticatedCustomerId, resolveIsActiveAdmin } from "./auth-helpers";
 
 function postgrestLiteral(val: string): string {
   return `"${val.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
@@ -53,9 +53,6 @@ export const getCustomerOrdersServerFn = createServerFn({ method: "POST" })
       orClauses.push(`customer_id.eq.${postgrestLiteral(auth.customerUuid)}`);
     }
     orClauses.push(`user_id.eq.${postgrestLiteral(auth.id)}`);
-    if (auth.email) {
-      orClauses.push(`customer_email.eq.${postgrestLiteral(auth.email.toLowerCase().trim())}`);
-    }
 
     const { data: orders, error } = await supabaseAdmin
       .from("orders")
@@ -296,6 +293,8 @@ export const checkProfileCompletionServerFn = createServerFn({ method: "POST" })
     const hasValidMobile = Boolean(cleanMobile && cleanMobile.length === 10);
     const isCompleted = Boolean(profile?.["profile_completed"] || (hasValidName && hasValidMobile));
 
+    const isAdmin = await resolveIsActiveAdmin(auth.id, auth.email);
+
     return {
       authenticated: true,
       userId: auth.id,
@@ -303,7 +302,7 @@ export const checkProfileCompletionServerFn = createServerFn({ method: "POST" })
       fullName,
       mobileNumber: cleanMobile,
       profileCompleted: isCompleted,
-      isAdmin: isWhitelistedAdminEmail(auth.email),
+      isAdmin,
     };
   });
 
@@ -443,7 +442,9 @@ export const completeCustomerProfileServerFn = createServerFn({ method: "POST" }
         await sql`
           UPDATE auth.users SET
             updated_at = now(),
-            raw_user_meta_data = raw_user_meta_data || ${sql.json({
+            raw_user_meta_data = (
+              CASE WHEN pg_catalog.jsonb_typeof(raw_user_meta_data) = 'object' THEN raw_user_meta_data ELSE '{}'::jsonb END
+            ) || ${sql.json({
               full_name: trimmedName,
               name: trimmedName,
               phone: normalizedPhone,
@@ -711,30 +712,41 @@ export const updateCustomerProfileServerFn = createServerFn({ method: "POST" })
 export const getWelcomeStatusServerFn = createServerFn({ method: "POST" })
   .validator((params?: { authToken?: string | undefined }) => params || {})
   .handler(async ({ data }): Promise<{ seen: boolean }> => {
-    const auth = await getAuthenticatedCustomerId(data?.authToken);
-    if (!auth) {
-      throw new Error("Authentication required to check welcome state.");
-    }
+    try {
+      const auth = await getAuthenticatedCustomerId(data?.authToken);
+      if (!auth) {
+        // If unauthenticated or token expired, do not throw fatal error — allow safe fallback
+        return { seen: true };
+      }
 
-    const sql = getDb();
-    if (sql) {
-      const [row] = await sql<{ welcome_seen_at: string | null }[]>`
-        SELECT welcome_seen_at FROM public.customer_welcome WHERE user_id = ${auth.id} LIMIT 1
-      `;
+      const sql = getDb();
+      if (sql) {
+        try {
+          const [row] = await sql<{ welcome_seen_at: string | null }[]>`
+            SELECT welcome_seen_at FROM public.customer_welcome WHERE user_id = ${auth.id} LIMIT 1
+          `;
+          return { seen: Boolean(row?.welcome_seen_at) };
+        } catch (dbErr) {
+          console.warn("[getWelcomeStatusServerFn] Direct DB query fallback to REST:", dbErr);
+        }
+      }
+
+      const { data: row, error } = await supabaseAdmin
+        .from("customer_welcome")
+        .select("welcome_seen_at")
+        .eq("user_id", auth.id)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("[getWelcomeStatusServerFn] Supabase REST check note:", error.message);
+        return { seen: true };
+      }
+
       return { seen: Boolean(row?.welcome_seen_at) };
+    } catch (err) {
+      console.warn("[getWelcomeStatusServerFn] Handled fallback for welcome state:", err);
+      return { seen: true };
     }
-
-    const { data: row, error } = await supabaseAdmin
-      .from("customer_welcome")
-      .select("welcome_seen_at")
-      .eq("user_id", auth.id)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return { seen: Boolean(row?.welcome_seen_at) };
   });
 
 /**
@@ -745,17 +757,21 @@ export const completeWelcomeServerFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<{ success: boolean }> => {
     const auth = await getAuthenticatedCustomerId(data?.authToken);
     if (!auth) {
-      throw new Error("Authentication required to complete welcome.");
+      return { success: true };
     }
 
     const sql = getDb();
     if (sql) {
-      await sql`
-        INSERT INTO public.customer_welcome (user_id, welcome_seen_at)
-        VALUES (${auth.id}, now())
-        ON CONFLICT (user_id) DO NOTHING
-      `;
-      return { success: true };
+      try {
+        await sql`
+          INSERT INTO public.customer_welcome (user_id, welcome_seen_at)
+          VALUES (${auth.id}, now())
+          ON CONFLICT (user_id) DO NOTHING
+        `;
+        return { success: true };
+      } catch (dbErr) {
+        console.warn("[completeWelcomeServerFn] Direct DB insert fallback to REST:", dbErr);
+      }
     }
 
     const { error } = await supabaseAdmin
@@ -763,7 +779,7 @@ export const completeWelcomeServerFn = createServerFn({ method: "POST" })
       .upsert({ user_id: auth.id }, { onConflict: "user_id", ignoreDuplicates: true });
 
     if (error) {
-      throw new Error(error.message);
+      console.warn("[completeWelcomeServerFn] Supabase REST insert note:", error.message);
     }
 
     return { success: true };

@@ -206,8 +206,16 @@ async function handleSeoRoute(request: Request, url: URL): Promise<Response | nu
   const pathname = url.pathname.replace(/\/+$/, "") || "/";
   const proto =
     request.headers.get("x-forwarded-proto") || url.protocol.replace(":", "") || "https";
-  const host = request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host;
-  const origin = host ? `${proto}://${host}` : url.origin;
+  const host = (request.headers.get("x-forwarded-host") || request.headers.get("host") || url.host)
+    .trim()
+    .toLowerCase();
+  const configuredSite = (process.env["SITE_URL"] || process.env["VITE_SITE_URL"] || "")
+    .replace(/^["']|["']$/g, "")
+    .trim()
+    .replace(/\/+$/, "");
+  const isCanonicalDomain = /^(www\.)?cavenhusrt\.in(:\d+)?$/i.test(host);
+  const origin =
+    configuredSite || (isCanonicalDomain ? `${proto}://${host}` : "https://cavenhusrt.in");
 
   if (pathname === "/sitemap.xml") {
     const xml = await generateSitemapXml(origin);
