@@ -242,7 +242,9 @@ function getSessionSecret(): string {
 
   const serviceRole = (
     process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["STORAGE_SUPABASE_SERVICE_ROLE_KEY"] ||
     process.env["SUPABASE_SECRET_KEY"] ||
+    process.env["STORAGE_SUPABASE_SECRET_KEY"] ||
     ""
   )
     .replace(/^["']|["']$/g, "")

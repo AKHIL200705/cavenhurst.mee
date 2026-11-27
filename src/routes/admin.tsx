@@ -502,7 +502,10 @@ function AdminDashboard() {
       }
     } catch (err) {
       console.error("[Admin Data Fetch Error]", err);
-      const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
+      let msg = err instanceof Error ? err.message : "Failed to load dashboard data";
+      if (msg === "Failed to fetch") {
+        msg = "Unable to reach database server. Please check your connection or Vercel settings.";
+      }
       if (msg.includes("Forbidden") || msg.includes("Unauthorized")) {
         if (typeof window !== "undefined") {
           localStorage.removeItem("cavenhusrt_admin_token");

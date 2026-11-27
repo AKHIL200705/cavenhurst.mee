@@ -58,12 +58,16 @@ function createSupabaseClient() {
   const rawUrl =
     import.meta.env["VITE_SUPABASE_URL"] ||
     process.env["SUPABASE_URL"] ||
+    process.env["STORAGE_SUPABASE_URL"] ||
+    process.env["STORAGE_URL"] ||
     process.env["VITE_SUPABASE_URL"] ||
     "https://placeholder.supabase.co";
   const rawKey =
     import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
     import.meta.env["VITE_SUPABASE_ANON_KEY"] ||
     process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+    process.env["STORAGE_SUPABASE_ANON_KEY"] ||
+    process.env["STORAGE_SUPABASE_PUBLISHABLE_KEY"] ||
     process.env["SUPABASE_ANON_KEY"] ||
     process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
     process.env["VITE_SUPABASE_ANON_KEY"] ||

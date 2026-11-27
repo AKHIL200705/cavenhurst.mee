@@ -702,16 +702,17 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
         .select("id, total, status, payment_status, shipment_status, created_at");
 
       if (fallbackError) {
-        console.error("[Admin Overview] Orders fallback query error:", fallbackError);
-        throw new Error(
-          `Failed to load overview data: ${fallbackError.message || "Orders query failed"}`,
+        console.warn(
+          "[Admin Overview] Orders fallback query notice, defaulting to empty list:",
+          fallbackError.message,
         );
+        allOrders = [];
+      } else {
+        allOrders = (fallbackOrders || []).map((o) => ({
+          ...o,
+          payment_method: (o as { payment_method?: string | null }).payment_method || "online",
+        })) as DbOrderOverviewRow[];
       }
-
-      allOrders = (fallbackOrders || []).map((o) => ({
-        ...o,
-        payment_method: (o as { payment_method?: string | null }).payment_method || "online",
-      })) as DbOrderOverviewRow[];
     } else {
       allOrders = (orders as unknown as DbOrderOverviewRow[]) || [];
     }
@@ -720,24 +721,34 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
 
     // Fetch verified refunds from canonical payment_refunds first (fallback to legacy refunds only if needed)
     let refundRows: DbRefundRow[] = [];
-    const { data: payRefunds } = await supabaseAdmin
-      .from("payment_refunds")
-      .select("order_id, amount");
-    if (payRefunds && payRefunds.length > 0) {
-      refundRows = payRefunds.map((r) => ({
-        order_id: r.order_id,
-        amount: Number(r.amount) || 0,
-      }));
-    } else {
-      const { data: allRefunds } = await supabaseAdmin.from("refunds").select("order_id, amount");
-      if (allRefunds && allRefunds.length > 0) {
-        refundRows = allRefunds as DbRefundRow[];
+    try {
+      const { data: payRefunds } = await supabaseAdmin
+        .from("payment_refunds")
+        .select("order_id, amount");
+      if (payRefunds && payRefunds.length > 0) {
+        refundRows = payRefunds.map((r) => ({
+          order_id: r.order_id,
+          amount: Number(r.amount) || 0,
+        }));
+      } else {
+        const { data: allRefunds } = await supabaseAdmin.from("refunds").select("order_id, amount");
+        if (allRefunds && allRefunds.length > 0) {
+          refundRows = allRefunds as DbRefundRow[];
+        }
       }
+    } catch {
+      refundRows = [];
     }
 
     const agg = computeOverviewSalesAndCounts(allOrders, refundRows);
 
-    const { data: dbProducts } = await supabaseAdmin.from("products").select("slug, name, stock");
+    let dbProducts: { slug: string; name: string; stock: unknown }[] | null = null;
+    try {
+      const { data } = await supabaseAdmin.from("products").select("slug, name, stock");
+      dbProducts = data;
+    } catch {
+      dbProducts = null;
+    }
     const productList = dbProducts || [];
 
     let outOfStockCount = 0;
@@ -759,32 +770,58 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       }
     }
 
-    const [custCountRes, prodCountRes, recentOrdersRes, recentCustRes, pendingReturnsRes] =
-      await Promise.all([
-        supabaseAdmin.from("customers").select("id", { count: "exact", head: true }),
-        supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
-        supabaseAdmin
-          .from("orders")
-          .select(
-            "id, order_number, customer_name, customer_email, total, status, payment_status, created_at",
-          )
-          .order("created_at", { ascending: false })
-          .limit(5),
-        supabaseAdmin
-          .from("customers")
-          .select("id, full_name, email, phone, created_at")
-          .order("created_at", { ascending: false })
-          .limit(5),
-        supabaseAdmin
-          .from("returns")
-          .select("id", { count: "exact", head: true })
-          .in("status", ["requested", "pending", "under_review"]),
-      ]);
+    let custCount = 0;
+    let prodCount = 0;
+    let recentOrdersList: DbRecentOrderRow[] = [];
+    let recentCustList: DbRecentCustomerRow[] = [];
+    let pendingReturnsCount = 0;
+
+    try {
+      const [profRes, prodCountRes, recentOrdersRes, recentCustRes, pendingReturnsRes] =
+        await Promise.all([
+          Promise.resolve(
+            supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }),
+          ).catch(() => null),
+          Promise.resolve(
+            supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
+          ).catch(() => null),
+          Promise.resolve(
+            supabaseAdmin
+              .from("orders")
+              .select(
+                "id, order_number, customer_name, customer_email, total, status, payment_status, created_at",
+              )
+              .order("created_at", { ascending: false })
+              .limit(5),
+          ).catch(() => null),
+          Promise.resolve(
+            supabaseAdmin
+              .from("profiles")
+              .select("id, full_name, email, phone, created_at")
+              .order("created_at", { ascending: false })
+              .limit(5),
+          ).catch(() => null),
+          Promise.resolve(
+            supabaseAdmin
+              .from("returns")
+              .select("id", { count: "exact", head: true })
+              .in("status", ["requested", "pending", "under_review"]),
+          ).catch(() => null),
+        ]);
+
+      custCount = profRes?.count ?? 0;
+      prodCount = prodCountRes?.count ?? 0;
+      recentOrdersList = (recentOrdersRes?.data as unknown as DbRecentOrderRow[]) || [];
+      recentCustList = (recentCustRes?.data as unknown as DbRecentCustomerRow[]) || [];
+      pendingReturnsCount = pendingReturnsRes?.count ?? 0;
+    } catch (restErr) {
+      console.warn("[Admin Overview] Auxiliary REST queries warning:", restErr);
+    }
 
     return {
-      totalCustomers: custCountRes.count ?? 0,
+      totalCustomers: custCount,
       newCustomers: 0,
-      totalProducts: prodCountRes.count ?? 0,
+      totalProducts: prodCount,
       totalOrders,
       totalPaidRevenue: agg.totalPaidRevenue,
       totalCodRevenue: agg.totalCodRevenue,
@@ -798,7 +835,7 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
       cancelledOrders: agg.cancelledOrders,
       rtoOrders: agg.rtoOrders,
       returnOrders: agg.returnOrders,
-      pendingReturns: pendingReturnsRes.count ?? 0,
+      pendingReturns: pendingReturnsCount,
       totalRefunded: agg.totalRefunded,
       lowStockCount,
       outOfStockCount,
@@ -817,8 +854,14 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
         },
       },
       topSellingProducts: [],
-      recentOrders: recentOrdersRes.data || [],
-      recentRegistrations: recentCustRes.data || [],
+      recentOrders: recentOrdersList,
+      recentRegistrations: recentCustList.map((c) => ({
+        id: c?.id || "",
+        full_name: c?.full_name || "Customer",
+        email: c?.email || null,
+        phone: c?.phone || null,
+        created_at: c?.created_at || null,
+      })),
     };
   });
 
