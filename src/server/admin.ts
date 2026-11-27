@@ -3,6 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getDb } from "@/server/db";
 import { PRODUCTS } from "@/lib/products";
+import { invalidateCatalogCache } from "./catalog";
 import { refundRazorpayPayment } from "./razorpay";
 import { createShipMaxxShipment, cancelShipMaxxShipment } from "./shipmaxx";
 import {
@@ -1661,6 +1662,7 @@ export const saveAdminProductServerFn = createServerFn({ method: "POST" })
       await recordAdminAuditLog(admin, "product_create", "product", created.id, { name: p.name });
     }
 
+    invalidateCatalogCache();
     return { success: true, product: resultProduct };
   });
 
@@ -1680,6 +1682,7 @@ export const deleteAdminProductServerFn = createServerFn({ method: "POST" })
     if (!prod) throw new Error("Product not found");
 
     if (data.hardDelete) {
+      invalidateCatalogCache();
       const { data: orderItem } = await supabaseAdmin
         .from("order_items")
         .select("id")

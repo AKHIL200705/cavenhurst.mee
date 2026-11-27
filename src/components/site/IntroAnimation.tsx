@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
 import { WingMark } from "./Logo";
 
-/** Brand intro shown on every full page load. Skipped entirely for reduced-motion users. */
+/** Brand intro shown on first load of a session. Skipped entirely for returning visits and reduced-motion users. */
 export function IntroAnimation() {
-  const [show, setShow] = useState(true);
+  const [show, setShow] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return !sessionStorage.getItem("cavenhusrt_intro_shown");
+    } catch {
+      return true;
+    }
+  });
   const [leaving, setLeaving] = useState(false);
 
   useEffect(() => {
@@ -11,15 +18,25 @@ export function IntroAnimation() {
       setShow(false);
       return;
     }
+    try {
+      if (sessionStorage.getItem("cavenhusrt_intro_shown")) {
+        setShow(false);
+        return;
+      }
+      sessionStorage.setItem("cavenhusrt_intro_shown", "1");
+    } catch {
+      /* ignore */
+    }
+
     // Already hidden by the pre-load reduced-motion handler: nothing left to animate.
     if (document.querySelector("[data-intro][data-intro-skipped]")) {
       setShow(false);
       return;
     }
-    // Anchor to page load, not to when this component mounted, so the intro never overruns.
+    // Crisp brand reveal: leaves at 650ms, unmounts at 950ms so content is immediately interactive.
     const left = (ms: number) => Math.max(0, ms - performance.now());
-    const t1 = setTimeout(() => setLeaving(true), left(2200));
-    const t2 = setTimeout(() => setShow(false), left(2800));
+    const t1 = setTimeout(() => setLeaving(true), left(650));
+    const t2 = setTimeout(() => setShow(false), left(950));
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);

@@ -85,12 +85,24 @@ function mapDbProductToFrontend(row: DbProductRow): Product {
   };
 }
 
+let _cachedCatalog: { data: Product[]; expiresAt: number } | null = null;
+const CATALOG_CACHE_TTL_MS = 60_000; // 60 seconds server-side in-memory cache
+
+export function invalidateCatalogCache(): void {
+  _cachedCatalog = null;
+}
+
 /**
  * Returns all active products directly from Supabase.
  * No hardcoded demo fallbacks - Supabase is the sole source of truth.
  */
 export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<Product[]> => {
+    const now = Date.now();
+    if (_cachedCatalog && _cachedCatalog.expiresAt > now && _cachedCatalog.data.length > 0) {
+      return _cachedCatalog.data;
+    }
+
     const sql = getDb();
     if (sql) {
       try {
@@ -121,7 +133,9 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
         );
         const rows = await Promise.race([queryPromise, timeoutPromise]);
         if (rows && rows.length > 0) {
-          return (rows as unknown as DbProductRow[]).map(mapDbProductToFrontend);
+          const mapped = (rows as unknown as DbProductRow[]).map(mapDbProductToFrontend);
+          _cachedCatalog = { data: mapped, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS };
+          return mapped;
         }
       } catch (dbErr) {
         console.error(
@@ -143,7 +157,9 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
         return PRODUCTS;
       }
 
-      return dbProducts.map((r) => mapDbProductToFrontend(r as unknown as DbProductRow));
+      const mapped = dbProducts.map((r) => mapDbProductToFrontend(r as unknown as DbProductRow));
+      _cachedCatalog = { data: mapped, expiresAt: Date.now() + CATALOG_CACHE_TTL_MS };
+      return mapped;
     } catch (err) {
       console.warn("[Catalog ServerFn] Unexpected error, using fallback catalog:", err);
       return PRODUCTS;
@@ -157,6 +173,12 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
 export const getProductBySlugServerFn = createServerFn({ method: "POST" })
   .validator((params: { slug: string }) => params)
   .handler(async ({ data }): Promise<Product | null> => {
+    // Instant cache hit if catalog is already warm
+    if (_cachedCatalog && _cachedCatalog.expiresAt > Date.now()) {
+      const match = _cachedCatalog.data.find((p) => p.slug === data.slug);
+      if (match) return match;
+    }
+
     const sql = getDb();
     if (sql) {
       try {
