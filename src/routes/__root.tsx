@@ -11,6 +11,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 
 import appCss from "../styles.css?url";
 import { StoreProvider } from "@/lib/store";
@@ -172,6 +173,7 @@ function RootShell({ children }: { children: ReactNode }) {
       </head>
       <body>
         {children}
+        <SpeedInsights />
         <Scripts />
       </body>
     </html>
