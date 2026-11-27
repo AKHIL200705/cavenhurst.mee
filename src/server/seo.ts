@@ -19,35 +19,50 @@ function escapeXml(value: string): string {
     .replace(/'/g, "&apos;");
 }
 
+let _cachedSitemap: { xml: string; origin: string; timestamp: number } | null = null;
+
 async function fetchPublishedProductSlugs(): Promise<
   Array<{ slug: string; updated_at?: string | null | undefined }>
 > {
-  const sql = getDb();
-  if (sql) {
-    try {
-      const rows = await sql<{ slug: string; updated_at?: string | null }[]>`
-        SELECT slug, updated_at
-        FROM public.products
-        WHERE is_published = true
-        ORDER BY rank ASC
-      `;
-      if (rows && rows.length > 0) return rows;
-    } catch {
-      // Fallback to Supabase REST / static catalog
+  const fetchWithTimeout = async () => {
+    const sql = getDb();
+    if (sql) {
+      try {
+        const rows = await sql<{ slug: string; updated_at?: string | null }[]>`
+          SELECT slug, updated_at
+          FROM public.products
+          WHERE is_published = true
+          ORDER BY rank ASC
+        `;
+        if (rows && rows.length > 0) return rows;
+      } catch {
+        // Fallback to Supabase REST / static catalog
+      }
     }
-  }
+
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("products")
+        .select("slug, updated_at")
+        .eq("is_published", true)
+        .order("rank", { ascending: true });
+      if (!error && data && data.length > 0) {
+        return data;
+      }
+    } catch {
+      // Fallback to static catalog
+    }
+
+    return null;
+  };
+
+  const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500));
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from("products")
-      .select("slug, updated_at")
-      .eq("is_published", true)
-      .order("rank", { ascending: true });
-    if (!error && data && data.length > 0) {
-      return data;
-    }
+    const result = await Promise.race([fetchWithTimeout(), timeoutPromise]);
+    if (result && result.length > 0) return result;
   } catch {
-    // Fallback to static catalog
+    // Ignore timeout race failures
   }
 
   return PRODUCTS.map((p) => ({ slug: p.slug, updated_at: null }));
@@ -55,6 +70,15 @@ async function fetchPublishedProductSlugs(): Promise<
 
 export async function generateSitemapXml(originOverride?: string): Promise<string> {
   const siteUrl = getSiteUrl(originOverride);
+  const now = Date.now();
+  if (
+    _cachedSitemap &&
+    _cachedSitemap.origin === siteUrl &&
+    now - _cachedSitemap.timestamp < 60_000
+  ) {
+    return _cachedSitemap.xml;
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const products = await fetchPublishedProductSlugs();
 
@@ -108,7 +132,9 @@ export async function generateSitemapXml(originOverride?: string): Promise<strin
     )
     .join("\n");
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>\n`;
+  _cachedSitemap = { xml, origin: siteUrl, timestamp: now };
+  return xml;
 }
 
 export function generateRobotsTxt(originOverride?: string): string {
