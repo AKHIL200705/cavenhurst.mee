@@ -94,7 +94,7 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
     const sql = getDb();
     if (sql) {
       try {
-        const rows = await sql`
+        const queryPromise = sql`
           SELECT 
             p.*,
             COALESCE(
@@ -116,13 +116,17 @@ export const getStoreCatalogServerFn = createServerFn({ method: "GET" }).handler
           WHERE p.is_published = true
           ORDER BY p.rank ASC
         `;
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Direct DB catalog query timeout")), 2500),
+        );
+        const rows = await Promise.race([queryPromise, timeoutPromise]);
         if (rows && rows.length > 0) {
           return (rows as unknown as DbProductRow[]).map(mapDbProductToFrontend);
         }
       } catch (dbErr) {
         console.error(
-          "[Catalog ServerFn] Direct DB error, falling back to Supabase client:",
-          dbErr,
+          "[Catalog ServerFn] Direct DB query fallback note:",
+          dbErr instanceof Error ? dbErr.message : dbErr,
         );
       }
     }

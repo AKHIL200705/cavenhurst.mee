@@ -254,7 +254,15 @@ function AuthGate() {
   useEffect(() => {
     if (redirectNeeded) void navigate({ to: destination, replace: true });
   }, [redirectNeeded, destination, navigate]);
-  if (!legal && (!checked || redirectNeeded)) return null;
+  if (!legal && (!checked || redirectNeeded)) {
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      </div>
+    );
+  }
   if (!legal && user && welcomeError)
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-5 px-6 text-center">

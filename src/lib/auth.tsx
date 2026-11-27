@@ -121,19 +121,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false;
     };
 
+    // Failsafe timer: auth initialization must never leave the screen stuck as blank
+    const authInitTimer = setTimeout(() => {
+      if (active) setReady(true);
+    }, 2000);
+
     googleCheckInFlight = true;
-    void verifyStoredGoogleSession().then((restored) => {
-      googleCheckInFlight = false;
-      if (!active || restored) return;
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (!active) return;
-        if (session?.user) {
-          setUser((session.user as unknown as AuthUser) ?? null);
-          setSessionToken(session.access_token ?? null);
-        }
-        setReady(true);
+    void verifyStoredGoogleSession()
+      .then((restored) => {
+        googleCheckInFlight = false;
+        if (!active || restored) return;
+        supabase.auth
+          .getSession()
+          .then(({ data: { session } }) => {
+            if (!active) return;
+            if (session?.user) {
+              setUser((session.user as unknown as AuthUser) ?? null);
+              setSessionToken(session.access_token ?? null);
+            }
+            setReady(true);
+          })
+          .catch(() => {
+            if (active) setReady(true);
+          });
+      })
+      .catch(() => {
+        googleCheckInFlight = false;
+        if (active) setReady(true);
       });
-    });
 
     // Active listener for Supabase authentication state
     const { data } = supabase.auth.onAuthStateChange((_e, s) => {
@@ -179,6 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      clearTimeout(authInitTimer);
       data.subscription.unsubscribe();
     };
   }, []);
@@ -191,6 +207,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     let active = true;
     const userId = user.id;
+
+    // Failsafe timer so welcome check never leaves screen hung
+    const welcomeTimer = setTimeout(() => {
+      if (active) {
+        setWelcome({
+          userId,
+          seen: true,
+          error: false,
+        });
+      }
+    }, 2500);
 
     // Welcome check: retry once on failure. If the server is unreachable after
     // retry, assume welcome was seen so users are never blocked from shopping
@@ -205,6 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .then((res) => {
         if (active) {
+          clearTimeout(welcomeTimer);
           setWelcome({
             userId,
             seen: Boolean(res?.seen),
@@ -218,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // transient backend issue.
         console.warn("[AuthProvider] Welcome status unavailable — degrading gracefully.");
         if (active) {
+          clearTimeout(welcomeTimer);
           setWelcome({
             userId,
             seen: true, // assume seen → user reaches the store, not a dead-end
@@ -228,6 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      clearTimeout(welcomeTimer);
     };
   }, [user, sessionToken, attempt]);
 
@@ -242,9 +272,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     setProfileChecking(true);
 
+    // Failsafe timer so profile check never leaves screen hung
+    const profileTimer = setTimeout(() => {
+      if (active) {
+        setProfileChecking(false);
+      }
+    }, 2500);
+
     checkProfileCompletionServerFn({ data: { authToken: sessionToken ?? undefined } })
       .then((res) => {
         if (active) {
+          clearTimeout(profileTimer);
           setProfileCompleted(Boolean(res.isAdmin || res.profileCompleted));
           setProfileChecking(false);
         }
@@ -252,6 +290,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         console.warn("[AuthProvider] Profile check notice:", err);
         if (active) {
+          clearTimeout(profileTimer);
           setProfileCompleted(false);
           setProfileChecking(false);
         }
@@ -259,6 +298,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       active = false;
+      clearTimeout(profileTimer);
     };
   }, [user, sessionToken, attempt]);
 

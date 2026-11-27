@@ -58,10 +58,10 @@ export function getDb(): ReturnType<typeof postgres> | null {
     const poolMax = process.env["VERCEL"] ? 2 : 4;
     _sql = postgres(dbUrl, {
       ssl: { rejectUnauthorized: false },
-      connect_timeout: 10,
+      connect_timeout: process.env["VERCEL"] ? 3 : 5,
       max: poolMax,
-      idle_timeout: 20,
-      max_lifetime: 300,
+      idle_timeout: 15,
+      max_lifetime: 120,
       ...(isTransactionPooler ? { prepare: false } : {}),
     });
     return _sql;
