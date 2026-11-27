@@ -65,13 +65,36 @@ export function clearSessionCookies(): void {
  * Reads an authenticated session JWT from HttpOnly cookies (preferring admin scope when requested).
  */
 export function readSessionCookieToken(preferAdmin = false): string | undefined {
+  const primary = preferAdmin ? ADMIN_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
+  const secondary = preferAdmin ? SESSION_COOKIE_NAME : ADMIN_SESSION_COOKIE_NAME;
+
   try {
-    const primary = preferAdmin ? ADMIN_SESSION_COOKIE_NAME : SESSION_COOKIE_NAME;
-    const secondary = preferAdmin ? SESSION_COOKIE_NAME : ADMIN_SESSION_COOKIE_NAME;
-    return getCookie(primary) || getCookie(secondary) || undefined;
+    const val = getCookie(primary) || getCookie(secondary);
+    if (val && typeof val === "string" && val.split(".").length === 3) return val;
   } catch {
-    return undefined;
+    // Safe fallback outside standard HTTP lifecycle
   }
+
+  try {
+    const req = getRequest();
+    const cookieHeader = req?.headers?.get("cookie") || "";
+    if (cookieHeader) {
+      const match1 = cookieHeader.match(new RegExp(`(?:^|;\\s*)${primary}=([^;]+)`));
+      if (match1 && match1[1]) {
+        const decoded = decodeURIComponent(match1[1]).trim();
+        if (decoded.split(".").length === 3) return decoded;
+      }
+      const match2 = cookieHeader.match(new RegExp(`(?:^|;\\s*)${secondary}=([^;]+)`));
+      if (match2 && match2[1]) {
+        const decoded = decodeURIComponent(match2[1]).trim();
+        if (decoded.split(".").length === 3) return decoded;
+      }
+    }
+  } catch {
+    // Ignore request header extraction exceptions
+  }
+
+  return undefined;
 }
 
 export interface GoogleSessionPayload {

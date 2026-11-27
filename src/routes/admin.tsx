@@ -374,6 +374,10 @@ function AdminDashboard() {
 
     try {
       let token = authToken;
+      if (!token && typeof window !== "undefined") {
+        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
+        if (adminTok) token = adminTok;
+      }
       if (!token && sessionToken) {
         token = sessionToken;
       }
@@ -392,10 +396,6 @@ function AdminDashboard() {
           }
         } catch {
           /* ignore */
-        }
-        if (!token) {
-          const adminTok = localStorage.getItem("cavenhusrt_admin_token");
-          if (adminTok) token = adminTok;
         }
       }
 
@@ -512,12 +512,55 @@ function AdminDashboard() {
         }
         setAuthToken(undefined);
         setIsAdmin(false);
+      } else if (!overviewData && (activeTab === "overview" || activeTab === "analytics")) {
+        setOverviewData({
+          totalCustomers: 0,
+          newCustomers: 0,
+          totalProducts: 0,
+          totalOrders: 0,
+          totalPaidRevenue: 0,
+          totalCodRevenue: 0,
+          totalPaidOrders: 0,
+          totalCodOrders: 0,
+          pendingPayments: 0,
+          pendingOrders: 0,
+          processingOrders: 0,
+          shippedOrders: 0,
+          deliveredOrders: 0,
+          cancelledOrders: 0,
+          rtoOrders: 0,
+          returnOrders: 0,
+          pendingReturns: 0,
+          totalRefunded: 0,
+          lowStockCount: 0,
+          outOfStockCount: 0,
+          lowStockAlerts: [],
+          dailySales: [],
+          weeklySales: [],
+          monthlySales: [],
+          paymentMethodBreakdown: {
+            online: { count: 0, revenue: 0 },
+            cod: { count: 0, revenue: 0 },
+          },
+          topSellingProducts: [],
+          recentOrders: [],
+          recentRegistrations: [],
+        });
       }
       toast.error(msg);
     } finally {
       setLoading(false);
     }
-  }, [isAdmin, activeTab, orderFilter, orderSearch, orderPage, authToken, sessionToken]);
+  }, [
+    isAdmin,
+    activeTab,
+    orderFilter,
+    orderSearch,
+    orderPage,
+    authToken,
+    sessionToken,
+    overviewData,
+  ]);
 
   useEffect(() => {
     if (isAdmin) {

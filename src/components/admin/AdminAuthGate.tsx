@@ -52,9 +52,12 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
     }
     setLoading(true);
     try {
-      await adminLoginServerFn({
+      const res = await adminLoginServerFn({
         data: { email: user.email.toLowerCase().trim(), authToken: sessionToken },
       });
+      if (res.sessionToken && typeof window !== "undefined") {
+        localStorage.setItem("cavenhusrt_admin_token", res.sessionToken);
+      }
       toast.success("Administrator session verified from active account.");
       onAuthenticated();
     } catch (err) {

@@ -191,13 +191,23 @@ function extractBearerToken(providedToken?: string | undefined): string | null {
       token = readSessionCookieToken(true);
       if (!token) {
         const cookieHeader = request?.headers?.get("cookie") || "";
-        const match = cookieHeader.match(/sb-[a-z0-9]+-auth-token=([^;]+)/i);
-        if (match && match[1]) {
-          try {
-            const parsed = JSON.parse(decodeURIComponent(match[1]));
-            token = Array.isArray(parsed) ? parsed[0] : parsed?.access_token || parsed;
-          } catch {
-            token = decodeURIComponent(match[1]);
+        const matchAdmin = cookieHeader.match(/(?:^|;\s*)cavenhusrt_admin_session=([^;]+)/);
+        if (matchAdmin && matchAdmin[1]) {
+          token = decodeURIComponent(matchAdmin[1]).trim();
+        } else {
+          const matchUser = cookieHeader.match(/(?:^|;\s*)cavenhusrt_session=([^;]+)/);
+          if (matchUser && matchUser[1]) {
+            token = decodeURIComponent(matchUser[1]).trim();
+          } else {
+            const matchSb = cookieHeader.match(/sb-[a-z0-9]+-auth-token=([^;]+)/i);
+            if (matchSb && matchSb[1]) {
+              try {
+                const parsed = JSON.parse(decodeURIComponent(matchSb[1]));
+                token = Array.isArray(parsed) ? parsed[0] : parsed?.access_token || parsed;
+              } catch {
+                token = decodeURIComponent(matchSb[1]);
+              }
+            }
           }
         }
       }
