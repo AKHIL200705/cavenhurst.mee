@@ -11,6 +11,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useAuth } from "@/lib/auth";
+import { Analytics } from "@vercel/analytics/react";
 
 import appCss from "../styles.css?url";
 import { StoreProvider } from "@/lib/store";
@@ -174,6 +175,7 @@ function RootComponent() {
           <IntroAnimation />
         </StoreProvider>
       </AuthProvider>
+      <Analytics />
     </QueryClientProvider>
   );
 }
