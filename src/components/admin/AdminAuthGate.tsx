@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { adminLoginServerFn, verifyCurrentAdminServerFn } from "@/server/admin";
 
 interface AdminAuthGateProps {
-  onAuthenticated: () => void;
+  onAuthenticated: (token?: string) => void;
 }
 
 export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
@@ -52,11 +52,11 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
     }
     setLoading(true);
     try {
-      await adminLoginServerFn({
+      const authRes = await adminLoginServerFn({
         data: { email: user.email.toLowerCase().trim(), authToken: sessionToken },
       });
       toast.success("Administrator session verified from active account.");
-      onAuthenticated();
+      onAuthenticated(authRes?.sessionToken);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to verify admin account");
     } finally {
@@ -104,7 +104,7 @@ export function AdminAuthGate({ onAuthenticated }: AdminAuthGateProps) {
       }
 
       toast.success("Administrator session verified.");
-      onAuthenticated();
+      onAuthenticated(serverAuth.sessionToken);
     } catch (err) {
       await supabase.auth.signOut().catch(() => {});
       const msg = err instanceof Error ? err.message : "Authentication error";

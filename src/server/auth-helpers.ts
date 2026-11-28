@@ -126,7 +126,11 @@ export interface GoogleAuthUser {
   isAdmin: boolean;
 }
 
-const DEFAULT_ADMIN_EMAILS = ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"];
+const DEFAULT_ADMIN_EMAILS = [
+  "akhilsaiabbireddy2007@gmail.com",
+  "akhilsaiabbireddy1011@gmail.com",
+  "cavenhurst@gmail.com",
+];
 
 export function getGoogleClientId(): string {
   const raw = process.env["GOOGLE_CLIENT_ID"] || process.env["VITE_GOOGLE_CLIENT_ID"] || "";

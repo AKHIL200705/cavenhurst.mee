@@ -55,7 +55,11 @@ export interface AdminAuthParams {
   authToken?: string | undefined;
 }
 
-const WHITELISTED_ADMIN_EMAILS = ["akhilsaiabbireddy2007@gmail.com", "cavenhurst@gmail.com"];
+const WHITELISTED_ADMIN_EMAILS = [
+  "akhilsaiabbireddy2007@gmail.com",
+  "akhilsaiabbireddy1011@gmail.com",
+  "cavenhurst@gmail.com",
+];
 
 function isWhitelistedAdminEmail(email?: string | null): boolean {
   if (!email) return false;

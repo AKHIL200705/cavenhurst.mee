@@ -296,70 +296,76 @@ function AdminDashboard() {
   const [settings, setSettings] = useState<AdminSettingsData | null>(null);
 
   // 1. Check admin authorization strictly via HttpOnly cookie or server-verified cryptographic token
-  const verifyAdmin = useCallback(async () => {
-    setAuthChecking(true);
-    try {
-      // Prefer HttpOnly session cookie verification first (no JS token storage needed)
+  const verifyAdmin = useCallback(
+    async (explicitToken?: string) => {
+      setAuthChecking(true);
       try {
-        const cookieCheck = await verifyCurrentAdminServerFn({ data: {} });
-        if (cookieCheck?.isAdmin) {
-          setAuthToken(undefined);
-          setIsAdmin(true);
-          return;
-        }
-      } catch {
-        // Fallback to candidate token checks
-      }
+        const candidateTokens: string[] = [];
+        if (explicitToken) candidateTokens.push(explicitToken);
 
-      const candidateTokens: string[] = [];
-
-      if (sessionToken) candidateTokens.push(sessionToken);
-
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        candidateTokens.push(session.access_token);
-      }
-
-      if (typeof window !== "undefined") {
-        const stored = localStorage.getItem("cavenhusrt_google_session");
-        if (stored) {
-          try {
-            const parsed = JSON.parse(stored);
-            if (parsed?.sessionToken && typeof parsed.sessionToken === "string") {
-              candidateTokens.push(parsed.sessionToken);
-            }
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const adminTok = localStorage.getItem("cavenhusrt_admin_token");
-        if (adminTok) candidateTokens.push(adminTok);
-      }
-
-      for (const candidate of candidateTokens) {
+        // Prefer HttpOnly session cookie verification first (no JS token storage needed)
         try {
-          const check = await verifyCurrentAdminServerFn({ data: { authToken: candidate } });
-          if (check?.isAdmin) {
-            setAuthToken(candidate);
+          const cookieCheck = await verifyCurrentAdminServerFn({
+            data: { authToken: explicitToken },
+          });
+          if (cookieCheck?.isAdmin) {
+            if (explicitToken) setAuthToken(explicitToken);
             setIsAdmin(true);
             return;
           }
         } catch {
-          // Try next candidate token
+          // Fallback to candidate token checks
         }
-      }
 
-      setAuthToken(undefined);
-      setIsAdmin(false);
-    } catch {
-      setIsAdmin(false);
-    } finally {
-      setAuthChecking(false);
-    }
-  }, [sessionToken]);
+        if (sessionToken) candidateTokens.push(sessionToken);
+
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          candidateTokens.push(session.access_token);
+        }
+
+        if (typeof window !== "undefined") {
+          const stored = localStorage.getItem("cavenhusrt_google_session");
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              if (parsed?.sessionToken && typeof parsed.sessionToken === "string") {
+                candidateTokens.push(parsed.sessionToken);
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+
+          const adminTok = localStorage.getItem("cavenhusrt_admin_token");
+          if (adminTok) candidateTokens.push(adminTok);
+        }
+
+        for (const candidate of candidateTokens) {
+          try {
+            const check = await verifyCurrentAdminServerFn({ data: { authToken: candidate } });
+            if (check?.isAdmin) {
+              setAuthToken(candidate);
+              setIsAdmin(true);
+              return;
+            }
+          } catch {
+            // Try next candidate token
+          }
+        }
+
+        setAuthToken(undefined);
+        setIsAdmin(false);
+      } catch {
+        setIsAdmin(false);
+      } finally {
+        setAuthChecking(false);
+      }
+    },
+    [sessionToken],
+  );
 
   useEffect(() => {
     if (ready) {
@@ -696,7 +702,7 @@ function AdminDashboard() {
     return (
       <div className="min-h-screen bg-[#031323]">
         <AdminTopBar showSidebarToggle={false} />
-        <AdminAuthGate onAuthenticated={() => void verifyAdmin()} />
+        <AdminAuthGate onAuthenticated={(tok) => void verifyAdmin(tok)} />
       </div>
     );
   }
