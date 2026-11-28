@@ -6,9 +6,9 @@ let _sql: ReturnType<typeof postgres> | undefined;
 
 function resolveDbUrl(): string {
   let dbUrl = (
-    process.env["DIRECT_URL"] ||
     process.env["DATABASE_URL"] ||
     process.env["POSTGRES_URL"] ||
+    process.env["DIRECT_URL"] ||
     process.env["POSTGRES_PRISMA_URL"] ||
     process.env["POSTGRES_URL_NON_POOLING"] ||
     process.env["SUPABASE_DB_URL"] ||
@@ -38,6 +38,16 @@ function resolveDbUrl(): string {
     }
   }
 
+  // Supabase direct URLs (db.[ref].supabase.co:5432) are IPv6-only.
+  // In serverless cloud environments (like Vercel), outbound IPv6 is unavailable.
+  // Automatically rewrite IPv6-only direct URLs to the IPv4-compatible Supabase pooler on port 5432.
+  if (dbUrl && /@db\.[a-z0-9]+\.supabase\.co:5432\//i.test(dbUrl)) {
+    dbUrl = dbUrl.replace(
+      /^postgresql:\/\/postgres:([^@]+)@db\.([a-z0-9]+)\.supabase\.co:5432\/(.*)$/i,
+      "postgresql://postgres.$2:$1@aws-0-ap-southeast-1.pooler.supabase.com:5432/$3",
+    );
+  }
+
   if (!dbUrl) {
     console.error(
       "[Database Security Error] DATABASE_URL is not configured. Refusing to connect without environment credentials.",
@@ -65,7 +75,7 @@ export function getDb(): ReturnType<typeof postgres> | null {
     const poolMax = process.env["VERCEL"] ? 2 : 4;
     _sql = postgres(dbUrl, {
       ssl: { rejectUnauthorized: false },
-      connect_timeout: process.env["VERCEL"] ? 3 : 5,
+      connect_timeout: process.env["VERCEL"] ? 8 : 5,
       max: poolMax,
       idle_timeout: 15,
       max_lifetime: 120,
