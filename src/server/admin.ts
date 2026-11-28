@@ -502,39 +502,40 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
     const sql = getDb();
     if (sql) {
       try {
-        const [
-          orders,
-          refunds,
-          products,
-          custCountRows,
-          prodCountRows,
-          recentOrders,
-          recentCust,
-          inventoryRows,
-          pendingReturnsRow,
-          newCustRow,
-          topSellingRows,
-        ] = await Promise.all([
+        // Run queries in small, resilient batches to prevent socket overload on connection poolers
+        const [orders, refunds, recentOrders] = await Promise.all([
           sql<DbOrderOverviewRow[]>`
             SELECT id, total, status, payment_method, payment_status, shipment_status, created_at
             FROM orders
-          `.catch(async (err) => {
-            console.warn(
-              "[Admin Overview] Orders direct query notice, falling back to legacy schema:",
-              err?.message,
-            );
-            const legacy = await sql<Omit<DbOrderOverviewRow, "payment_method">[]>`
-              SELECT id, total, status, payment_status, shipment_status, created_at
-              FROM orders
-            `.catch(() => []);
-            return legacy.map((r) => ({
-              ...r,
-              payment_method: (r as { payment_method?: string | null }).payment_method || "online",
-            }));
-          }),
+          `
+            .catch(async (err) => {
+              console.warn(
+                "[Admin Overview] Orders direct query notice, falling back to legacy schema:",
+                err?.message,
+              );
+              const legacy = await sql<Omit<DbOrderOverviewRow, "payment_method">[]>`
+                SELECT id, total, status, payment_status, shipment_status, created_at
+                FROM orders
+              `.catch(() => []);
+              return legacy.map((r) => ({
+                ...r,
+                payment_method:
+                  (r as { payment_method?: string | null }).payment_method || "online",
+              }));
+            })
+            .catch(() => []),
           sql<DbRefundRow[]>`SELECT order_id, amount FROM payment_refunds`
             .catch(() => sql<DbRefundRow[]>`SELECT order_id, amount FROM refunds`)
             .catch(() => []),
+          sql<DbRecentOrderRow[]>`
+            SELECT id, order_number, customer_name, customer_email, total, status, payment_status, created_at
+            FROM orders
+            ORDER BY created_at DESC
+            LIMIT 5
+          `.catch(() => []),
+        ]);
+
+        const [products, custCountRows, prodCountRows, recentCust] = await Promise.all([
           sql<DbProductRow[]>`SELECT slug, name, stock FROM products`.catch(() => []),
           sql<DbCountRow[]>`SELECT count(*)::int as count FROM profiles`
             .catch(() => sql<DbCountRow[]>`SELECT count(*)::int as count FROM customers`)
@@ -542,12 +543,6 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
           sql<DbCountRow[]>`SELECT count(*)::int as count FROM products`.catch(() => [
             { count: 0 },
           ]),
-          sql<DbRecentOrderRow[]>`
-            SELECT id, order_number, customer_name, customer_email, total, status, payment_status, created_at
-            FROM orders
-            ORDER BY created_at DESC
-            LIMIT 5
-          `.catch(() => []),
           sql<DbRecentCustomerRow[]>`
             SELECT id, full_name, email, phone, created_at
             FROM profiles
@@ -564,6 +559,9 @@ export const getAdminOverviewServerFn = createServerFn({ method: "POST" })
               `,
             )
             .catch(() => []),
+        ]);
+
+        const [inventoryRows, pendingReturnsRow, newCustRow, topSellingRows] = await Promise.all([
           sql<
             Array<{
               variant_id: string;
