@@ -1049,6 +1049,11 @@ export const getAdminOrdersServerFn = createServerFn({ method: "POST" })
 
     if (error) {
       console.error("[Admin Orders] Fetch error:", error);
+      if (error.message?.includes("Unregistered API key")) {
+        throw new Error(
+          "Failed to load orders: DATABASE_URL is missing in Vercel environment variables. Add DATABASE_URL to Vercel Project Settings -> Environment Variables.",
+        );
+      }
       throw new Error(`Failed to load orders: ${error.message || "Database request failed"}`);
     }
 

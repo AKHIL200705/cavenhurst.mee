@@ -1166,6 +1166,69 @@ export const getAdminOrdersServerFn = createServerFn({ method: "GET" })
       throw new Error("Forbidden: Access restricted to CAVENHUSRT administrators.");
     }
 
+    interface AdminOrderListRow {
+      id: string;
+      order_number: string | null;
+      customer_name: string | null;
+      customer_email: string | null;
+      customer_phone: string | null;
+      total: number;
+      status: string;
+      payment_method?: string | null;
+      payment_status: string | null;
+      shipment_status: string | null;
+      razorpay_order_id: string | null;
+      razorpay_payment_id: string | null;
+      awb_number: string | null;
+      courier_partner: string | null;
+      created_at: string;
+    }
+
+    // Try direct PostgreSQL first (bypasses REST key requirements)
+    const sql = await getDb();
+    if (sql) {
+      try {
+        let statusFilter = sql`TRUE`;
+        if (data.filter && data.filter !== "all") {
+          const safeFilter = data.filter.replace(/[^a-zA-Z0-9_-]/g, "");
+          if (safeFilter === "cod") {
+            statusFilter = sql`payment_method = 'cod'`;
+          } else if (safeFilter === "paid") {
+            statusFilter = sql`payment_status = 'paid'`;
+          } else if (safeFilter === "pending_payment") {
+            statusFilter = sql`payment_status = 'pending'`;
+          } else if (safeFilter) {
+            statusFilter = sql`(status = ${safeFilter} OR shipment_status = ${safeFilter})`;
+          }
+        }
+
+        let searchFilter = sql`TRUE`;
+        if (data.search && data.search.trim()) {
+          const s = `%${data.search.trim()}%`;
+          searchFilter = sql`(
+            order_number ILIKE ${s} OR
+            customer_name ILIKE ${s} OR
+            customer_email ILIKE ${s} OR
+            awb_number ILIKE ${s}
+          )`;
+        }
+
+        const rows = await sql<AdminOrderListRow[]>`
+          SELECT id, order_number, customer_name, customer_email, customer_phone, total, status,
+                 COALESCE(payment_method, 'online') as payment_method, payment_status, shipment_status,
+                 razorpay_order_id, razorpay_payment_id, awb_number, courier_partner, created_at
+          FROM orders
+          WHERE ${statusFilter} AND ${searchFilter}
+          ORDER BY created_at DESC
+          LIMIT 50
+        `;
+
+        return { orders: rows || [] };
+      } catch (dbErr) {
+        console.warn("[Admin Orders Fn] Direct DB query notice, trying REST client:", dbErr);
+      }
+    }
+
     let query = supabaseAdmin
       .from("orders")
       .select(
