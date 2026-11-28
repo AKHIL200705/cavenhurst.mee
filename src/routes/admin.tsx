@@ -299,18 +299,28 @@ function AdminDashboard() {
   const verifyAdmin = useCallback(
     async (explicitToken?: string) => {
       setAuthChecking(true);
+
+      // Hard timeout: never let auth checking hang the UI beyond 10 seconds
+      const timeoutId = setTimeout(() => {
+        setAuthChecking(false);
+        setIsAdmin(false);
+      }, 10_000);
+
       try {
         const candidateTokens: string[] = [];
         if (explicitToken) candidateTokens.push(explicitToken);
 
         // Prefer HttpOnly session cookie verification first (no JS token storage needed)
         try {
-          const cookieCheck = await verifyCurrentAdminServerFn({
-            data: { authToken: explicitToken },
-          });
+          const cookieCheck = await Promise.race([
+            verifyCurrentAdminServerFn({ data: { authToken: explicitToken } }),
+            new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 7000)),
+          ]);
           if (cookieCheck?.isAdmin) {
+            clearTimeout(timeoutId);
             if (explicitToken) setAuthToken(explicitToken);
             setIsAdmin(true);
+            setAuthChecking(false);
             return;
           }
         } catch {
@@ -343,12 +353,25 @@ function AdminDashboard() {
           if (adminTok) candidateTokens.push(adminTok);
         }
 
-        for (const candidate of candidateTokens) {
+        // Deduplicate tokens (avoid re-checking the same JWT multiple times)
+        const seen = new Set<string>();
+        const uniqueTokens = candidateTokens.filter((t) => {
+          if (seen.has(t)) return false;
+          seen.add(t);
+          return true;
+        });
+
+        for (const candidate of uniqueTokens) {
           try {
-            const check = await verifyCurrentAdminServerFn({ data: { authToken: candidate } });
+            const check = await Promise.race([
+              verifyCurrentAdminServerFn({ data: { authToken: candidate } }),
+              new Promise<never>((_, r) => setTimeout(() => r(new Error("timeout")), 6000)),
+            ]);
             if (check?.isAdmin) {
+              clearTimeout(timeoutId);
               setAuthToken(candidate);
               setIsAdmin(true);
+              setAuthChecking(false);
               return;
             }
           } catch {
@@ -356,9 +379,11 @@ function AdminDashboard() {
           }
         }
 
+        clearTimeout(timeoutId);
         setAuthToken(undefined);
         setIsAdmin(false);
       } catch {
+        clearTimeout(timeoutId);
         setIsAdmin(false);
       } finally {
         setAuthChecking(false);

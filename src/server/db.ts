@@ -5,12 +5,14 @@ import path from "node:path";
 let _sql: ReturnType<typeof postgres> | undefined;
 
 function resolveDbUrl(): string {
+  // Prefer DIRECT_URL (session pooler port 5432) over DATABASE_URL (transaction pooler port 6543)
+  // Session pooler supports full SQL including prepared statements and is more stable under concurrency.
   let dbUrl = (
+    process.env["DIRECT_URL"] ||
+    process.env["POSTGRES_URL_NON_POOLING"] ||
     process.env["DATABASE_URL"] ||
     process.env["POSTGRES_URL"] ||
-    process.env["DIRECT_URL"] ||
     process.env["POSTGRES_PRISMA_URL"] ||
-    process.env["POSTGRES_URL_NON_POOLING"] ||
     process.env["SUPABASE_DB_URL"] ||
     process.env["STORAGE_DATABASE_URL"] ||
     process.env["STORAGE_POSTGRES_URL"] ||

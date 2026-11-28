@@ -437,33 +437,7 @@ function Login() {
     }
 
     setGoogleLoading(true);
-    const configuredRedirectUri = (
-      (import.meta.env["VITE_GOOGLE_REDIRECT_URI"] || "") as string
-    ).trim();
-    if (configuredRedirectUri) {
-      signInWithGoogleRedirectFallback();
-      return;
-    }
-
-    // Synchronous fast-path preserves user gesture activation across Safari/Firefox/Chrome
-    const syncAccounts = (
-      window as unknown as {
-        google?: { accounts?: Awaited<ReturnType<typeof ensureGoogleGsiLoaded>> };
-      }
-    ).google?.accounts;
-    if (syncAccounts && startGisTokenPopup(syncAccounts)) {
-      return;
-    }
-
-    void ensureGoogleGsiLoaded().then((accounts) => {
-      if (accounts && startGisTokenPopup(accounts)) {
-        return;
-      }
-      setGoogleLoading(false);
-      toast.error(
-        "Could not load Google Sign-In services. Please check your network or popup settings.",
-      );
-    });
+    signInWithGoogleRedirectFallback();
   };
 
   // ---------------------------------------------------------------------------
