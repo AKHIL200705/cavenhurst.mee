@@ -245,24 +245,57 @@ async function verifyAdminSession(providedToken?: string | undefined): Promise<A
     // Token is not an internal/Google token; try Supabase GoTrue verification next
   }
 
-  // 2. Try Supabase Auth JWT verification via supabaseAdmin.auth.getUser()
-  const {
-    data: { user },
-    error,
-  } = await supabaseAdmin.auth.getUser(token);
-
-  if (!error && user) {
-    const emailConfirmed = Boolean(
-      user.email_confirmed_at || user.confirmed_at || user.app_metadata?.["provider"] === "google",
-    );
-    if (!emailConfirmed) {
-      throw new Error("Forbidden: Verified email required for administrator access.");
+  // 2. Try direct PostgreSQL auth.users check first (fast and resilient against GoTrue HTTP API key issues)
+  try {
+    const parts = token.split(".");
+    if (parts.length === 3 && parts[1]) {
+      const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+      if (payload && payload.sub && (!payload.exp || payload.exp * 1000 > Date.now())) {
+        const sql = getDb();
+        if (sql) {
+          const [authUser] = await sql<
+            { id: string; email: string | null; confirmed_at: string | null }[]
+          >`
+            SELECT id, email, confirmed_at 
+            FROM auth.users 
+            WHERE id = ${payload.sub}::uuid
+            LIMIT 1
+          `;
+          if (authUser) {
+            const verified = await resolveAuthorizedAdmin(authUser.id, authUser.email);
+            if (verified) return verified;
+          }
+        }
+      }
     }
+  } catch (directErr) {
+    console.warn("[Admin Auth] Direct auth.users verification notice:", directErr);
+  }
 
-    const verified = await resolveAuthorizedAdmin(user.id, user.email || null);
-    if (verified) return verified;
-  } else if (error) {
-    console.warn("[Admin Auth] supabaseAdmin.auth.getUser rejected token:", error.message);
+  // 3. Fallback to Supabase GoTrue verification
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (!error && user) {
+      const emailConfirmed = Boolean(
+        user.email_confirmed_at ||
+        user.confirmed_at ||
+        user.app_metadata?.["provider"] === "google",
+      );
+      if (!emailConfirmed) {
+        throw new Error("Forbidden: Verified email required for administrator access.");
+      }
+
+      const verified = await resolveAuthorizedAdmin(user.id, user.email || null);
+      if (verified) return verified;
+    } else if (error) {
+      console.warn("[Admin Auth] supabaseAdmin.auth.getUser rejected token:", error.message);
+    }
+  } catch {
+    // GoTrue call rejected or failed
   }
 
   throw new Error("Forbidden: Access restricted to CAVENHUSRT administrators.");

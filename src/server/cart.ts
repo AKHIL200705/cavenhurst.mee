@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
+import { getDb } from "@/server/db";
 import { getAuthenticatedCustomerId } from "./auth-helpers";
 import { getVariantAvailableStock, parseStockMap } from "./inventory";
 import { resolveProductAsset, type Size } from "@/lib/products";
@@ -47,6 +48,32 @@ function postgrestLiteral(val: string): string {
  * Ensures an active cart row exists for the customer in public.carts.
  */
 async function getOrCreateActiveCart(customerUuid?: string, authUid?: string): Promise<string> {
+  const sql = getDb();
+  if (sql) {
+    try {
+      const existing = await sql<{ id: string }[]>`
+        SELECT id FROM public.carts
+        WHERE status = 'active'
+          AND (
+            (${customerUuid || null}::uuid IS NOT NULL AND customer_id = ${customerUuid || null}::uuid)
+            OR (${authUid || null}::text IS NOT NULL AND customer_auth_uid = ${authUid || null})
+          )
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+      if (existing[0]?.id) return existing[0].id;
+
+      const [newCart] = await sql<{ id: string }[]>`
+        INSERT INTO public.carts (customer_id, customer_auth_uid, status, updated_at)
+        VALUES (${customerUuid || null}, ${authUid || null}, 'active', now())
+        RETURNING id
+      `;
+      if (newCart?.id) return newCart.id;
+    } catch (err) {
+      console.warn("[Cart] Direct SQL failed, trying PostgREST fallback:", err);
+    }
+  }
+
   const orClauses: string[] = [];
   if (customerUuid) orClauses.push(`customer_id.eq.${postgrestLiteral(customerUuid)}`);
   if (authUid) orClauses.push(`customer_auth_uid.eq.${postgrestLiteral(authUid)}`);
@@ -87,6 +114,31 @@ async function getOrCreateActiveCart(customerUuid?: string, authUid?: string): P
  * Ensures a wishlist exists for the customer in public.wishlists.
  */
 async function getOrCreateWishlist(customerUuid?: string, authUid?: string): Promise<string> {
+  const sql = getDb();
+  if (sql) {
+    try {
+      const existing = await sql<{ id: string }[]>`
+        SELECT id FROM public.wishlists
+        WHERE (
+          (${customerUuid || null}::uuid IS NOT NULL AND customer_id = ${customerUuid || null}::uuid)
+          OR (${authUid || null}::text IS NOT NULL AND customer_auth_uid = ${authUid || null})
+        )
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `;
+      if (existing[0]?.id) return existing[0].id;
+
+      const [newWish] = await sql<{ id: string }[]>`
+        INSERT INTO public.wishlists (customer_id, customer_auth_uid, updated_at)
+        VALUES (${customerUuid || null}, ${authUid || null}, now())
+        RETURNING id
+      `;
+      if (newWish?.id) return newWish.id;
+    } catch (err) {
+      console.warn("[Wishlist] Direct SQL failed, trying PostgREST fallback:", err);
+    }
+  }
+
   const orClauses: string[] = [];
   if (customerUuid) orClauses.push(`customer_id.eq.${postgrestLiteral(customerUuid)}`);
   if (authUid) orClauses.push(`customer_auth_uid.eq.${postgrestLiteral(authUid)}`);
