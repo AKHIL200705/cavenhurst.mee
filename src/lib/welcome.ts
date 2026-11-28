@@ -11,7 +11,8 @@ export function customerFirstName(metadata: Record<string, unknown>): string | n
 export const ACCOUNT_GATED_ROUTES = ["/account", "/checkout"];
 
 export function isAccountGatedRoute(path: string): boolean {
-  return ACCOUNT_GATED_ROUTES.some((p) => path === p || path.startsWith(`${p}/`));
+  const pathname = (path.split("?")[0] || path).split("#")[0] || path;
+  return ACCOUNT_GATED_ROUTES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
 export function accountDestination(
@@ -29,7 +30,10 @@ export function accountDestination(
       ? `/complete-profile?returnTo=${encodeURIComponent(path)}`
       : "/complete-profile";
   }
-  return path === "/login" || path === "/welcome" || path === "/complete-profile" ? "/" : path;
+  const cleanPath = (path.split("?")[0] || path).split("#")[0] || path;
+  return cleanPath === "/login" || cleanPath === "/welcome" || cleanPath === "/complete-profile"
+    ? "/"
+    : path;
 }
 
 export type GateState = {

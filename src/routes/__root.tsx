@@ -224,10 +224,16 @@ function AuthGate() {
   } = useAuth();
   const path = useRouterState({ select: (s) => s.location.pathname });
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
+  const fullPath = searchStr ? `${path}${searchStr}` : path;
   const navigate = useNavigate();
   const legal = path === "/terms" || path === "/privacy";
   const checked = ready && (!user || (welcomeReady && !profileChecking));
-  const baseDestination = accountDestination(Boolean(user), welcomeSeen, profileCompleted, path);
+  const baseDestination = accountDestination(
+    Boolean(user),
+    welcomeSeen,
+    profileCompleted,
+    fullPath,
+  );
   const rawReturnTo =
     path === "/complete-profile" && profileCompleted && searchStr
       ? new URLSearchParams(searchStr).get("returnTo")

@@ -113,8 +113,6 @@ function loadRazorpayScript(): Promise<boolean> {
 
 function Checkout() {
   const search = Route.useSearch();
-  const isDirectBuy = search.mode === "direct";
-  const checkoutMode: "DIRECT_BUY" | "CART_CHECKOUT" = isDirectBuy ? "DIRECT_BUY" : "CART_CHECKOUT";
 
   const {
     cart,
@@ -132,6 +130,10 @@ function Checkout() {
     clearDirectBuy,
   } = useStore();
   const { user, sessionToken } = useAuth();
+
+  const isDirectBuy =
+    search.mode === "direct" || (search.mode !== "cart" && Boolean(directBuyItem));
+  const checkoutMode: "DIRECT_BUY" | "CART_CHECKOUT" = isDirectBuy ? "DIRECT_BUY" : "CART_CHECKOUT";
 
   const checkoutItems = useMemo(
     () => (isDirectBuy ? (directBuyItem ? [directBuyItem] : []) : cart),
